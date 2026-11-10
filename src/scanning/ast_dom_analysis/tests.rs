@@ -262,16 +262,16 @@ document.getElementById('output').innerHTML = stored;
 
 #[test]
 fn test_postmessage_event_data() {
-    // Direct use of e.data as source (simplified pattern)
+    // Direct use of event.data as source (simplified pattern)
     let code = r#"
-let data = e.data;
+let data = event.data;
 document.getElementById('msg').innerHTML = data;
 "#;
     let analyzer = AstDomAnalyzer::new();
     let result = analyzer.analyze(code).unwrap();
     assert!(
         !result.is_empty(),
-        "Should detect e.data (postMessage) as source"
+        "Should detect event.data (postMessage) as source"
     );
 }
 
@@ -793,7 +793,7 @@ let f = Function(input);
 #[test]
 fn test_location_assignment() {
     let code = r#"
-let url = location.hash;
+let url = location.hash.slice(1);
 location.href = url;
 "#;
     let analyzer = AstDomAnalyzer::new();
@@ -1176,7 +1176,7 @@ document.body.innerHTML = base;
 #[test]
 fn test_location_replace_sink() {
     let code = r#"
-let url = location.hash;
+let url = location.hash.slice(1);
 location.replace(url);
 "#;
     let analyzer = AstDomAnalyzer::new();
@@ -1355,8 +1355,9 @@ fn test_tainted_in_switch_statement() {
 let input = location.hash;
 switch(input) {
 case "test":
-    document.write(input);
     break;
+default:
+    document.write(input);
 }
 "#;
     let analyzer = AstDomAnalyzer::new();
@@ -2464,7 +2465,7 @@ fn test_class_static_method_summary_flow_detected() {
                 location.assign(url);
             }
         }
-        Redirector.go(location.hash);
+        Redirector.go(location.hash.slice(1));
 "#;
     let analyzer = AstDomAnalyzer::new();
     let result = analyzer.analyze(code).unwrap();
@@ -4813,7 +4814,7 @@ fn detects_self_and_global_this_open_aliases() {
         ("self.open(t)", "self.open"),
         ("globalThis.open(t)", "globalThis.open"),
     ] {
-        let js = format!("var t = location.hash; {alias};");
+        let js = format!("var t = location.hash.slice(1); {alias};");
         let r = AstDomAnalyzer::new().analyze(&js).unwrap();
         assert!(
             r.iter().any(|v| v.sink == src),
@@ -5422,6 +5423,7 @@ mod dataflow_regressions;
 mod expression_regressions;
 mod hunt_regressions;
 mod library_fp_regressions;
+mod real_page_shapes;
 mod scope_cost;
 
 #[test]

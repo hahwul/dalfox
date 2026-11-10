@@ -43,6 +43,19 @@ impl<'a> DomXssVisitor<'a> {
         &self,
         call: &CallExpression<'a>,
     ) -> (bool, Option<String>) {
+        // `f.bind(thisArg, …)` is the function `f`, whatever it is bound to:
+        // `setTimeout(location.reload.bind(location), 1000)`.
+        if self.get_callee_property_name(&call.callee).as_deref() == Some("bind")
+            && let Some(receiver) = self.get_callee_object_expr(&call.callee)
+        {
+            let tainted = self.is_tainted(receiver);
+            return (
+                tainted,
+                tainted
+                    .then(|| self.find_source_in_expr(receiver))
+                    .flatten(),
+            );
+        }
         // `responseVar.text()` / `responseVar.json()` on a `fetch()` Response
         // reads untrusted network data (issue #1024). The receiver is bound by
         // the promise-chain driver; the resolved string is the DOM-XSS source.
@@ -67,14 +80,30 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         // Sanitizers produce de-tainted values
-        if let Some(func_name) = self.get_expr_string(&call.callee)
-            && (self.sanitizers.contains(func_name.as_str())
+        if let Some(func_name) = self.get_expr_string(&call.callee) {
+            // `window.parseInt(x)` is `parseInt(x)`.
+            let builtin = super::sinks::strip_global_object(&func_name);
+            let coercion = NUMERIC_COERCIONS.contains(&builtin);
+            let shadowed = coercion
+                && (self.function_summaries.contains_key(builtin)
+                    || self.overridden_coercions.contains(builtin));
+            let helps_here = match self.sink_ctx.get() {
+                SinkCtx::Html => true,
+                SinkCtx::Url => coercion || builtin == "encodeURIComponent",
+                SinkCtx::Code => coercion,
+            };
+            if (self.sanitizers.contains(func_name.as_str())
+                || coercion
                 || Self::is_likely_sanitizer_name(&func_name))
-            && !(NUMERIC_COERCIONS.contains(&func_name.as_str())
-                && (self.function_summaries.contains_key(&func_name)
-                    || self.overridden_coercions.contains(&func_name)))
-        {
-            return (false, None);
+                && !shadowed
+                && helps_here
+            {
+                return (false, None);
+            }
+            // `Math.max(1, n)` and the rest of `Math` return numbers.
+            if builtin.starts_with("Math.") {
+                return (false, None);
+            }
         }
 
         // Reflect.apply(targetFn, thisArg, argsArray) return propagation
@@ -99,7 +128,7 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             if let Some(summary_key) = target_key.clone()
-                && let Some(summary) = self.function_summaries.get(&summary_key)
+                && let Some(summary) = self.summary(&summary_key)
             {
                 if let Some(source) = &summary.return_without_tainted_params {
                     return (true, Some(source.clone()));
@@ -114,7 +143,7 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             if let Some(target_name) = target_key
-                && self.sources.contains(target_name.as_str())
+                && self.is_source(target_name.as_str())
             {
                 return (true, Some(target_name));
             }
@@ -129,7 +158,7 @@ impl<'a> DomXssVisitor<'a> {
             let mut target_summary_key = self.get_summary_key_for_callee_expr(target_expr);
             if target_summary_key
                 .as_ref()
-                .and_then(|k| self.function_summaries.get(k))
+                .and_then(|k| self.summary(k))
                 .is_none()
                 && let Some(alias) = target_alias
             {
@@ -137,7 +166,7 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             if let Some(summary_key) = target_summary_key
-                && let Some(summary) = self.function_summaries.get(&summary_key)
+                && let Some(summary) = self.summary(&summary_key)
             {
                 if let Some(source) = &summary.return_without_tainted_params {
                     return (true, Some(source.clone()));
@@ -158,13 +187,13 @@ impl<'a> DomXssVisitor<'a> {
             let mut target_name = self.get_expr_string(target_expr);
             if target_name
                 .as_ref()
-                .is_none_or(|name| !self.sources.contains(name.as_str()))
+                .is_none_or(|name| !self.is_source(name.as_str()))
                 && let Some(alias) = target_alias
             {
                 target_name = Some(alias.target.clone());
             }
             if let Some(target_name) = target_name
-                && self.sources.contains(target_name.as_str())
+                && self.is_source(target_name.as_str())
             {
                 return (true, Some(target_name));
             }
@@ -174,10 +203,7 @@ impl<'a> DomXssVisitor<'a> {
         let mut summary_key = self.get_summary_key_for_callee_expr(&call.callee);
         if let Expression::Identifier(id) = &call.callee
             && (summary_key.is_none()
-                || summary_key
-                    .as_ref()
-                    .and_then(|k| self.function_summaries.get(k))
-                    .is_none())
+                || summary_key.as_ref().and_then(|k| self.summary(k)).is_none())
         {
             summary_key = self
                 .bound_function_aliases
@@ -187,7 +213,7 @@ impl<'a> DomXssVisitor<'a> {
         }
         let alias = self.get_alias_for_callee_identifier(call);
         if let Some(fn_key) = summary_key
-            && let Some(summary) = self.function_summaries.get(&fn_key)
+            && let Some(summary) = self.summary(&fn_key)
         {
             if let Some(source) = &summary.return_without_tainted_params {
                 return (true, Some(source.clone()));
@@ -205,7 +231,7 @@ impl<'a> DomXssVisitor<'a> {
                 .bound_function_aliases
                 .get(id.name.as_str())
                 .map(|alias| alias.target.clone())
-            && self.sources.contains(bound_target.as_str())
+            && self.is_source(bound_target.as_str())
         {
             return (true, Some(bound_target));
         }
@@ -228,8 +254,19 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(storage_source) = self.storage_get_source(call, &callee_str) {
                     return (true, Some(storage_source));
                 }
-                if self.sources.contains(callee_str.as_str()) {
+                if self.is_source(callee_str.as_str()) {
                     return (true, Some(callee_str));
+                }
+                // `<any event>.dataTransfer.getData(…)` / `.clipboardData
+                // .getData(…)`: the property chain exists only on drag and
+                // clipboard events, whatever the handler named its parameter.
+                for api in ["dataTransfer.getData", "clipboardData.getData"] {
+                    if callee_str
+                        .strip_suffix(api)
+                        .is_some_and(|head| head.ends_with('.'))
+                    {
+                        return (true, Some(format!("event.{api}")));
+                    }
                 }
             }
 
@@ -250,7 +287,7 @@ impl<'a> DomXssVisitor<'a> {
                 return (true, Some(source));
             }
             if let Some(callee_str) = self.get_computed_member_string(member)
-                && self.sources.contains(callee_str.as_str())
+                && self.is_source(callee_str.as_str())
             {
                 return (true, Some(callee_str));
             }
@@ -284,6 +321,22 @@ impl<'a> DomXssVisitor<'a> {
         // tainted map was already caught by the receiver check above.
         if self.is_builtin_map_get(call) {
             return (false, None);
+        }
+
+        // A tainted value called as a function is a template compiled from
+        // attacker text: `_.template(t)(data)`, `var render = compile(t); render()`.
+        match call.callee.without_parentheses() {
+            Expression::Identifier(id)
+                if (self.tainted_vars.contains(id.name.as_str())
+                    || self.global_taints.contains(id.name.as_str()))
+                    && !self.function_summaries.contains_key(id.name.as_str()) =>
+            {
+                return (true, self.var_aliases.get(id.name.as_str()).cloned());
+            }
+            callee @ Expression::CallExpression(_) if self.is_tainted(callee) => {
+                return (true, self.find_source_in_expr(callee));
+            }
+            _ => {}
         }
 
         // Conservative fallback: tainted argument taints call result.
@@ -505,7 +558,7 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         let summary_key = self.get_summary_key_for_callee_expr(&tagged.tag)?;
-        let summary = self.function_summaries.get(&summary_key)?;
+        let summary = self.summary(&summary_key)?;
 
         // The tag returns a tainted value regardless of its arguments
         // (e.g. it reads `location.hash` itself).
@@ -620,6 +673,23 @@ impl<'a> DomXssVisitor<'a> {
         {
             return false;
         }
+        // …and neither are these on `Location` itself, in any spelling
+        // (`window.location.hostname` reads the same as `location.hostname`).
+        if matches!(
+            member.property.name.as_str(),
+            "protocol" | "hostname" | "port"
+        ) && self.expr_is_location_object(&member.object)
+        {
+            return false;
+        }
+        // `Location`'s methods are functions, not the URL: `setTimeout(location.reload, 1000)`.
+        if matches!(
+            member.property.name.as_str(),
+            "reload" | "assign" | "replace"
+        ) && self.expr_is_location_object(&member.object)
+        {
+            return false;
+        }
         if self.url_search_params_source_for_member(member).is_some() {
             return true;
         }
@@ -646,8 +716,13 @@ impl<'a> DomXssVisitor<'a> {
             if self.field_taints.contains_key(&full_path) {
                 return true;
             }
+            // jQuery wraps the native event: `e.originalEvent.data` is the
+            // message payload.
+            if full_path.ends_with(".originalEvent.data") {
+                return true;
+            }
             // Check if the full path is a known source
-            if self.sources.contains(full_path.as_str()) {
+            if self.is_source(full_path.as_str()) {
                 return true;
             }
         }
@@ -678,7 +753,7 @@ impl<'a> DomXssVisitor<'a> {
     }
     pub(super) fn computed_member_is_tainted(&self, member: &ComputedMemberExpression<'a>) -> bool {
         if let Some(path) = self.get_computed_member_string(member)
-            && (self.sources.contains(path.as_str()) || self.field_taints.contains_key(&path))
+            && (self.is_source(path.as_str()) || self.field_taints.contains_key(&path))
         {
             return true;
         }
@@ -715,6 +790,7 @@ impl<'a> DomXssVisitor<'a> {
             Expression::Identifier(id) => {
                 self.tainted_vars.contains(id.name.as_str())
                     || self.global_taints.contains(id.name.as_str())
+                    || self.is_location_value(id.name.as_str())
             }
             Expression::StaticMemberExpression(member) => self.static_member_is_tainted(member),
             Expression::TemplateLiteral(template) => {
@@ -801,6 +877,15 @@ impl<'a> DomXssVisitor<'a> {
             _ => false,
         }
     }
+    /// The bare `Location` object (or an alias of it) used as a value:
+    /// `'' + location`, `String(location)`, `document.write(location)` all
+    /// stringify it to the page URL, like the `window.location` spelling.
+    pub(super) fn is_location_value(&self, name: &str) -> bool {
+        match self.global_aliases.get(name) {
+            Some(global) => *global == "location",
+            None => name == "location" && !self.local_names.contains(name),
+        }
+    }
     /// Report a vulnerability with an optional explicit source
     pub(super) fn report_vulnerability_with_source(
         &mut self,
@@ -823,16 +908,18 @@ impl<'a> DomXssVisitor<'a> {
         let line = (line_idx + 1) as u32;
         let column = (offset - self.line_starts[line_idx] + 1) as u32;
 
-        // Find the source that led to this
-        let source = explicit_source
-            .or_else(|| {
-                self.tainted_vars
-                    .iter()
-                    .next()
-                    .and_then(|var| self.var_aliases.get(var))
-                    .cloned()
-            })
-            .unwrap_or_else(|| "unknown source".to_string());
+        let source = explicit_source.unwrap_or_else(|| "unknown source".to_string());
+        // A flow is reported with the source it starts at. `fn_param_N` is a
+        // summary pass's assumption about a parameter, which in the real walk
+        // can only have leaked; and a value tainted by nothing that can be
+        // named is what name collisions in minified code leave behind — there
+        // is no input to put a payload in either way. (Summary passes keep
+        // both: they record which sink a parameter reaches, not the label.)
+        if !self.collecting_tainted_returns
+            && (source.starts_with("fn_param_") || source.starts_with("unknown"))
+        {
+            return;
+        }
 
         self.vulnerabilities.push(DomXssVulnerability {
             line,

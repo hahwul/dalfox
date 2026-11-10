@@ -108,6 +108,14 @@ fn reflected_markup_from_document(
             markup.form_ids.insert(id.to_string());
         }
     }
+    for element in document.select(selectors::media_frame_link_with_id()) {
+        let el = element.value();
+        if let Some(id) = el.attr("id").map(str::trim).filter(|s| !s.is_empty()) {
+            markup
+                .element_tags
+                .insert(id.to_string(), el.name().to_ascii_lowercase());
+        }
+    }
     // Markers are alphanumeric, so entity encoding cannot hide one from the
     // raw text: no marker there means no slot to find.
     if !carries_scan_marker(raw) {

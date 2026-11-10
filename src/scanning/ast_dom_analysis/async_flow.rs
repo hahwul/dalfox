@@ -90,7 +90,7 @@ impl<'a> DomXssVisitor<'a> {
     /// handed a tainted value resolves to whatever it resolves to.
     pub(super) fn summary_return_source(&self, call: &CallExpression<'a>) -> Option<String> {
         let key = self.get_summary_key_for_callee_expr(&call.callee)?;
-        let summary = self.function_summaries.get(&key)?;
+        let summary = self.summary(&key)?;
         if let Some(source) = &summary.return_without_tainted_params {
             return Some(source.clone());
         }
@@ -336,10 +336,14 @@ impl<'a> DomXssVisitor<'a> {
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let response_vars_checkpoint = self.response_object_vars.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
+        let callback_locals: HashSet<String> = param_name.iter().cloned().collect();
+        let url_lead_scope = self.url_leads_enter(&callback_locals);
 
+        let mut hidden_alias = None;
         if let Some(name) = &param_name {
             // A fresh parameter binding shadows any same-named outer state.
             self.page_url_objects.remove(name);
+            hidden_alias = self.global_aliases.remove(name);
             self.tainted_vars.remove(name);
             self.var_aliases.remove(name);
             self.response_object_vars.remove(name);
@@ -355,11 +359,13 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        let body_frame = self.enter_body();
         if matches!(expr, Expression::FunctionExpression(_)) {
             self.with_own_this(|v| v.walk_statements(statements));
         } else {
             self.walk_statements(statements);
         }
+        self.leave_body(body_frame);
 
         let result_kind = match return_expr {
             Some(re) if self.is_tainted(re) => PromiseValueKind::Tainted(
@@ -369,6 +375,10 @@ impl<'a> DomXssVisitor<'a> {
             _ => PromiseValueKind::Unknown,
         };
 
+        self.url_leads_exit(url_lead_scope, &callback_locals);
+        if let (Some(name), Some(global)) = (&param_name, hidden_alias) {
+            self.global_aliases.insert(name.clone(), global);
+        }
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
@@ -394,15 +404,14 @@ impl<'a> DomXssVisitor<'a> {
         // value flowing into it is tainted.
         if let PromiseValueKind::Tainted(source) = incoming
             && let Some(sink_name) = self
-                .function_summaries
-                .get(fn_name)
+                .summary(fn_name)
                 .and_then(|summary| summary.tainted_param_sinks.get(&0))
                 .cloned()
         {
             self.report_vulnerability_with_source(span, &sink_name, Some(source.clone()));
         }
 
-        if let Some(summary) = self.function_summaries.get(fn_name) {
+        if let Some(summary) = self.summary(fn_name) {
             if matches!(
                 incoming,
                 PromiseValueKind::Tainted(_) | PromiseValueKind::Response

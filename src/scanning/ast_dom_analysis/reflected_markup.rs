@@ -20,6 +20,10 @@ pub struct PageMarkup {
     /// `id`s of `<form>` elements, so `getElementById('f').action = …` is
     /// known to write a real form's action. Not marker-gated.
     pub(crate) form_ids: HashSet<String>,
+    /// `id` → tag of the media, frame and `<link>` elements, so
+    /// `getElementById('logo').src = …` is known to write an image's `src`.
+    /// Not marker-gated.
+    pub(crate) element_tags: HashMap<String, String>,
     /// `id` → lowercased names of the attributes whose value carries a marker.
     pub(crate) attrs: HashMap<String, HashSet<String>>,
     /// `id`s of elements whose text content carries a marker.
@@ -56,12 +60,30 @@ impl PageMarkup {
         }
         self.text.extend(other.text.iter().cloned());
         self.form_ids.extend(other.form_ids.iter().cloned());
+        for (id, tag) in &other.element_tags {
+            self.element_tags.insert(id.clone(), tag.clone());
+        }
         self.css_custom_properties
             .extend(other.css_custom_properties.iter().cloned());
         if self.sent_value.is_none() {
             self.sent_value = other.sent_value.clone();
         }
     }
+}
+
+/// The tag a selector's only compound names (`img.hero` → `img`). A selector
+/// with a combinator or a list matches its *last* compound, which this does
+/// not parse, so those resolve to nothing.
+fn selector_tag(selector: &str) -> Option<String> {
+    let selector = selector.trim();
+    if selector.contains([',', ' ', '>', '+', '~']) {
+        return None;
+    }
+    let tag = &selector[..selector
+        .find(['.', '#', '[', ':'])
+        .unwrap_or(selector.len())];
+    (!tag.is_empty() && tag.chars().all(|c| c.is_ascii_alphanumeric()))
+        .then(|| tag.to_ascii_lowercase())
 }
 
 /// `dataset.fooBar` reads the `data-foo-bar` attribute.
@@ -230,21 +252,48 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Whether `expr` resolves to an image element: `new Image(…)`,
-    /// `document.createElement('img')`, or a variable bound to one.
-    pub(super) fn expr_resolves_to_image(&self, expr: &Expression<'a>) -> bool {
+    /// The lowercased tag of the element `expr` resolves to, when the script
+    /// says so itself: `createElement('img')`, `new Image()` / `new Audio()`,
+    /// `querySelector('iframe.x')`, `document.images[0]`,
+    /// `getElementsByTagName('img')[0]`, `getElementById('id')` for an id the
+    /// HTML pre-scan saw on a media, frame or link element, or a variable
+    /// bound to one of those.
+    pub(super) fn expr_element_tag(&self, expr: &Expression<'a>) -> Option<String> {
         match expr {
-            Expression::Identifier(id) => self.image_element_vars.contains(id.name.as_str()),
-            Expression::ParenthesizedExpression(p) => self.expr_resolves_to_image(&p.expression),
-            Expression::NewExpression(new_expr) => {
-                matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "Image")
-            }
+            Expression::Identifier(id) => self.element_tag_vars.get(id.name.as_str()).cloned(),
+            Expression::ParenthesizedExpression(p) => self.expr_element_tag(&p.expression),
+            Expression::NewExpression(new_expr) => match &new_expr.callee {
+                Expression::Identifier(id) if id.name == "Image" => Some("img".to_string()),
+                Expression::Identifier(id) if id.name == "Audio" => Some("audio".to_string()),
+                _ => None,
+            },
             Expression::CallExpression(call) => {
-                self.get_callee_property_name(&call.callee).as_deref() == Some("createElement")
-                    && Self::extract_static_string_argument(call, 0)
-                        .is_some_and(|tag| tag.eq_ignore_ascii_case("img"))
+                let method = self.get_callee_property_name(&call.callee)?;
+                let arg = Self::extract_static_string_argument(call, 0)?;
+                match method.as_str() {
+                    "createElement" => Some(arg.to_ascii_lowercase()),
+                    "querySelector" | "closest" => selector_tag(&arg),
+                    "getElementById" => self.reflected_markup.element_tags.get(&arg).cloned(),
+                    _ => None,
+                }
             }
-            _ => false,
+            Expression::ComputedMemberExpression(member) => match &member.object {
+                Expression::StaticMemberExpression(inner) => {
+                    (self.get_member_string(inner).as_deref() == Some("document.images"))
+                        .then(|| "img".to_string())
+                }
+                Expression::CallExpression(call) => {
+                    let method = self.get_callee_property_name(&call.callee)?;
+                    let arg = Self::extract_static_string_argument(call, 0)?;
+                    match method.as_str() {
+                        "getElementsByTagName" => Some(arg.to_ascii_lowercase()),
+                        "querySelectorAll" => selector_tag(&arg),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
         }
     }
 

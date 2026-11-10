@@ -31,6 +31,18 @@ pub(crate) fn form() -> &'static Selector {
     SEL.get_or_init(|| Selector::parse("form").expect("valid CSS form selector"))
 }
 
+/// Elements whose `src` / `href` does something other than what the same
+/// property does on a script or an anchor, when they carry an `id`.
+pub(crate) fn media_frame_link_with_id() -> &'static Selector {
+    static SEL: OnceLock<Selector> = OnceLock::new();
+    SEL.get_or_init(|| {
+        Selector::parse(
+            "img[id], video[id], audio[id], source[id], track[id], iframe[id], frame[id], link[id]",
+        )
+        .expect("valid CSS media/frame/link selector")
+    })
+}
+
 pub(crate) fn input_textarea_select() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     // `button[name]` is part of the HTML form-submitter set per the

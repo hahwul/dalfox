@@ -32,13 +32,24 @@ impl<'a> DomXssVisitor<'a> {
             }
             Statement::IfStatement(if_stmt) => {
                 self.walk_expression(&if_stmt.test);
+                // What the test vouches for on each branch (see `guards`).
+                let (when_true, when_false) = self.condition_guards(&if_stmt.test);
                 // Branch bodies are conditional: suppress detaint inside them.
                 self.branch_depth += 1;
-                self.walk_statement(&if_stmt.consequent);
+                self.walk_guarded_branch(&when_true, &if_stmt.consequent);
                 if let Some(alt) = &if_stmt.alternate {
-                    self.walk_statement(alt);
+                    self.walk_guarded_branch(&when_false, alt);
                 }
                 self.branch_depth -= 1;
+                // `if (!ok(x)) return;` — past it, the test held.
+                if self.branch_depth == self.branch_base {
+                    if Self::always_exits(&if_stmt.consequent) {
+                        self.untaint_for_rest_of_body(&when_false);
+                    }
+                    if if_stmt.alternate.as_ref().is_some_and(Self::always_exits) {
+                        self.untaint_for_rest_of_body(&when_true);
+                    }
+                }
             }
             Statement::WhileStatement(while_stmt) => {
                 self.walk_expression(&while_stmt.test);
@@ -92,8 +103,13 @@ impl<'a> DomXssVisitor<'a> {
                         self.taint_binding_pattern(&decl.id, &source);
                     }
                 }
+                let mut bound = HashSet::new();
+                Self::collect_for_loop_left(&for_of.left, &mut bound);
+                if let ForStatementLeft::AssignmentTargetIdentifier(id) = &for_of.left {
+                    bound.insert(id.name.to_string());
+                }
                 self.branch_depth += 1;
-                self.walk_statement(&for_of.body);
+                self.with_block_bindings(&bound, |v| v.walk_statement(&for_of.body));
                 self.branch_depth -= 1;
             }
             // `for (k in obj)` binds property *keys* (strings), not the iterated
@@ -101,8 +117,13 @@ impl<'a> DomXssVisitor<'a> {
             // expression and the body so sources/sinks inside them are seen.
             Statement::ForInStatement(for_in) => {
                 self.walk_expression(&for_in.right);
+                let mut bound = HashSet::new();
+                Self::collect_for_loop_left(&for_in.left, &mut bound);
+                if let ForStatementLeft::AssignmentTargetIdentifier(id) = &for_in.left {
+                    bound.insert(id.name.to_string());
+                }
                 self.branch_depth += 1;
-                self.walk_statement(&for_in.body);
+                self.with_block_bindings(&bound, |v| v.walk_statement(&for_in.body));
                 self.branch_depth -= 1;
             }
             Statement::DoWhileStatement(do_while) => {
@@ -161,12 +182,33 @@ impl<'a> DomXssVisitor<'a> {
             }
             Statement::SwitchStatement(switch_stmt) => {
                 self.walk_expression(&switch_stmt.discriminant);
+                // `switch (x) { case 'a': … }` — in a literal case `x` is that
+                // literal. A `default` that is not last can fall through into
+                // one, so only the default-last (or default-less) shape counts.
+                let cases = &switch_stmt.cases;
+                let literal_cases = cases
+                    .iter()
+                    .position(|case| case.test.is_none())
+                    .is_none_or(|default| default + 1 == cases.len())
+                    && cases
+                        .iter()
+                        .filter_map(|case| case.test.as_ref())
+                        .all(Self::is_plain_literal);
+                let subject: Vec<guards::GuardTarget> =
+                    match self.guard_subject(&switch_stmt.discriminant) {
+                        Some(target @ guards::GuardTarget::Var(_)) if literal_cases => vec![target],
+                        _ => Vec::new(),
+                    };
                 self.branch_depth += 1;
-                for case in &switch_stmt.cases {
+                for case in cases {
                     if let Some(test) = &case.test {
                         self.walk_expression(test);
                     }
+                    let taken = case.test.is_some().then(|| self.untaint(&subject));
                     self.walk_statements(&case.consequent);
+                    if let Some(taken) = taken {
+                        self.retaint(taken);
+                    }
                 }
                 self.branch_depth -= 1;
             }
@@ -176,7 +218,11 @@ impl<'a> DomXssVisitor<'a> {
                 self.branch_depth += 1;
                 self.walk_statements(&try_stmt.block.body);
                 if let Some(handler) = &try_stmt.handler {
-                    self.walk_statements(&handler.body.body);
+                    let mut bound = HashSet::new();
+                    if let Some(param) = &handler.param {
+                        Self::collect_binding_pattern_strs(&param.pattern, &mut bound);
+                    }
+                    self.with_block_bindings(&bound, |v| v.walk_statements(&handler.body.body));
                 }
                 if let Some(finalizer) = &try_stmt.finalizer {
                     self.walk_statements(&finalizer.body);
@@ -186,6 +232,22 @@ impl<'a> DomXssVisitor<'a> {
             _ => {}
         }
     }
+    /// Walk with `names` bound by a block — a `catch` parameter, a loop
+    /// variable — which hides what the outer binding of that name stood for:
+    /// `var e = window; try { … } catch (e) { el.innerHTML = e.name }`.
+    fn with_block_bindings(&mut self, names: &HashSet<String>, walk: impl FnOnce(&mut Self)) {
+        let hidden: Vec<(String, &'static str)> = names
+            .iter()
+            .filter_map(|name| Some((name.clone(), self.global_aliases.remove(name.as_str())?)))
+            .collect();
+        for name in names {
+            self.forget_url_lead(name);
+        }
+        walk(self);
+        for (name, global) in hidden {
+            self.global_aliases.insert(name, global);
+        }
+    }
     /// Parameter *flows* belong to the summary registered for this
     /// declaration and are reported at each call site. What the summary cannot
     /// represent is a free variable the body reads on its own (`function
@@ -193,16 +255,223 @@ impl<'a> DomXssVisitor<'a> {
     /// here too — with its parameters shadowed, which is what keeps the two
     /// from reporting the same flow twice.
     fn walk_function_declaration(&mut self, func_decl: &Function<'a>) {
-        if let Some(body) = &func_decl.body {
-            self.walk_function_literal_body(&func_decl.params, &body.statements);
+        self.walk_named_function(func_decl.id.as_ref().map(|id| id.name.as_str()), func_decl);
+    }
+
+    /// Walk a function that has a name to be constructed under: `function
+    /// W() { this.q = … }` and `W.prototype.render = function () { … this.q }`
+    /// run against the same object, so they share one `this`.
+    pub(super) fn walk_named_function(&mut self, name: Option<&str>, func: &Function<'a>) {
+        let Some(body) = &func.body else {
+            return;
+        };
+        match name {
+            Some(name) => {
+                let this = self.named_this_id(name);
+                // `this.render` in `function W() { … }` is `W.prototype.render`.
+                let outer = self.current_class.replace(name.to_string());
+                self.walk_method_body(this, &func.params, &body.statements);
+                self.current_class = outer;
+            }
+            None => self.walk_function_literal_body(&func.params, &body.statements),
+        }
+    }
+
+    pub(super) fn named_this_id(&mut self, name: &str) -> usize {
+        if let Some(id) = self.named_this.get(name) {
+            return *id;
+        }
+        self.this_scopes += 1;
+        self.named_this.insert(name.to_string(), self.this_scopes);
+        self.this_scopes
+    }
+
+    /// Walk a non-arrow function body whose `this` is the object `this`
+    /// identifies.
+    fn walk_method_body(
+        &mut self,
+        this: usize,
+        params: &FormalParameters<'a>,
+        statements: &[Statement<'a>],
+    ) {
+        let apply_defaults = !self.arity_known.contains(&params.span);
+        let outer = std::mem::replace(&mut self.this_scope, this);
+        self.walk_function_scope(params, statements, &[], apply_defaults);
+        self.this_scope = outer;
+    }
+
+    /// Walk an object literal whose methods run with `this` bound to it:
+    /// `{ init() { this.q = location.hash }, render() { el.innerHTML = this.q } }`.
+    /// The methods can be called in any order, so when they use `this` at
+    /// all they are walked once beforehand just for the fields they taint.
+    pub(super) fn walk_object_literal(&mut self, object: &ObjectExpression<'a>, this: usize) {
+        let is_method = |property: &ObjectPropertyKind<'a>| {
+            matches!(property, ObjectPropertyKind::ObjectProperty(p)
+                if matches!(p.value, Expression::FunctionExpression(_)))
+        };
+        if !self.in_field_prepass
+            && object.properties.iter().filter(|p| is_method(p)).count() >= 2
+            && self
+                .source_code
+                .get(object.span.start as usize..object.span.end as usize)
+                .is_some_and(|text| text.contains("this."))
+        {
+            let before = self.vulnerabilities.len();
+            self.in_field_prepass = true;
+            self.walk_object_properties(object, this);
+            self.in_field_prepass = false;
+            self.vulnerabilities.truncate(before);
+        }
+        self.walk_object_properties(object, this);
+    }
+
+    fn walk_object_properties(&mut self, object: &ObjectExpression<'a>, this: usize) {
+        for property in &object.properties {
+            match property {
+                ObjectPropertyKind::ObjectProperty(property) => {
+                    if property.computed
+                        && let Some(key) = property.key.as_expression()
+                    {
+                        self.walk_expression(key);
+                    }
+                    self.report_dangerously_set_inner_html(property);
+                    match &property.value {
+                        Expression::FunctionExpression(func) => {
+                            if let Some(body) = &func.body {
+                                self.walk_method_body(this, &func.params, &body.statements);
+                            }
+                        }
+                        value => self.walk_expression(value),
+                    }
+                }
+                ObjectPropertyKind::SpreadProperty(spread) => {
+                    self.walk_expression(&spread.argument)
+                }
+            }
+        }
+    }
+
+    /// `W.prototype.render = function () { … }` and `W.prototype = { … }`:
+    /// methods of `W`, summarised as `W.render` and walked with `W`'s `this`.
+    /// False when `assign` is neither.
+    pub(super) fn walk_prototype_assignment(&mut self, assign: &AssignmentExpression<'a>) -> bool {
+        let AssignmentTarget::StaticMemberExpression(target) = &assign.left else {
+            return false;
+        };
+        if let Some((ctor, method, func)) = Self::prototype_method(assign)
+            && let Some(body) = &func.body
+        {
+            self.register_function_summary(
+                format!("{ctor}.{method}"),
+                &func.params,
+                &body.statements,
+                false,
+            );
+            let this = self.named_this_id(ctor);
+            let outer = self.current_class.replace(ctor.to_string());
+            self.walk_method_body(this, &func.params, &body.statements);
+            self.current_class = outer;
+            return true;
+        }
+        if target.property.name == "prototype"
+            && let Expression::Identifier(ctor) = &target.object
+            && let Expression::ObjectExpression(object) = &assign.right
+        {
+            self.register_object_literal_method_summaries(ctor.name.as_str(), object);
+            let this = self.named_this_id(ctor.name.as_str());
+            self.walk_object_literal(object, this);
+            return true;
+        }
+        false
+    }
+
+    /// `var Mod = (function () { function get() { … } return { get: get }; })()`
+    /// — the revealing-module pattern. The returned object's members are the
+    /// module's API, so they are summarised as `Mod.get`.
+    fn register_module_exports(&mut self, name: &str, init: &Expression<'a>) {
+        let Expression::CallExpression(call) = init.without_parentheses() else {
+            return;
+        };
+        let statements = match call.callee.without_parentheses() {
+            Expression::FunctionExpression(func) => match &func.body {
+                Some(body) => &body.statements,
+                None => return,
+            },
+            Expression::ArrowFunctionExpression(arrow) if !arrow.expression => {
+                &arrow.body.statements
+            }
+            _ => return,
+        };
+        let Some(Statement::ReturnStatement(ret)) = statements.last() else {
+            return;
+        };
+        let Some(Expression::ObjectExpression(object)) =
+            ret.argument.as_ref().map(|arg| arg.without_parentheses())
+        else {
+            return;
+        };
+        self.register_object_literal_method_summaries(name, object);
+        for property in &object.properties {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                continue;
+            };
+            let (Some(key), Expression::Identifier(target)) =
+                (self.get_property_key_name(&property.key), &property.value)
+            else {
+                continue;
+            };
+            // The function the member names, declared in the module body.
+            for stmt in statements {
+                let (params, body, concise) = match stmt {
+                    Statement::FunctionDeclaration(func)
+                        if func.id.as_ref().is_some_and(|id| id.name == target.name) =>
+                    {
+                        match &func.body {
+                            Some(body) => (&func.params, &body.statements, false),
+                            None => continue,
+                        }
+                    }
+                    Statement::VariableDeclaration(decl) => {
+                        let bound = decl
+                            .declarations
+                            .iter()
+                            .find_map(|d| match (&d.id, &d.init) {
+                                (BindingPattern::BindingIdentifier(id), Some(init))
+                                    if id.name == target.name =>
+                                {
+                                    Some(init)
+                                }
+                                _ => None,
+                            });
+                        match bound {
+                            Some(Expression::FunctionExpression(func)) => match &func.body {
+                                Some(body) => (&func.params, &body.statements, false),
+                                None => continue,
+                            },
+                            Some(Expression::ArrowFunctionExpression(arrow)) => {
+                                (&arrow.params, &arrow.body.statements, arrow.expression)
+                            }
+                            _ => continue,
+                        }
+                    }
+                    _ => continue,
+                };
+                self.register_function_summary(format!("{name}.{key}"), params, body, concise);
+                break;
+            }
         }
     }
 
     fn walk_class_declaration(&mut self, class_decl: &Class<'a>) {
+        let outer = std::mem::replace(
+            &mut self.current_class,
+            class_decl.id.as_ref().map(|id| id.name.to_string()),
+        );
         if let Some(class_id) = &class_decl.id {
             self.register_class_method_summaries_for_name(class_id.name.as_str(), class_decl);
         }
         self.walk_class_body(class_decl);
+        self.current_class = outer;
     }
 
     /// React's `dangerouslySetInnerHTML: { __html: x }` (JSX compiles to this
@@ -243,7 +512,11 @@ impl<'a> DomXssVisitor<'a> {
                     && !self.is_tainted(init)
                 {
                     self.tainted_vars.remove(id.name.as_str());
-                    self.var_aliases.remove(id.name.as_str());
+                    // A global keeps its taint (a function body wrote it),
+                    // and so the label that says where from.
+                    if !self.global_taints.contains(id.name.as_str()) {
+                        self.var_aliases.remove(id.name.as_str());
+                    }
                 }
                 self.bind_declarator_identifier(id, init);
             }
@@ -254,10 +527,13 @@ impl<'a> DomXssVisitor<'a> {
             // property's own source wins the label, so the PoC lands in the
             // right part of the URL.
             if let BindingPattern::ObjectPattern(obj_pat) = &decl.id {
-                let whole = self.is_tainted(init).then(|| {
-                    self.find_source_in_expr(init)
-                        .unwrap_or_else(|| "unknown source".to_string())
-                });
+                // Off `location` only the properties that are sources count
+                // (`origin` is the page's own), not everything on the object.
+                let whole =
+                    (self.is_tainted(init) && !self.expr_is_location_object(init)).then(|| {
+                        self.find_source_in_expr(init)
+                            .unwrap_or_else(|| "unknown source".to_string())
+                    });
                 for prop in &obj_pat.properties {
                     let own = self
                         .get_property_key_name(&prop.key)
@@ -281,6 +557,7 @@ impl<'a> DomXssVisitor<'a> {
                 for elem in arr_pat.elements.iter().flatten() {
                     if let BindingPattern::BindingIdentifier(id) = &elem {
                         let name = id.name.to_string();
+                        self.forget_url_lead(&name);
                         self.tainted_vars.insert(name.clone());
                         if let Some(ref src) = source {
                             self.var_aliases.insert(name, src.clone());
@@ -290,7 +567,22 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             // Walk the init expression to detect any sinks used in the initializer
-            self.walk_expression(init);
+            match (&decl.id, init) {
+                // `var W = function () { this.q = … }` is a constructor too.
+                (BindingPattern::BindingIdentifier(id), Expression::FunctionExpression(func)) => {
+                    self.walk_named_function(Some(id.name.as_str()), func);
+                }
+                // `var App = { init() { on('message', this.recv) }, recv(e) { … } }`.
+                (BindingPattern::BindingIdentifier(id), Expression::ObjectExpression(_)) => {
+                    let outer = self.current_class.replace(id.name.to_string());
+                    self.walk_expression(init);
+                    self.current_class = outer;
+                }
+                _ => self.walk_expression(init),
+            }
+            if let BindingPattern::BindingIdentifier(id) = &decl.id {
+                self.register_module_exports(id.name.as_str(), init);
+            }
         }
     }
     /// Walk through an expression.
@@ -337,22 +629,8 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
             Expression::ObjectExpression(object) => {
-                for property in &object.properties {
-                    match property {
-                        ObjectPropertyKind::ObjectProperty(property) => {
-                            if property.computed
-                                && let Some(key) = property.key.as_expression()
-                            {
-                                self.walk_expression(key);
-                            }
-                            self.report_dangerously_set_inner_html(property);
-                            self.walk_expression(&property.value);
-                        }
-                        ObjectPropertyKind::SpreadProperty(spread) => {
-                            self.walk_expression(&spread.argument)
-                        }
-                    }
-                }
+                self.this_scopes += 1;
+                self.walk_object_literal(object, self.this_scopes);
             }
             Expression::TemplateLiteral(template) => {
                 for e in &template.expressions {
@@ -370,14 +648,19 @@ impl<'a> DomXssVisitor<'a> {
                 self.walk_expression(&binary.left);
                 self.walk_expression(&binary.right);
             }
+            // `c && (x = v)` and `c ? (x = v) : 0` are `if (c) x = v`.
             Expression::LogicalExpression(logical) => {
                 self.walk_expression(&logical.left);
+                self.branch_depth += 1;
                 self.walk_expression(&logical.right);
+                self.branch_depth -= 1;
             }
             Expression::ConditionalExpression(cond) => {
                 self.walk_expression(&cond.test);
+                self.branch_depth += 1;
                 self.walk_expression(&cond.consequent);
                 self.walk_expression(&cond.alternate);
+                self.branch_depth -= 1;
             }
             Expression::NewExpression(new_expr) => {
                 self.walk_expression(&new_expr.callee);
@@ -393,9 +676,8 @@ impl<'a> DomXssVisitor<'a> {
                     let callee_name = id.name.as_str();
                     // `new W(x)` runs W's body, or the class's constructor.
                     let param_sinks = self
-                        .function_summaries
-                        .get(&format!("{callee_name}.constructor"))
-                        .or_else(|| self.function_summaries.get(callee_name))
+                        .summary(&format!("{callee_name}.constructor"))
+                        .or_else(|| self.summary(callee_name))
                         .map(|summary| summary.tainted_param_sinks.clone())
                         .unwrap_or_default();
                     for (idx, sink_name) in param_sinks {
@@ -417,7 +699,8 @@ impl<'a> DomXssVisitor<'a> {
                                 Argument::SpreadElement(spread) => Some(&spread.argument),
                                 _ => arg.as_expression(),
                             };
-                            let is_arg_tainted = arg_expr.is_some_and(|e| self.is_tainted(e));
+                            let is_arg_tainted = arg_expr
+                                .is_some_and(|e| self.for_sink(callee_name, |v| v.is_tainted(e)));
                             if is_arg_tainted {
                                 // Propagate the originating source (e.g.
                                 // `URLSearchParams.get('q')`) instead of
@@ -538,7 +821,7 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let response_vars_checkpoint = self.response_object_vars.checkpoint();
-        let image_vars_checkpoint = self.image_element_vars.checkpoint();
+        let image_vars_checkpoint = self.element_tag_vars.checkpoint();
         let param_names = self.function_param_bindings(params);
         // `global_taints` is deliberately *not* saved wholesale — see the
         // escape handling below. Only the shadowed parameter names are lifted
@@ -564,6 +847,32 @@ impl<'a> DomXssVisitor<'a> {
         }
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
+        let shadow_params_checkpoint = self.shadow_params.checkpoint();
+        let url_lead_scope = self.url_leads_enter(&own_names);
+        let global_aliases_checkpoint = self.global_aliases.checkpoint();
+        for name in &own_names {
+            self.global_aliases.remove(name.as_str());
+        }
+        for (name, global) in std::mem::take(&mut self.pending_param_aliases) {
+            self.global_aliases.insert(name, global);
+        }
+        // A body-level declaration wins over a parameter of the same name.
+        let mut declared = HashSet::new();
+        Self::collect_declared_names(statements, &mut declared);
+        for name in &param_names {
+            self.shadow_params.insert(name.clone());
+        }
+        for name in &declared {
+            self.shadow_params.remove(name.as_str());
+        }
+        for name in std::mem::take(&mut self.iife_passthrough) {
+            self.shadow_params.remove(name.as_str());
+        }
+        // A local constructor `t` is not the outer `t` (see `named_this`).
+        let shadowed_this: Vec<(String, usize)> = own_names
+            .iter()
+            .filter_map(|name| Some((name.clone(), self.named_this.remove(name)?)))
+            .collect();
         // A parameter or local `m` is not the outer `const m = new Map()`.
         let shadowed_instances: Vec<(String, String)> = own_names
             .iter()
@@ -571,7 +880,7 @@ impl<'a> DomXssVisitor<'a> {
             .collect();
         for name in &own_names {
             self.local_names.insert(name.clone());
-            self.image_element_vars.remove(name.as_str());
+            self.element_tag_vars.remove(name.as_str());
             self.tainted_vars.remove(name.as_str());
             self.var_aliases.remove(name.as_str());
             if self.global_taints.remove(name.as_str()) {
@@ -595,7 +904,9 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        let body_frame = self.enter_body();
         self.walk_statements(statements);
+        self.leave_body(body_frame);
 
         // A name the body tainted that it neither declared nor took as a
         // parameter is an *outer* binding: `function () { g = location.hash; }`
@@ -618,15 +929,20 @@ impl<'a> DomXssVisitor<'a> {
             })
             .collect();
 
+        self.url_leads_exit(url_lead_scope, &locals);
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
-        self.image_element_vars.rollback(image_vars_checkpoint);
+        self.element_tag_vars.rollback(image_vars_checkpoint);
         self.local_names.rollback(local_names_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
+        self.shadow_params.rollback(shadow_params_checkpoint);
+        self.global_aliases.rollback(global_aliases_checkpoint);
         for name in &own_names {
             self.instance_classes.remove(name.as_str());
+            self.named_this.remove(name);
         }
+        self.named_this.extend(shadowed_this);
         for (name, class) in shadowed_instances {
             self.instance_classes.insert(name, class);
         }
@@ -757,6 +1073,7 @@ impl<'a> DomXssVisitor<'a> {
         Self::collect_binding_pattern_names(pattern, &mut names);
         for name in names {
             self.page_url_objects.remove(name.as_str());
+            self.forget_url_lead(&name);
             self.tainted_vars.insert(name.clone());
             self.var_aliases.insert(name, source.to_string());
         }
@@ -931,7 +1248,7 @@ impl<'a> DomXssVisitor<'a> {
             self.get_expr_string(object)?
         };
         let path = format!("{base}.{key}");
-        self.sources.contains(path.as_str()).then_some(path)
+        self.is_source(path.as_str()).then_some(path)
     }
 
     pub(super) fn collect_binding_pattern_names(
@@ -968,7 +1285,7 @@ impl<'a> DomXssVisitor<'a> {
     /// `location.*`, `URLSearchParams`, `name`, `document.referrer`, …) loads
     /// and runs an attacker-controlled ES module — a real DOM XSS.
     pub(super) fn walk_import_expression(&mut self, import_expr: &ImportExpression<'a>) {
-        if self.is_tainted(&import_expr.source) {
+        if self.for_sink("import", |v| v.is_tainted(&import_expr.source)) {
             let source = self.find_source_in_expr(&import_expr.source);
             self.report_vulnerability_with_source(import_expr.span, "import", source);
         }
