@@ -1299,3 +1299,48 @@ fn multipart_poc_type_matches_the_wire() {
     let (poc, _) = multipart_poc_body(Some(body), "meta", "PAY");
     assert_eq!(poc.matches("Content-Type:").count(), 0, "{poc}");
 }
+
+/// `query_wire_value` encodes runs between `%XX` at once; it must match the
+/// per-char encoding it replaced on every edge (`%` at the end, bad hex,
+/// multi-byte chars, already-encoded twins).
+#[test]
+fn query_wire_value_matches_per_char_encoding() {
+    fn per_char(raw: &str) -> String {
+        let bytes = raw.as_bytes();
+        let mut out = String::new();
+        let mut idx = 0;
+        while idx < bytes.len() {
+            if bytes[idx] == b'%'
+                && idx + 2 < bytes.len()
+                && bytes[idx + 1].is_ascii_hexdigit()
+                && bytes[idx + 2].is_ascii_hexdigit()
+            {
+                out.push_str(&raw[idx..idx + 3]);
+                idx += 3;
+                continue;
+            }
+            let len = raw[idx..].chars().next().unwrap().len_utf8();
+            urlencoding::Encoded(&raw[idx..idx + len]).append_to(&mut out);
+            idx += len;
+        }
+        out
+    }
+    for raw in [
+        "",
+        "%",
+        "%4",
+        "%41",
+        "a%41",
+        "%zz%41%",
+        "<svg onload=alert(1)>",
+        "%3Csvg%20onload%3Dalert(1)%3E",
+        "\u{ff1c}script\u{ff1e}%e2%80%8b&#x3c;",
+        "100%%41 é",
+    ] {
+        assert_eq!(query_wire_value(raw), per_char(raw), "{raw:?}");
+    }
+    assert_eq!(
+        query_wire_value("<svg onload=alert(1)>"),
+        query_wire_value(&crate::encoding::url_encode("<svg onload=alert(1)>"))
+    );
+}

@@ -100,21 +100,26 @@ pub(crate) fn prune_blocked_raw_angles(
     }
     payloads
         .into_iter()
-        .filter(|p| {
-            // Leading-window ("positional") filter bypass payloads carry raw
-            // `<`/`>` on purpose: their premise is that the block is positional,
-            // so the raw angle passes once the leading pad pushes it past the
-            // filtered window. Keep them despite the blocked-angle classification
-            // (they are FP-safe — a non-positional filter still encodes the `<`
-            // and nothing verifies). See `synthesis::positional_pad_payloads`.
-            // Doubled-angle ("sub-not-gsub") bypasses carry raw `<`/`>` for the
-            // same reason — the second angle opens a tag once a one-shot filter
-            // has consumed the first. See `synthesis::sub_filter_doubled_payloads`.
-            crate::payload::synthesis::is_positional_pad_bypass(p)
-                || crate::payload::synthesis::is_sub_filter_doubled_bypass(p)
-                || !((block_lt && p.contains('<')) || (block_gt && p.contains('>')))
-        })
+        .filter(|p| !raw_angle_pruned(p, invalid_specials))
         .collect()
+}
+
+/// Whether [`prune_blocked_raw_angles`] drops `p` for these invalid specials.
+pub(crate) fn raw_angle_pruned(p: &str, invalid_specials: &[char]) -> bool {
+    let block_lt = invalid_specials.contains(&'<');
+    let block_gt = invalid_specials.contains(&'>');
+    // Leading-window ("positional") filter bypass payloads carry raw
+    // `<`/`>` on purpose: their premise is that the block is positional,
+    // so the raw angle passes once the leading pad pushes it past the
+    // filtered window. Keep them despite the blocked-angle classification
+    // (they are FP-safe — a non-positional filter still encodes the `<`
+    // and nothing verifies). See `synthesis::positional_pad_payloads`.
+    // Doubled-angle ("sub-not-gsub") bypasses carry raw `<`/`>` for the
+    // same reason — the second angle opens a tag once a one-shot filter
+    // has consumed the first. See `synthesis::sub_filter_doubled_payloads`.
+    !(crate::payload::synthesis::is_positional_pad_bypass(p)
+        || crate::payload::synthesis::is_sub_filter_doubled_bypass(p))
+        && ((block_lt && p.contains('<')) || (block_gt && p.contains('>')))
 }
 /// Common encoded forms of `<` / `>` we look for when deciding whether a
 /// payload depends on angle brackets. A payload that carries any of these

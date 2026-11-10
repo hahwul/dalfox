@@ -325,8 +325,17 @@ fn payload_has_handler_sink_text(payload: &str) -> bool {
 /// attribute run (see the `ATTR_*` templates in `payload::synthesis`), so if the
 /// response shows the marker on an element that carries no surviving handler,
 /// the handler was swallowed by the surrounding markup and nothing executes.
+///
+/// The handler is also looked for in the entity-decoded payload, like
+/// [`payload_opens_tag`]: WAF-bypass shapes spell the `=` as `&#61;`
+/// (`" onfocus&#61;alert(1) autofocus id=… "`). Echoed verbatim, that text is
+/// an attribute *name* (`onfocus&#61;alert(1)` — names are not entity-decoded),
+/// so the marker lands on a live element while nothing runs; only a server
+/// that decodes the entity first produces a real `onfocus=` handler.
 fn payload_is_bare_attribute_handler_injection(payload: &str) -> bool {
-    !payload_opens_tag(payload) && payload_has_handler_sink_text(payload)
+    !payload_opens_tag(payload)
+        && (payload_has_handler_sink_text(payload)
+            || payload_has_handler_sink_text(&decode_html_entities(payload)))
 }
 
 /// Whether at least one element carrying one of the payload's markers also
@@ -1298,14 +1307,8 @@ async fn verify_normal_dom(
     let status_code = status.as_u16();
     let headers = resp.headers().clone();
 
-    if status.is_redirection() || ignore_return.contains(&status_code) {
-        return DomVerifyEvidenceOutcome {
-            outcome: DomVerifyOutcome {
-                status: status_code,
-                ..Default::default()
-            },
-            evidence_kind: None,
-        };
+    if dom_outcome_is_status_only(status_code, ignore_return, &headers) {
+        return DomVerifyEvidenceOutcome::status_only(status_code);
     }
 
     let content_type = headers
@@ -1316,81 +1319,117 @@ async fn verify_normal_dom(
     // `reflected` is computed independently of the browser-parser check so an
     // inert echo (payload present, but not executable) can still feed the
     // DOM-phase early-exit signal.
-    if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
-        // The signal the DOM-phase inert-echo early exit budgets against.
-        //
-        // Byte-exact reflection is one half. The other half is the *escaped
-        // echo*: the server handed our exact payload back, escaped
-        // (`&lt;svg …&gt;`, `%3Csvg%20…`), which `classify_reflection`
-        // deliberately reports as no reflection because it is not a finding.
-        // Budgeting only on the byte-exact form meant a uniformly escaping
-        // endpoint — the most common shape on the web — advanced the counter
-        // zero times and the phase ran its entire catalog against a body that
-        // can never verify (measured: 5394 requests, 0 findings, on the
-        // `inert` perf-budget scenario).
-        //
-        // The recall constraint this used to protect is preserved by
-        // `is_escaped_echo` itself, not by abstaining: a *sanitizing* endpoint
-        // must never advance the counter, or the early exit can retire before a
-        // genuine late verifier (e.g. sanitizer-level3's whitelisted
-        // `<a href=javascript:>`) is reached. A whitelisting sanitizer *removes*
-        // markup rather than escaping it, so the payload never surfaces whole in
-        // any decoded view and `is_escaped_echo` returns false — as it also does
-        // for truncated echoes, `+`→space form decoding, event-handler and
-        // URL-attribute contexts, and unrelated bodies.
-        //
-        // 4xx is excluded for the reason `BLOCKED_STREAK_LIMIT` is scoped to
-        // 5xx: a WAF block page that echoes the payload is a *block*, and a
-        // later payload variant may still bypass it, so it must not consume the
-        // budget that keeps the bypass surface alive.
-        let live_reflection =
-            crate::scanning::check_reflection::classify_reflection(&text, payload).is_some();
-        let reflected = live_reflection
-            || (!(400..500).contains(&status_code)
-                && crate::scanning::check_reflection::is_escaped_echo(&text, payload));
-        // Verification uses a *broader* reflection pre-gate: the byte-exact check
-        // misses a payload the server *transforms* — a one-shot angle filter
-        // collapsing a doubled-angle bypass (`<<svg class=dlx… onload=…>>`) to a
-        // single-angle tag being the motivating case. The payload's unique
-        // per-scan marker surviving into the response is an equally valid "this
-        // came from us" signal there. It is confined to the `verified` gate (not
-        // the inert-echo `reflected` signal above) precisely to preserve that
-        // budget's invariant, and `classify_dom_evidence` still independently
-        // proves the marker landed on a real sink-carrying element (issue #1118),
-        // so an inert marker echo yields no finding.
-        let reflected_for_evidence =
-            reflected || crate::scanning::check_reflection::payload_marker_present(&text, payload);
-        let evidence_kind = reflected_for_evidence
-            .then(|| classify_dom_evidence_for_response(payload, &text, content_type))
-            .flatten();
-        if let Some(evidence_kind) = evidence_kind {
-            return DomVerifyEvidenceOutcome {
-                outcome: DomVerifyOutcome {
-                    verified: true,
-                    response_text: Some(text),
-                    reflected: true,
-                    live_reflection,
-                    status: status_code,
-                },
-                evidence_kind: Some(evidence_kind),
-            };
+    match crate::utils::http::read_body_counted(resp).await {
+        Ok(text) => verify_dom_response_text(status_code, content_type, &text, payload),
+        Err(_) => DomVerifyEvidenceOutcome::status_only(status_code),
+    }
+}
+
+/// A redirect, an `--ignore-return` status, or a `Content-Disposition:
+/// attachment` download never verifies: its body is not read, only its status
+/// counts. The attachment gate matches the reflection path and the `--sxss`
+/// DOM path, which already drop downloads — a browser saves them, it does not
+/// render them.
+pub(crate) fn dom_outcome_is_status_only(
+    status_code: u16,
+    ignore_return: &[u16],
+    headers: &reqwest::header::HeaderMap,
+) -> bool {
+    (300..400).contains(&status_code)
+        || ignore_return.contains(&status_code)
+        || crate::utils::http::is_attachment(headers)
+}
+
+impl DomVerifyEvidenceOutcome {
+    /// The outcome for a response whose body cannot verify (a redirect, an
+    /// `--ignore-return` status, an unreadable body): only the status feeds the
+    /// DOM phase's early-exit streaks.
+    pub(crate) fn status_only(status: u16) -> Self {
+        Self {
+            outcome: DomVerifyOutcome {
+                status,
+                ..Default::default()
+            },
+            evidence_kind: None,
         }
+    }
+}
+
+/// [`verify_normal_dom`]'s verdict over an already-read, non-redirect,
+/// non-ignored response body. Split out so the reflection phase can compute
+/// the DOM outcome of a wire request the DOM phase would otherwise send again
+/// (issue #1661); both paths must reach the same verdict for the same bytes.
+pub(crate) fn verify_dom_response_text(
+    status_code: u16,
+    content_type: &str,
+    text: &str,
+    payload: &str,
+) -> DomVerifyEvidenceOutcome {
+    // The signal the DOM-phase inert-echo early exit budgets against.
+    //
+    // Byte-exact reflection is one half. The other half is the *escaped
+    // echo*: the server handed our exact payload back, escaped
+    // (`&lt;svg …&gt;`, `%3Csvg%20…`), which `classify_reflection`
+    // deliberately reports as no reflection because it is not a finding.
+    // Budgeting only on the byte-exact form meant a uniformly escaping
+    // endpoint — the most common shape on the web — advanced the counter
+    // zero times and the phase ran its entire catalog against a body that
+    // can never verify (measured: 5394 requests, 0 findings, on the
+    // `inert` perf-budget scenario).
+    //
+    // The recall constraint this used to protect is preserved by
+    // `is_escaped_echo` itself, not by abstaining: a *sanitizing* endpoint
+    // must never advance the counter, or the early exit can retire before a
+    // genuine late verifier (e.g. sanitizer-level3's whitelisted
+    // `<a href=javascript:>`) is reached. A whitelisting sanitizer *removes*
+    // markup rather than escaping it, so the payload never surfaces whole in
+    // any decoded view and `is_escaped_echo` returns false — as it also does
+    // for truncated echoes, `+`→space form decoding, event-handler and
+    // URL-attribute contexts, and unrelated bodies.
+    //
+    // 4xx is excluded for the reason `BLOCKED_STREAK_LIMIT` is scoped to
+    // 5xx: a WAF block page that echoes the payload is a *block*, and a
+    // later payload variant may still bypass it, so it must not consume the
+    // budget that keeps the bypass surface alive.
+    let live_reflection =
+        crate::scanning::check_reflection::classify_reflection(text, payload).is_some();
+    let reflected = live_reflection
+        || (!(400..500).contains(&status_code)
+            && crate::scanning::check_reflection::is_escaped_echo(text, payload));
+    // Verification uses a *broader* reflection pre-gate: the byte-exact check
+    // misses a payload the server *transforms* — a one-shot angle filter
+    // collapsing a doubled-angle bypass (`<<svg class=dlx… onload=…>>`) to a
+    // single-angle tag being the motivating case. The payload's unique
+    // per-scan marker surviving into the response is an equally valid "this
+    // came from us" signal there. It is confined to the `verified` gate (not
+    // the inert-echo `reflected` signal above) precisely to preserve that
+    // budget's invariant, and `classify_dom_evidence` still independently
+    // proves the marker landed on a real sink-carrying element (issue #1118),
+    // so an inert marker echo yields no finding.
+    let reflected_for_evidence =
+        reflected || crate::scanning::check_reflection::payload_marker_present(text, payload);
+    let evidence_kind = reflected_for_evidence
+        .then(|| classify_dom_evidence_for_response(payload, text, content_type))
+        .flatten();
+    if let Some(evidence_kind) = evidence_kind {
         return DomVerifyEvidenceOutcome {
             outcome: DomVerifyOutcome {
-                verified: false,
-                response_text: None,
-                reflected,
+                verified: true,
+                response_text: Some(text.to_string()),
+                reflected: true,
                 live_reflection,
                 status: status_code,
             },
-            evidence_kind: None,
+            evidence_kind: Some(evidence_kind),
         };
     }
-
     DomVerifyEvidenceOutcome {
         outcome: DomVerifyOutcome {
+            verified: false,
+            response_text: None,
+            reflected,
+            live_reflection,
             status: status_code,
-            ..Default::default()
         },
         evidence_kind: None,
     }

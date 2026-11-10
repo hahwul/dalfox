@@ -27,8 +27,13 @@ fn encode_decoded_query_component_into(raw: &str, out: &mut String) {
 
 /// Encode an injected query component while preserving valid `%XX` sequences.
 /// Payload encoders can intentionally hand this function pre-escaped bytes.
+///
+/// Encodes each run between `%XX` sequences in one call: this runs for every
+/// query payload request and for every payload in `dedup_wire_identical`, and a
+/// call per char made it the most expensive part of planning a parameter.
 fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
     let bytes = raw.as_bytes();
+    let mut run_start = 0;
     let mut idx = 0;
 
     while idx < bytes.len() {
@@ -37,19 +42,25 @@ fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
             && bytes[idx + 1].is_ascii_hexdigit()
             && bytes[idx + 2].is_ascii_hexdigit()
         {
+            // `%` and hex digits are ASCII, so both cuts are char boundaries.
+            encode_decoded_query_component_into(&raw[run_start..idx], out);
             out.push_str(&raw[idx..idx + 3]);
             idx += 3;
+            run_start = idx;
             continue;
         }
-
-        let len = raw[idx..]
-            .chars()
-            .next()
-            .expect("valid utf-8 char")
-            .len_utf8();
-        encode_decoded_query_component_into(&raw[idx..idx + len], out);
-        idx += len;
+        idx += 1;
     }
+    encode_decoded_query_component_into(&raw[run_start..], out);
+}
+
+/// The bytes `build_injected_url` writes for `injected` into a query URL. Every
+/// other byte of that URL is fixed per parameter, so two payloads give the same
+/// query request exactly when this agrees (`param_jobs::dedup_wire_identical`).
+pub(crate) fn query_wire_value(injected: &str) -> String {
+    let mut out = String::with_capacity(injected.len() * 3);
+    encode_query_component_preserving_pct_into(injected, &mut out);
+    out
 }
 
 /// Replace the zero-based `idx`th non-empty path segment without changing any

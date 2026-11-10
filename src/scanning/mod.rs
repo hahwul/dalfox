@@ -112,7 +112,7 @@ use crate::scanning::check_dom_verification::check_dom_verification_with_evidenc
 use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
@@ -495,6 +495,12 @@ struct ParamScanState {
     /// DOM XSS already confirmed for this param locally — skip the
     /// remaining DOM payloads.
     dom_found_locally: bool,
+    /// DOM verdicts the reflection phase already computed for a DOM payload it
+    /// sent byte-for-byte (issue #1661). The DOM phase takes an entry instead of
+    /// re-sending that request; the entry still feeds its early-exit budgets.
+    /// Bounded by the DOM payload set, and a verified entry's body is trimmed
+    /// to the evidence bound.
+    dom_reuse: HashMap<String, crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome>,
 }
 
 /// Grow speculative batches gradually: early catalog hits should not cost a
@@ -609,20 +615,23 @@ impl ScanWorkerCtx {
         param: &Param,
         payload: &str,
         waf_streak: &std::sync::atomic::AtomicU32,
+        want_dom: bool,
     ) -> (
         Option<check_reflection::ReflectionKind>,
         Option<check_reflection::ReflectionBody>,
         u16,
         bool,
+        Option<crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome>,
     ) {
         let _permit = self.req_budget.acquire().await;
-        check_reflection::check_reflection_with_response(
+        check_reflection::check_reflection_with_dom_outcome(
             self.client.as_ref(),
             &self.target,
             param,
             payload,
             &self.args,
             waf_streak,
+            want_dom,
         )
         .await
     }
@@ -822,7 +831,13 @@ impl ScanWorkerCtx {
 
             let payload_phases = async {
                 if let PhaseFlow::Abort = self
-                    .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
+                    .run_reflection_phase(
+                        &param,
+                        reflection_payloads,
+                        &dom_payloads,
+                        &mut state,
+                        &waf_streak,
+                    )
                     .await
                 {
                     self.flush_results(&mut state.local_results).await;
@@ -1026,9 +1041,28 @@ impl ScanWorkerCtx {
         &self,
         param: &Param,
         reflection_payloads: Vec<String>,
+        dom_payloads: &[String],
         state: &mut ParamScanState,
         waf_streak: &std::sync::atomic::AtomicU32,
     ) -> PhaseFlow {
+        // Issue #1661: most DOM payloads are also reflection payloads, and the
+        // two phases send them through the same request builder, so the DOM
+        // phase used to re-send requests this phase had just sent. For those,
+        // compute the DOM verdict from this phase's response and hand it over.
+        // `--sxss` is excluded: its verdict comes from retrieval pages that
+        // change as later payloads are stored. So is a target with a detected
+        // WAF: it may answer a burst with a 200 interstitial, and the DOM
+        // phase's later send of the same request is a second chance past it.
+        let waf_detected = self
+            .target
+            .waf_info
+            .as_ref()
+            .is_some_and(|waf| !waf.is_empty());
+        let dom_wanted: HashSet<&str> = if self.args.sxss || waf_detected {
+            HashSet::new()
+        } else {
+            dom_payloads.iter().map(String::as_str).collect()
+        };
         // Within-parameter concurrency: the reflection set is issued in chunks
         // of up to `request_concurrency()` requests in flight at once (each
         // bounded by the scan-wide `req_budget`), and the responses are
@@ -1067,16 +1101,29 @@ impl ScanWorkerCtx {
             }
             let chunk = payload_chunk_size(i, concurrency);
             let end = (i + chunk).min(total);
-            let fetched = futures::future::join_all(
-                reflection_payloads[i..end]
-                    .iter()
-                    .map(|p| self.fetch_reflection(param, p, waf_streak)),
-            )
+            let dom_found = state.dom_found_locally;
+            let fetched = futures::future::join_all(reflection_payloads[i..end].iter().map(|p| {
+                let want_dom = !dom_found && dom_wanted.contains(p.as_str());
+                self.fetch_reflection(param, p, waf_streak, want_dom)
+            }))
             .await;
-            for (reflection_payload, (reflected_kind, reflection_body, status, xml_content_type)) in
-                reflection_payloads[i..end].iter().zip(fetched)
+            for (
+                reflection_payload,
+                (reflected_kind, reflection_body, status, xml_content_type, dom_outcome),
+            ) in reflection_payloads[i..end].iter().zip(fetched)
             {
                 self.inc_progress(1);
+                // Keep the verdict only for an application answer (2xx/3xx). A
+                // 4xx/5xx may be a WAF or rate-limit hiccup that a later send of
+                // the same request gets past, so the DOM phase re-sends those.
+                if let Some(mut dom) = dom_outcome
+                    && (200..400).contains(&status)
+                {
+                    dom.outcome.response_text = dom.outcome.response_text.take().map(|t| {
+                        crate::scanning::result::bound_evidence_body(t, reflection_payload)
+                    });
+                    state.dom_reuse.insert(reflection_payload.clone(), dom);
+                }
                 // A plain R must not hide a V in responses we already paid for.
                 // Keep checking this chunk until execution is confirmed; the
                 // result processor still deduplicates repeated R findings.
@@ -1191,8 +1238,8 @@ impl ScanWorkerCtx {
         // payload total or ticked on the progress bar — the same treatment the
         // shared CSP/tech payloads get (see `generate_param_jobs`), so the bar
         // still reaches 100% from the planned set and never overshoots.
-        let (_, reflection_body, status, _xml) =
-            self.fetch_reflection(param, probe, waf_streak).await;
+        let (_, reflection_body, status, _xml, _) =
+            self.fetch_reflection(param, probe, waf_streak, false).await;
         // A 4xx/5xx body is a WAF block / error interstitial, not the page the
         // framework compiles — `tech_info` was fingerprinted from the preflight
         // response, not from this one. (3xx is the non-renderable `Location:`
@@ -1601,11 +1648,18 @@ impl ScanWorkerCtx {
             }
             let chunk = payload_chunk_size(i, concurrency);
             let end = (i + chunk).min(total);
-            let fetched = futures::future::join_all(
-                dom_payloads[i..end]
-                    .iter()
-                    .map(|p| self.fetch_dom(param, p)),
-            )
+            let fetched = futures::future::join_all(dom_payloads[i..end].iter().map(|p| {
+                // A verdict the reflection phase already computed for this
+                // exact request (#1661) replaces the fetch; it is folded into
+                // the budgets below exactly like a fresh response.
+                let reused = state.dom_reuse.remove(p);
+                async move {
+                    match reused {
+                        Some(outcome) => outcome,
+                        None => self.fetch_dom(param, p).await,
+                    }
+                }
+            }))
             .await;
             let mut early_exit = None;
             for (dom_payload, outcome) in dom_payloads[i..end].iter().zip(fetched) {

@@ -241,7 +241,7 @@ async fn test_fetch_injection_multipart_injects_absent_param() {
     let streak = std::sync::atomic::AtomicU32::new(0);
     let client = target.build_client_or_default();
 
-    let body = fetch_injection_response(&client, &target, &param, "PAYMARK", &args, &streak)
+    let body = fetch_injection_response(&client, &target, &param, "PAYMARK", &args, &streak, false)
         .await
         .body
         .expect("injection response");
