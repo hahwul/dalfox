@@ -169,7 +169,11 @@ enum StartDecision {
     /// Job was cancelled (or its cancel flag set) before the scan task got
     /// a chance to start. Caller must still fire the webhook so subscribers
     /// see a terminal callback for this scan_id.
-    PreCancelled { callback_url: Option<String> },
+    PreCancelled {
+        callback_url: Option<String>,
+        /// Why, when the canceller said (a server shutdown does).
+        error_message: Option<String>,
+    },
     /// Job was deleted from the map between submission and dispatch.
     Missing,
 }
@@ -180,12 +184,22 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
         let mut jobs = state.jobs.lock().await;
         match jobs.get_mut(&job_id) {
             Some(job) => match job.start() {
-                Some((progress, cancel_flag)) => StartDecision::Run {
-                    progress,
-                    cancel_flag,
-                },
+                Some((progress, cancel_flag)) => {
+                    // What `GET /scan/{id}?partial=1` renders findings with
+                    // while the scan is still running.
+                    job.result_view = crate::job::ResultView {
+                        include_request: opts.include_request.unwrap_or(false),
+                        include_response: opts.include_response.unwrap_or(false),
+                        min_confidence: opts.min_confidence.clone(),
+                    };
+                    StartDecision::Run {
+                        progress,
+                        cancel_flag,
+                    }
+                }
                 None => StartDecision::PreCancelled {
                     callback_url: job.callback_url.clone(),
+                    error_message: job.error_message.clone(),
                 },
             },
             None => StartDecision::Missing,
@@ -197,7 +211,10 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
             progress,
             cancel_flag,
         } => (progress, cancel_flag),
-        StartDecision::PreCancelled { callback_url } => {
+        StartDecision::PreCancelled {
+            callback_url,
+            error_message,
+        } => {
             // Previously this branch returned silently, so any subscriber
             // wired to the webhook never received a terminal callback for
             // scans that were cancelled before the task got a chance to
@@ -229,7 +246,7 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
                 TerminalOutcome {
                     status_label: "cancelled",
                     results: &[],
-                    error_message: None,
+                    error_message: error_message.as_deref(),
                     warnings: &[],
                 },
                 cb_client,
@@ -337,6 +354,8 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
             }
             None => (None, None, None, Vec::new()),
         };
+    // The settled results are stored; drop the raw copy a partial read used.
+    progress.live_results.lock().await.clear();
     // Derive the webhook/log label from the status actually stored, not from the
     // pre-lock `was_cancelled`/`panicked` snapshot: a DELETE cancel landing in
     // the window between those reads and this lock flips the job to `cancelled`,

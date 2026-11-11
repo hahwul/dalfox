@@ -354,6 +354,15 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
             "SERVER",
             "shutdown signal received — draining in-flight requests",
         );
+        // Cancel now, so the scans wind down while the HTTP drain runs.
+        let cancelled = cancel_active_scans(&shutdown_state).await;
+        if cancelled > 0 {
+            log(
+                &shutdown_state,
+                "SERVER",
+                &format!("cancelling {cancelled} active scan(s)"),
+            );
+        }
         let _ = signalled_tx.send(());
     };
     let serve = std::future::IntoFuture::into_future(
@@ -378,7 +387,58 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
             "drain grace elapsed — exiting with requests still in flight",
         ),
     }
+    // A request that was still draining may have queued one more scan.
+    cancel_active_scans(&state).await;
+    // Exiting kills the scan workers where they stand. Give the ones just
+    // cancelled the time to store their partial results and fire their
+    // completion webhooks — a subscriber otherwise waits forever on a scan
+    // that died with the server.
+    if !wait_for_workers(&state, Duration::from_secs(SHUTDOWN_SCAN_GRACE_SECS)).await {
+        log(
+            &state,
+            "SERVER",
+            "scan drain grace elapsed — exiting with scans still winding down",
+        );
+    }
     Ok(())
+}
+
+/// How long shutdown waits for cancelled scans to wind down. A worker stops at
+/// its next cancellation checkpoint, which is bounded by one in-flight request
+/// (`timeout`, default 10s), then delivers its webhook.
+const SHUTDOWN_SCAN_GRACE_SECS: u64 = 15;
+
+/// `error_message` of a scan the server cancelled on its way down, so a poller
+/// or webhook subscriber can tell it from a client's `DELETE`.
+pub(crate) const SHUTDOWN_CANCEL_MESSAGE: &str =
+    "server shutting down: scan cancelled, results are partial";
+
+/// Cancel every scan still queued or running; returns how many there were.
+pub(crate) async fn cancel_active_scans(state: &AppState) -> usize {
+    let mut jobs = state.jobs.lock().await;
+    jobs.values_mut()
+        .filter_map(|job| {
+            job.cancel().then(|| {
+                job.error_message
+                    .get_or_insert_with(|| SHUTDOWN_CANCEL_MESSAGE.to_string());
+            })
+        })
+        .count()
+}
+
+/// Wait until no scan worker is running, or `grace` runs out. `true` when
+/// every worker finished.
+pub(crate) async fn wait_for_workers(state: &AppState, grace: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + grace;
+    loop {
+        if !state.jobs.lock().await.values().any(Job::worker_alive) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 /// How long graceful shutdown waits for in-flight requests after the signal.

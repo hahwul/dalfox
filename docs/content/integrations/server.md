@@ -240,7 +240,13 @@ Response (while running):
 ```
 
 - `results` appears once the scan's worker has finished: the findings of a
-  `done` scan, or the partial findings of an `error` / `cancelled` one. A scan
+  `done` scan, or the partial findings of an `error` / `cancelled` one. To read
+  the findings so far while a scan is still running, add `?partial=1`: the
+  response then carries `results` and `"partial": true` until the worker
+  settles. The list is provisional: when the scan ends it drops an `R` finding
+  that a `V` on the same parameter already proves, so the settled list can be
+  shorter. Each such poll renders the whole list again, so use it when you want
+  the findings, not on every status check. A scan
   that never reached the target, or was cancelled before it started, has no
   `results` at all. A scan cancelled while running reports `cancelled` at once
   but only gains `results` when the worker drains, which can take a few seconds.
@@ -602,9 +608,11 @@ cancelled before it starts. Jobs live in memory only: a finished scan is kept
 for one hour by default (`--retention-secs`), or until `--max-retained-scans`
 evicts it, and nothing survives a
 restart. On `SIGINT`/`SIGTERM` the server stops accepting connections, waits up
-to 10 seconds for HTTP responses already in flight, and exits. Scans still
-running are abandoned rather than waited for, and no completion webhook fires
-for them.
+to 10 seconds for HTTP responses already in flight, and cancels every scan still
+queued or running. It then gives those scans up to 15 seconds to stop, so each
+fires its completion webhook with `status: "cancelled"`, its partial results,
+and an `error_message` beginning `server shutting down`. A scan that has not
+stopped by then dies with the process.
 
 A single scan tests at most 512 parameters. On a target that exposes more, the
 discovered set is truncated and the scan still ends `done`, with a

@@ -1816,6 +1816,7 @@ async fn soft_failures_surface_as_job_warnings() {
         serde_json::to_value(crate::server::types::ResultPayload {
             target: j.target_url.clone(),
             status: j.status.clone(),
+            partial: false,
             results: None,
             error_message: None,
             warnings: &j.warnings,

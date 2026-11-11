@@ -355,6 +355,9 @@ pub(crate) struct ResultPayload<'a> {
     /// finding list just to serialize it once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) results: Option<&'a [SanitizedResult]>,
+    /// `results` is a mid-scan read (`?partial=1`), not the settled list.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) partial: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error_message: Option<String>,
     /// Non-fatal conditions the caller must weigh before calling the scan

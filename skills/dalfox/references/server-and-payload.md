@@ -29,14 +29,14 @@ Runs an async HTTP API (axum) that exposes the same scanning engine.
 
 - `POST /scan` — submit scan. Body is `{"target": "https://…", "options": {…}}`; a flat option dict is an unknown field → `400`
 - `GET /scan` — submit via query params (JSONP friendly)
-- `GET /scan/{id}` — status + results
+- `GET /scan/{id}` — status + results; `?partial=1` adds the findings so far (`"partial": true`) while the scan is still running
 - `DELETE /scan/{id}` — cancel
 - `GET /scans` — list jobs (supports `?status=running`)
 - `GET /result/{id}` — alias of `/scan/{id}`
 - `POST /preflight` — discovery only
 - `GET /health` — liveness; with the API key also `scans: {active, max_concurrent}` (room before a `503`)
 
-Jobs are in-memory only. Same `queued / running / done / error / cancelled` lifecycle as MCP.
+Jobs are in-memory only. On `SIGINT`/`SIGTERM` the server cancels active scans and waits up to 15s for them, so each still fires its webhook (`status: "cancelled"`, partial results, `error_message` starting `server shutting down`). Same `queued / running / done / error / cancelled` lifecycle as MCP.
 
 ### `options` keys (POST body / GET query)
 

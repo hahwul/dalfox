@@ -1591,6 +1591,9 @@ async fn test_run_scan_job_finds_stored_xss_only_in_sxss_mode() {
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job");
         assert_eq!(job.status, JobStatus::Done, "{:?}", job.error_message);
+        // The raw accumulator a partial read uses must not outlive the scan:
+        // it holds full request/response bodies next to the sanitized copy.
+        assert!(job.progress.live_results.lock().await.is_empty());
         job.results.as_ref().map_or(0, |r| r.len())
     };
 
@@ -3594,6 +3597,159 @@ async fn spawn_webhook_capture() -> (String, Arc<Mutex<Option<serde_json::Value>
         let _ = axum::serve(listener, app).await;
     });
     (format!("http://{addr}/hook"), captured)
+}
+
+/// Shutdown used to abandon running scans: no partial results, no webhook, and
+/// a subscriber left waiting on a scan that died with the server. It now
+/// cancels them and waits for the workers to settle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_shutdown_cancels_running_scans_and_fires_their_webhooks() {
+    crate::ensure_crypto_provider();
+    let target = start_slow_reflecting_target_server().await;
+    let (hook, captured) = spawn_webhook_capture().await;
+    let state = make_state(None, None, false, false, "cb");
+
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{target}/?q=1"),
+            options: Some(ScanOptions {
+                callback_url: Some(hook),
+                skip_mining: Some(true),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = response_body_string(resp).await;
+    let id = serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"]["scan_id"]
+        .as_str()
+        .expect("scan id")
+        .to_string();
+
+    // Let the worker get into the scan before the "signal".
+    for _ in 0..200 {
+        if state.jobs.lock().await[&id].status == JobStatus::Running {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(cancel_active_scans(&state).await, 1);
+    assert_eq!(
+        cancel_active_scans(&state).await,
+        0,
+        "nothing left to cancel"
+    );
+    assert!(
+        wait_for_workers(&state, Duration::from_secs(30)).await,
+        "the cancelled worker must wind down"
+    );
+
+    let jobs = state.jobs.lock().await;
+    let job = &jobs[&id];
+    assert_eq!(job.status, JobStatus::Cancelled);
+    assert!(job.results.is_some(), "partial results are stored");
+    assert_eq!(job.error_message.as_deref(), Some(SHUTDOWN_CANCEL_MESSAGE));
+    drop(jobs);
+
+    let payload = captured.lock().await.clone().expect("webhook fired");
+    assert_eq!(payload["status"], "cancelled");
+    assert_eq!(payload["error_message"], SHUTDOWN_CANCEL_MESSAGE);
+}
+
+/// `?partial=1` on a running scan returns the findings so far, rendered with
+/// the request's own `include_*` flags; without the flag `results` stays absent
+/// until the worker settles, as it always has.
+#[tokio::test]
+async fn test_get_result_returns_findings_so_far_only_when_asked() {
+    let state = make_state(None, None, false, false, "cb");
+    let job = test_job(JobStatus::Running, None, "http://t/");
+    let mut finding =
+        crate::scanning::result::Result::builder(crate::scanning::result::FindingType::Reflected)
+            .inject_type("inHTML")
+            .method("GET")
+            .data("http://t/?q=x")
+            .param("q")
+            .payload("x")
+            .evidence("e")
+            .severity("Low")
+            .build();
+    finding.request = Some("GET /?q=x HTTP/1.1".to_string());
+    finding.response = Some("<html>x</html>".to_string());
+    job.progress.live_results.lock().await.push(finding);
+    state.jobs.lock().await.insert("run".to_string(), job);
+
+    let get = |partial: bool| {
+        let state = state.clone();
+        async move {
+            let mut params = Map::new();
+            if partial {
+                params.insert("partial".to_string(), "1".to_string());
+            }
+            let resp = get_result_handler(
+                State(state),
+                HeaderMap::new(),
+                Path("run".to_string()),
+                Query(params),
+            )
+            .await
+            .into_response();
+            let body = response_body_string(resp).await;
+            serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"].clone()
+        }
+    };
+
+    let plain = get(false).await;
+    assert!(plain.get("results").is_none(), "{plain}");
+    assert!(plain.get("partial").is_none(), "{plain}");
+
+    let partial = get(true).await;
+    assert_eq!(partial["status"], "running");
+    assert_eq!(partial["partial"], true);
+    let results = partial["results"].as_array().expect("findings so far");
+    assert_eq!(results.len(), 1);
+    // include_request / include_response were not asked for.
+    assert!(results[0].get("request").is_none(), "{partial}");
+    assert!(results[0].get("response").is_none(), "{partial}");
+
+    // The same job, now asking for the raw request.
+    state
+        .jobs
+        .lock()
+        .await
+        .get_mut("run")
+        .unwrap()
+        .result_view
+        .include_request = true;
+    let with_request = get(true).await;
+    assert_eq!(with_request["results"][0]["request"], "GET /?q=x HTTP/1.1");
+
+    // Once settled, `?partial=1` is just the settled list.
+    {
+        let mut jobs = state.jobs.lock().await;
+        let job = jobs.get_mut("run").unwrap();
+        job.status = JobStatus::Done;
+        job.results = Some(Arc::new(vec![]));
+    }
+    let settled = get(true).await;
+    assert!(settled.get("partial").is_none(), "{settled}");
+    assert_eq!(settled["results"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn test_wait_for_workers_gives_up_after_the_grace() {
+    let state = make_state(None, None, false, false, "cb");
+    let mut job = test_job(JobStatus::Running, None, "");
+    let lease = job.issue_worker_lease();
+    state.jobs.lock().await.insert("stuck".to_string(), job);
+    assert!(!wait_for_workers(&state, Duration::from_millis(150)).await);
+    drop(lease);
+    assert!(wait_for_workers(&state, Duration::from_millis(150)).await);
 }
 
 #[tokio::test]

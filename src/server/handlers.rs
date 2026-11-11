@@ -117,12 +117,26 @@ pub(crate) async fn get_result_handler(
 
     match job {
         Some(j) => {
+            // `?partial=1`: the findings so far, while the worker has not
+            // stored the settled list yet. Opt-in because it renders the whole
+            // list on every poll, and because `results` has always meant "the
+            // worker finished" to a client that does not ask. Provisional: the
+            // scan's end-of-run collapse (an `R` its own `V` proves) has not
+            // run yet, so the settled list can be shorter.
+            let live =
+                if parse_bool_query(&params, "partial") && j.results.is_none() && !j.is_settled() {
+                    let raw = j.progress.live_results.lock().await.clone();
+                    Some(crate::job::runner::sanitize_results(raw, &j.result_view))
+                } else {
+                    None
+                };
             let progress_data = j.progress_payload(0);
             let duration_ms = j.duration_ms();
             let payload = ResultPayload {
                 target: j.target_url.clone(),
                 status: j.status.clone(),
-                results: j.results.as_deref().map(Vec::as_slice),
+                partial: live.is_some(),
+                results: j.results.as_deref().map(Vec::as_slice).or(live.as_deref()),
                 error_message: j.error_message.clone(),
                 warnings: &j.warnings,
                 progress: progress_data,
