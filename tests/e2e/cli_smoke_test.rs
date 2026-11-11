@@ -1111,6 +1111,29 @@ fn test_server_exits_cleanly_on_sigterm() {
         .any(|line| line.contains("listening on"));
     assert!(came_up, "the server never announced its listener");
 
+    // A scan in flight when the signal lands: its target accepts the
+    // connection and never answers, so the job is still active.
+    let stalled = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stalled target");
+    let body = format!(
+        r#"{{"target":"http://{}/?q=1"}}"#,
+        stalled.local_addr().expect("stalled addr")
+    );
+    let mut conn =
+        std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect to the server");
+    write!(
+        conn,
+        "POST /scan HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .expect("send the scan request");
+    let mut reply = String::new();
+    std::io::Read::read_to_string(&mut conn, &mut reply).expect("read the reply");
+    assert!(
+        reply.contains("scan_id"),
+        "the scan must be accepted: {reply}"
+    );
+
     let killed = Command::new("kill")
         .args(["-TERM", &child.id().to_string()])
         .status()
@@ -1123,5 +1146,10 @@ fn test_server_exits_cleanly_on_sigterm() {
     assert!(
         rest.iter().any(|l| l.contains("shutdown signal received")),
         "the shutdown must be logged: {rest:?}"
+    );
+    assert!(
+        rest.iter()
+            .any(|l| l.contains("cancelling 1 active scan(s)")),
+        "the in-flight scan must be cancelled, not abandoned: {rest:?}"
     );
 }
