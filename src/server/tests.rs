@@ -38,6 +38,7 @@ fn make_state(
         max_retained_scans: 0,
         retention_secs: JOB_RETENTION_SECS as u32,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+        shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     }
 }
@@ -1591,6 +1592,9 @@ async fn test_run_scan_job_finds_stored_xss_only_in_sxss_mode() {
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job");
         assert_eq!(job.status, JobStatus::Done, "{:?}", job.error_message);
+        // The raw accumulator a partial read uses must not outlive the scan:
+        // it holds full request/response bodies next to the sanitized copy.
+        assert!(job.progress.live_results.lock().await.is_empty());
         job.results.as_ref().map_or(0, |r| r.len())
     };
 
@@ -3594,6 +3598,305 @@ async fn spawn_webhook_capture() -> (String, Arc<Mutex<Option<serde_json::Value>
         let _ = axum::serve(listener, app).await;
     });
     (format!("http://{addr}/hook"), captured)
+}
+
+/// Shutdown used to abandon running scans: no partial results, no webhook, and
+/// a subscriber left waiting on a scan that died with the server. It now
+/// cancels them and waits for the workers to settle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_shutdown_cancels_running_scans_and_fires_their_webhooks() {
+    crate::ensure_crypto_provider();
+    let target = start_slow_reflecting_target_server().await;
+    let (hook, captured) = spawn_webhook_capture().await;
+    let state = make_state(None, None, false, false, "cb");
+
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{target}/?q=1"),
+            options: Some(ScanOptions {
+                callback_url: Some(hook),
+                skip_mining: Some(true),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = response_body_string(resp).await;
+    let id = serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"]["scan_id"]
+        .as_str()
+        .expect("scan id")
+        .to_string();
+
+    // Let the worker get into the scan before the "signal".
+    for _ in 0..200 {
+        if state.jobs.lock().await[&id].status == JobStatus::Running {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(begin_shutdown(&state).await, 1);
+    assert_eq!(begin_shutdown(&state).await, 0, "nothing left to cancel");
+    assert!(
+        wait_for_workers(&state, Duration::from_secs(30)).await,
+        "the cancelled worker must wind down"
+    );
+
+    let jobs = state.jobs.lock().await;
+    let job = &jobs[&id];
+    assert_eq!(job.status, JobStatus::Cancelled);
+    assert!(job.results.is_some(), "partial results are stored");
+    let reason = shutdown_cancel_message();
+    assert!(reason.starts_with(crate::cmd::error_codes::SERVER_SHUTDOWN));
+    assert_eq!(job.error_message.as_deref(), Some(reason.as_str()));
+    drop(jobs);
+
+    let payload = captured.lock().await.clone().expect("webhook fired");
+    assert_eq!(payload["status"], "cancelled");
+    assert_eq!(payload["error_message"], reason);
+
+    // Nothing is admitted once shutdown has begun: it would run with no one
+    // left to cancel it or wait for it.
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://127.0.0.1:1/".to_string(),
+            options: None,
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = response_body_string(resp).await;
+    assert!(body.contains("shutting down"), "{body}");
+    assert_eq!(state.jobs.lock().await.len(), 1);
+}
+
+/// `?partial=1` on a running scan returns the findings so far, rendered with
+/// the request's own `include_*` flags; without the flag `results` stays absent
+/// until the worker settles, as it always has.
+#[tokio::test]
+async fn test_get_result_returns_findings_so_far_only_when_asked() {
+    let state = make_state(None, None, false, false, "cb");
+    let mut job = test_job(JobStatus::Running, None, "http://t/");
+    job.started_at_ms = Some(crate::job::now_ms());
+    let mut finding =
+        crate::scanning::result::Result::builder(crate::scanning::result::FindingType::Reflected)
+            .inject_type("inHTML")
+            .method("GET")
+            .data("http://t/?q=x")
+            .param("q")
+            .payload("x")
+            .evidence("e")
+            .severity("Low")
+            .build();
+    finding.request = Some("GET /?q=x HTTP/1.1".to_string());
+    finding.response = Some("<html>x</html>".to_string());
+    job.progress.live_results.lock().await.push(finding);
+    state.jobs.lock().await.insert("run".to_string(), job);
+
+    let get = |partial: bool| {
+        let state = state.clone();
+        async move {
+            let mut params = Map::new();
+            if partial {
+                params.insert("partial".to_string(), "1".to_string());
+            }
+            let resp = get_result_handler(
+                State(state),
+                HeaderMap::new(),
+                Path("run".to_string()),
+                Query(params),
+            )
+            .await
+            .into_response();
+            let body = response_body_string(resp).await;
+            serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"].clone()
+        }
+    };
+
+    let plain = get(false).await;
+    assert!(plain.get("results").is_none(), "{plain}");
+    assert!(plain.get("partial").is_none(), "{plain}");
+
+    let partial = get(true).await;
+    assert_eq!(partial["status"], "running");
+    assert_eq!(partial["partial"], true);
+    let results = partial["results"].as_array().expect("findings so far");
+    assert_eq!(results.len(), 1);
+    // include_request / include_response were not asked for.
+    assert!(results[0].get("request").is_none(), "{partial}");
+    assert!(results[0].get("response").is_none(), "{partial}");
+
+    // The same job, now asking for the raw request.
+    state
+        .jobs
+        .lock()
+        .await
+        .get_mut("run")
+        .unwrap()
+        .result_view
+        .include_request = true;
+    let with_request = get(true).await;
+    assert_eq!(with_request["results"][0]["request"], "GET /?q=x HTTP/1.1");
+
+    // A scan that failed before scanning never had findings: `?partial=1`
+    // must not dress its absent results up as an empty provisional list, even
+    // while its worker is still busy delivering the webhook.
+    let lease = {
+        let mut jobs = state.jobs.lock().await;
+        let job = jobs.get_mut("run").unwrap();
+        job.status = JobStatus::Error;
+        job.issue_worker_lease()
+    };
+    let failed = get(true).await;
+    assert!(failed.get("partial").is_none(), "{failed}");
+    assert!(failed.get("results").is_none(), "{failed}");
+    drop(lease);
+
+    // Nor has a queued one started.
+    {
+        let mut jobs = state.jobs.lock().await;
+        let job = jobs.get_mut("run").unwrap();
+        job.status = JobStatus::Queued;
+        job.started_at_ms = None;
+    }
+    let queued = get(true).await;
+    assert!(queued.get("partial").is_none(), "{queued}");
+
+    // Once settled, `?partial=1` is just the settled list.
+    {
+        let mut jobs = state.jobs.lock().await;
+        let job = jobs.get_mut("run").unwrap();
+        job.status = JobStatus::Done;
+        job.results = Some(Arc::new(vec![]));
+    }
+    let settled = get(true).await;
+    assert!(settled.get("partial").is_none(), "{settled}");
+    assert_eq!(settled["results"], serde_json::json!([]));
+}
+
+/// No error exit stores results, so the raw findings a partial read used must
+/// go with it — they carry request and response bodies, and would otherwise
+/// sit on the job record until retention drops it.
+#[tokio::test]
+async fn test_mark_job_error_drops_the_raw_findings() {
+    let state = make_state(None, None, false, false, "cb");
+    let job = test_job(JobStatus::Running, None, "http://t/");
+    let live = job.progress.live_results.clone();
+    live.lock().await.push(
+        crate::scanning::result::Result::builder(crate::scanning::result::FindingType::Reflected)
+            .build(),
+    );
+    state.jobs.lock().await.insert("boom".to_string(), job);
+    mark_job_error(
+        &state,
+        "boom",
+        "http://t/",
+        "worker panicked".to_string(),
+        None,
+    )
+    .await;
+    assert!(live.lock().await.is_empty());
+
+    // A job purged in the meantime is simply not there to mark.
+    mark_job_error(&state, "gone", "http://t/", "late".to_string(), None).await;
+    assert!(!state.jobs.lock().await.contains_key("gone"));
+}
+
+/// A scan still queued when the server stops never runs, but its subscriber
+/// must still hear why: the pre-start webhook carries the shutdown reason, not
+/// a bare `cancelled` that reads like a client's `DELETE`.
+#[tokio::test]
+async fn test_shutdown_tells_a_queued_scans_webhook_why() {
+    crate::ensure_crypto_provider();
+    let (hook, captured) = spawn_webhook_capture().await;
+    let state = make_state(None, None, false, false, "cb");
+    let mut job = test_job(JobStatus::Queued, None, "http://127.0.0.1:1/");
+    job.callback_url = Some(hook.clone());
+    state.jobs.lock().await.insert("queued".to_string(), job);
+
+    assert_eq!(begin_shutdown(&state).await, 1);
+    run_scan_job(
+        state.clone(),
+        "queued".to_string(),
+        "http://127.0.0.1:1/".to_string(),
+        ScanOptions {
+            callback_url: Some(hook),
+            // The job's `ScanArgs` are built before the worker claims the job,
+            // so every option is resolved on this path too.
+            force_waf: Some("cloudflare".to_string()),
+            ..ScanOptions::default()
+        },
+    )
+    .await;
+
+    let payload = captured.lock().await.clone().expect("webhook fired");
+    assert_eq!(payload["status"], "cancelled");
+    assert_eq!(payload["error_message"], shutdown_cancel_message());
+}
+
+/// The three ways the shutdown wait ends. `Interrupted` is the second Ctrl-C:
+/// the first signal consumed its handler, so without this branch an operator
+/// could not get out of the grace.
+#[tokio::test]
+async fn test_drain_scans_ends_on_drain_grace_or_second_signal() {
+    let state = make_state(None, None, false, false, "cb");
+    let never = std::future::pending::<()>;
+    assert_eq!(
+        drain_scans(&state, Duration::from_secs(5), never()).await,
+        ScanDrain::Drained,
+        "no worker, nothing to wait for"
+    );
+
+    let mut job = test_job(JobStatus::Cancelled, None, "");
+    let _lease = job.issue_worker_lease();
+    state.jobs.lock().await.insert("stuck".to_string(), job);
+    assert_eq!(
+        drain_scans(&state, Duration::from_millis(150), never()).await,
+        ScanDrain::GraceElapsed
+    );
+
+    let started = std::time::Instant::now();
+    assert_eq!(
+        drain_scans(&state, Duration::from_secs(30), async {}).await,
+        ScanDrain::Interrupted
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "a second signal must not wait out the grace"
+    );
+
+    // Only the two endings that leave scans running are worth a log line.
+    assert_eq!(ScanDrain::Drained.log_line(), None);
+    assert!(
+        ScanDrain::GraceElapsed
+            .log_line()
+            .is_some_and(|l| l.contains("grace elapsed"))
+    );
+    assert!(
+        ScanDrain::Interrupted
+            .log_line()
+            .is_some_and(|l| l.contains("second signal"))
+    );
+}
+
+#[tokio::test]
+async fn test_wait_for_workers_gives_up_after_the_grace() {
+    let state = make_state(None, None, false, false, "cb");
+    let mut job = test_job(JobStatus::Running, None, "");
+    let lease = job.issue_worker_lease();
+    state.jobs.lock().await.insert("stuck".to_string(), job);
+    assert!(!wait_for_workers(&state, Duration::from_millis(150)).await);
+    drop(lease);
+    assert!(wait_for_workers(&state, Duration::from_millis(150)).await);
 }
 
 #[tokio::test]

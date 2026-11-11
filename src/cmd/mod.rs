@@ -52,6 +52,9 @@ pub mod error_codes {
     /// or `"findings"` when something was found before the cap fired) and
     /// in a REST / MCP job's `error_message` (`SCAN_TIMEOUT: …`).
     pub(crate) const SCAN_TIMEOUT: &str = "SCAN_TIMEOUT";
+    /// `dalfox server` cancelled the scan because the server was stopping.
+    /// Prefixes the job's `error_message` (`SERVER_SHUTDOWN: …`).
+    pub(crate) const SERVER_SHUTDOWN: &str = "SERVER_SHUTDOWN";
 }
 
 #[cfg(test)]
@@ -84,5 +87,6 @@ mod tests {
         assert_eq!(error_codes::SESSION_LOST, "SESSION_LOST");
         assert_eq!(error_codes::INTERNAL_ERROR, "INTERNAL_ERROR");
         assert_eq!(error_codes::SCAN_TIMEOUT, "SCAN_TIMEOUT");
+        assert_eq!(error_codes::SERVER_SHUTDOWN, "SERVER_SHUTDOWN");
     }
 }

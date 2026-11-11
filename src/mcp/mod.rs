@@ -208,6 +208,9 @@ impl DalfoxMcp {
             .lock_jobs()
             .get_mut(&scan_id)
             .map(|j| run.settle(j, sanitized, scan_args.scan_timeout, true));
+        // The settled results are stored; the raw accumulator shares the job's
+        // `progress` and would otherwise live as long as the job record.
+        progress.live_results.lock().await.clear();
 
         // Derive the log label from the status actually stored, not the pre-lock
         // was_cancelled/panicked snapshot — a cancel_scan_dalfox landing between

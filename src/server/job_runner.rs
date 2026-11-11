@@ -137,8 +137,19 @@ pub(crate) async fn mark_job_error(
     client: Option<reqwest::Client>,
 ) {
     let reason = msg.clone();
-    let transitioned = (state.jobs.lock().await.get_mut(job_id))
-        .and_then(|job| job.fail(msg).then(|| job.callback_url.clone()));
+    let (transitioned, live) = match state.jobs.lock().await.get_mut(job_id) {
+        Some(job) => (
+            job.fail(msg).then(|| job.callback_url.clone()),
+            Some(job.progress.live_results.clone()),
+        ),
+        None => (None, None),
+    };
+    // Every error exit comes through here, a worker panic included, and none
+    // of them stores results: without this the raw findings (request and
+    // response bodies) stay on the job record until retention drops it.
+    if let Some(live) = live {
+        live.lock().await.clear();
+    }
     if let Some(callback_url) = transitioned {
         send_terminal_webhook(
             state,
@@ -169,23 +180,59 @@ enum StartDecision {
     /// Job was cancelled (or its cancel flag set) before the scan task got
     /// a chance to start. Caller must still fire the webhook so subscribers
     /// see a terminal callback for this scan_id.
-    PreCancelled { callback_url: Option<String> },
+    PreCancelled {
+        callback_url: Option<String>,
+        /// Why, when the canceller said (a server shutdown does).
+        error_message: Option<String>,
+    },
     /// Job was deleted from the map between submission and dispatch.
     Missing,
 }
 
 pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, opts: ScanOptions) {
+    // Built once behind an `Arc` so the scan future and `run_scanning` share it
+    // by refcount bump instead of deep-cloning this ~70-field struct (mirrors
+    // the MCP path, which already uses `Arc<ScanArgs>`).
+    //
+    // The mapping from request to `ScanArgs` lives in `job::spec` so this path
+    // and MCP's cannot drift; only the two server-wide ceilings and the WAF
+    // name normalization are applied here, because they need `state`.
+    let args = Arc::new(
+        ScanRequestSpec::from_rest_options(
+            url.clone(),
+            &opts,
+            // Capped by the server-wide `--scan-timeout` when set. Enforced
+            // below by wrapping the scan future.
+            effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
+            // Capped by the server-wide `--rate-limit` when set.
+            effective_rate_limit(opts.rate_limit, state.rate_limit),
+            // Normalize to the canonical (lowercased) WAF name like the CLI/MCP
+            // do; `validate_scan_options` already rejected unknown names before
+            // queuing, so the fallback is defensive only.
+            opts.force_waf.as_deref().map(|s| {
+                crate::cmd::scan::parse_force_waf_arg(s).unwrap_or_else(|_| s.to_string())
+            }),
+        )
+        .into_scan_args(),
+    );
+
     // Grab progress counters and cancellation flag
     let decision = {
         let mut jobs = state.jobs.lock().await;
         match jobs.get_mut(&job_id) {
             Some(job) => match job.start() {
-                Some((progress, cancel_flag)) => StartDecision::Run {
-                    progress,
-                    cancel_flag,
-                },
+                Some((progress, cancel_flag)) => {
+                    // What `GET /scan/{id}?partial=1` renders findings with
+                    // while the scan is still running.
+                    job.result_view = crate::job::ResultView::of(&args);
+                    StartDecision::Run {
+                        progress,
+                        cancel_flag,
+                    }
+                }
                 None => StartDecision::PreCancelled {
                     callback_url: job.callback_url.clone(),
+                    error_message: job.error_message.clone(),
                 },
             },
             None => StartDecision::Missing,
@@ -197,7 +244,10 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
             progress,
             cancel_flag,
         } => (progress, cancel_flag),
-        StartDecision::PreCancelled { callback_url } => {
+        StartDecision::PreCancelled {
+            callback_url,
+            error_message,
+        } => {
             // Previously this branch returned silently, so any subscriber
             // wired to the webhook never received a terminal callback for
             // scans that were cancelled before the task got a chance to
@@ -229,7 +279,7 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
                 TerminalOutcome {
                     status_label: "cancelled",
                     results: &[],
-                    error_message: None,
+                    error_message: error_message.as_deref(),
                     warnings: &[],
                 },
                 cb_client,
@@ -239,32 +289,6 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
         }
         StartDecision::Missing => return,
     };
-
-    // Built once behind an `Arc` so the scan future and `run_scanning` share it
-    // by refcount bump instead of deep-cloning this ~70-field struct (mirrors
-    // the MCP path, which already uses `Arc<ScanArgs>`).
-    //
-    // The mapping from request to `ScanArgs` lives in `job::spec` so this path
-    // and MCP's cannot drift; only the two server-wide ceilings and the WAF
-    // name normalization are applied here, because they need `state`.
-    let args = Arc::new(
-        ScanRequestSpec::from_rest_options(
-            url.clone(),
-            &opts,
-            // Capped by the server-wide `--scan-timeout` when set. Enforced
-            // below by wrapping the scan future.
-            effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
-            // Capped by the server-wide `--rate-limit` when set.
-            effective_rate_limit(opts.rate_limit, state.rate_limit),
-            // Normalize to the canonical (lowercased) WAF name like the CLI/MCP
-            // do; `validate_scan_options` already rejected unknown names before
-            // queuing, so the fallback is defensive only.
-            opts.force_waf.as_deref().map(|s| {
-                crate::cmd::scan::parse_force_waf_arg(s).unwrap_or_else(|_| s.to_string())
-            }),
-        )
-        .into_scan_args(),
-    );
 
     let mut target = match crate::job::runner::hydrate_target(&url, &args) {
         Ok(t) => t,
@@ -337,6 +361,8 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
             }
             None => (None, None, None, Vec::new()),
         };
+    // The settled results are stored; drop the raw copy a partial read used.
+    progress.live_results.lock().await.clear();
     // Derive the webhook/log label from the status actually stored, not from the
     // pre-lock `was_cancelled`/`panicked` snapshot: a DELETE cancel landing in
     // the window between those reads and this lock flips the job to `cancelled`,

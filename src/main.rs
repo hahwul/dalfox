@@ -188,7 +188,8 @@ fn explicit_args_for(matches: &clap::ArgMatches, name: &str) -> cmd::scan::Expli
 /// (or MCP stdin EOF) the process lingered until each in-flight scan ended —
 /// forever under the default `scan_timeout` of 0 — still firing payloads at
 /// targets with no client attached, and a second Ctrl-C could not stop it.
-/// Jobs live only in memory, so nothing is lost by not waiting for them.
+/// `dalfox server` cancels its scans and gives them a bounded grace before it
+/// gets here (`server::run_server`); whatever is still running then is cut off.
 fn exit_daemon(outcome: ScanOutcome) -> ! {
     std::process::exit(outcome.exit_code())
 }

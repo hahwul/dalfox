@@ -157,6 +157,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         max_retained_scans: args.max_retained_scans,
         retention_secs: args.retention_secs,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+        shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     };
 
@@ -335,25 +336,21 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
     let shutdown_state = state.clone();
     let (signalled_tx, signalled_rx) = tokio::sync::oneshot::channel::<()>();
     let shutdown_signal = async move {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{SignalKind, signal};
-            let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
-            let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
-            tokio::select! {
-                _ = sigint.recv() => {}
-                _ = sigterm.recv() => {}
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-        }
+        wait_for_signal().await;
         log(
             &shutdown_state,
             "SERVER",
             "shutdown signal received — draining in-flight requests",
         );
+        // Cancel now, so the scans wind down while the HTTP drain runs.
+        let cancelled = begin_shutdown(&shutdown_state).await;
+        if cancelled > 0 {
+            log(
+                &shutdown_state,
+                "SERVER",
+                &format!("cancelling {cancelled} active scan(s)"),
+            );
+        }
         let _ = signalled_tx.send(());
     };
     let serve = std::future::IntoFuture::into_future(
@@ -378,7 +375,127 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
             "drain grace elapsed — exiting with requests still in flight",
         ),
     }
+    // Exiting kills the scan workers where they stand. Give the ones just
+    // cancelled the time to store their partial results and fire their
+    // completion webhooks — a subscriber otherwise waits forever on a scan
+    // that died with the server. A second signal skips the wait: the first
+    // one consumed its handler, so without this the operator's second Ctrl-C
+    // would be swallowed for the whole grace.
+    let drain = drain_scans(
+        &state,
+        Duration::from_secs(SHUTDOWN_SCAN_GRACE_SECS),
+        wait_for_signal(),
+    )
+    .await;
+    if let Some(line) = drain.log_line() {
+        log(&state, "SERVER", line);
+    }
     Ok(())
+}
+
+/// How the wait for cancelled scans ended.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ScanDrain {
+    /// Every worker finished.
+    Drained,
+    /// `grace` ran out with a worker still running.
+    GraceElapsed,
+    /// `interrupt` resolved first (a second signal).
+    Interrupted,
+}
+
+impl ScanDrain {
+    /// What the operator is told when scans were left running.
+    pub(crate) fn log_line(&self) -> Option<&'static str> {
+        match self {
+            ScanDrain::Drained => None,
+            ScanDrain::GraceElapsed => {
+                Some("scan drain grace elapsed — exiting with scans still winding down")
+            }
+            ScanDrain::Interrupted => Some("second signal — exiting without waiting for scans"),
+        }
+    }
+}
+
+/// Wait for the scan workers, for at most `grace`, unless `interrupt` resolves.
+pub(crate) async fn drain_scans(
+    state: &AppState,
+    grace: Duration,
+    interrupt: impl std::future::Future<Output = ()>,
+) -> ScanDrain {
+    tokio::select! {
+        drained = wait_for_workers(state, grace) => {
+            if drained { ScanDrain::Drained } else { ScanDrain::GraceElapsed }
+        }
+        _ = interrupt => ScanDrain::Interrupted,
+    }
+}
+
+/// Resolve on SIGINT or SIGTERM (Ctrl-C elsewhere).
+async fn wait_for_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        tokio::select! {
+            _ = sigint.recv() => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+/// How long shutdown waits for cancelled scans to wind down: one in-flight
+/// request at the default `timeout` (10s), the completion webhook's own 10s
+/// timeout, and slack. A scan with a longer `timeout`, stuck on a stalled
+/// request, can still miss it — as can any scan under a supervisor that kills
+/// sooner (`docker stop` waits 10s by default).
+const SHUTDOWN_SCAN_GRACE_SECS: u64 = 30;
+
+/// `error_message` of a scan the server cancelled on its way down, so a poller
+/// or webhook subscriber can tell it from a client's `DELETE`.
+pub(crate) fn shutdown_cancel_message() -> String {
+    format!(
+        "{}: server shutting down; scan cancelled, results are partial",
+        crate::cmd::error_codes::SERVER_SHUTDOWN
+    )
+}
+
+/// Stop admitting scans and cancel every one still queued or running; returns
+/// how many there were.
+pub(crate) async fn begin_shutdown(state: &AppState) -> usize {
+    // Before the lock — see `try_admit_and_queue` for why the order matters.
+    state
+        .shutting_down
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut jobs = state.jobs.lock().await;
+    jobs.values_mut()
+        .filter_map(|job| {
+            job.cancel().then(|| {
+                job.error_message
+                    .get_or_insert_with(shutdown_cancel_message);
+            })
+        })
+        .count()
+}
+
+/// Wait until no scan worker is running, or `grace` runs out. `true` when
+/// every worker finished.
+pub(crate) async fn wait_for_workers(state: &AppState, grace: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + grace;
+    loop {
+        if !state.jobs.lock().await.values().any(Job::worker_alive) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 /// How long graceful shutdown waits for in-flight requests after the signal.

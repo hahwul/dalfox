@@ -875,6 +875,33 @@ pub(crate) struct JobProgress {
     pub findings_so_far: Arc<AtomicU64>,
     pub params_total: Arc<AtomicU32>,
     pub params_tested: Arc<AtomicU32>,
+    /// The accumulator the running scan pushes raw findings into, shared so a
+    /// poll can read what has been found so far. The front end empties it once
+    /// the job's settled `results` are stored — the raw findings carry full
+    /// request/response bodies and would otherwise sit beside the sanitized
+    /// copy for the whole retention window.
+    pub live_results: Arc<tokio::sync::Mutex<Vec<crate::scanning::result::Result>>>,
+}
+
+/// How a job's raw findings become the results a caller sees: the request's
+/// opt-in raw-traffic flags and its confidence floor.
+#[derive(Clone, Default)]
+pub(crate) struct ResultView {
+    pub include_request: bool,
+    pub include_response: bool,
+    pub min_confidence: Option<String>,
+}
+
+impl ResultView {
+    /// The view a job's own `ScanArgs` asks for — the one source both the
+    /// mid-scan read and the settled results render from.
+    pub(crate) fn of(args: &crate::cmd::scan::ScanArgs) -> Self {
+        Self {
+            include_request: args.include_request,
+            include_response: args.include_response,
+            min_confidence: args.min_confidence.clone(),
+        }
+    }
 }
 
 /// The `progress` object of a scan status response (REST `/scan/{id}`, MCP
@@ -915,6 +942,8 @@ pub(crate) struct Job {
     pub target_url: String,
     /// Optional webhook URL to POST results to. REST-server only.
     pub callback_url: Option<String>,
+    /// How to render findings read before the scan settles. REST-server only.
+    pub result_view: ResultView,
     /// Unix ms when the scan was enqueued.
     pub queued_at_ms: i64,
     /// Unix ms when the scan transitioned to Running.
@@ -967,6 +996,7 @@ impl Job {
             warnings: Vec::new(),
             target_url,
             callback_url: None,
+            result_view: ResultView::default(),
             queued_at_ms: now_ms(),
             started_at_ms: None,
             finished_at_ms: None,

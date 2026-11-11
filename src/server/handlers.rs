@@ -77,6 +77,12 @@ async fn queue_scan(r: &Reply<'_>, url: String, mut opts: ScanOptions) -> ApiRep
     // checked race-free against the live job count. 503 when at capacity.
     let callback_url = opts.callback_url.clone();
     let Some((id, lease)) = try_admit_and_queue(r.state, &url, callback_url).await else {
+        if r.state
+            .shutting_down
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return r.err(StatusCode::SERVICE_UNAVAILABLE, "server is shutting down");
+        }
         return r.busy(at_capacity_message(r.state));
     };
     log(r.state, "JOB", &format!("queued id={} url={}", id, url));
@@ -110,10 +116,30 @@ pub(crate) async fn get_result_handler(
         return refused;
     }
 
-    let job = {
-        let jobs = state.jobs.lock().await;
-        jobs.get(&id).cloned()
-    };
+    let snapshot = || async { state.jobs.lock().await.get(&id).cloned() };
+    let mut job = snapshot().await;
+
+    // `?partial=1`: the findings so far, while the worker has not stored the
+    // settled list yet. Opt-in because it renders the whole list on every
+    // poll, and because `results` has always meant "the worker finished" to a
+    // client that does not ask. Provisional: the scan's end-of-run collapse
+    // (an `R` its own `V` proves) has not run yet, so the settled list can be
+    // shorter.
+    let mut live = None;
+    if parse_bool_query(&params, "partial")
+        && let Some(j) = job.as_ref().filter(|j| reads_partial(j))
+    {
+        let rendered = crate::job::runner::sanitize_results(
+            &j.progress.live_results.lock().await,
+            &j.result_view,
+        );
+        // Report it with a snapshot taken *after* the read. The worker empties
+        // the live list only once the settled results are stored, so a job
+        // that still has none here was read before that — never the emptied
+        // list presented as "nothing found so far".
+        job = snapshot().await;
+        live = job.as_ref().is_some_and(reads_partial).then_some(rendered);
+    }
 
     match job {
         Some(j) => {
@@ -122,7 +148,8 @@ pub(crate) async fn get_result_handler(
             let payload = ResultPayload {
                 target: j.target_url.clone(),
                 status: j.status.clone(),
-                results: j.results.as_deref().map(Vec::as_slice),
+                partial: live.is_some(),
+                results: live.as_deref().or(j.results.as_deref().map(Vec::as_slice)),
                 error_message: j.error_message.clone(),
                 warnings: &j.warnings,
                 progress: progress_data,
@@ -142,6 +169,16 @@ pub(crate) async fn get_result_handler(
         }
         None => r.err(StatusCode::NOT_FOUND, "not found"),
     }
+}
+
+/// Whether `?partial=1` has anything to add: a scan that started, whose worker
+/// is still running, and whose settled results are not stored yet. A queued
+/// job, and one that failed before scanning, never had findings to show.
+fn reads_partial(job: &Job) -> bool {
+    matches!(job.status, JobStatus::Running | JobStatus::Cancelled)
+        && job.started_at_ms.is_some()
+        && job.results.is_none()
+        && !job.is_settled()
 }
 
 /// CORS preflight. No API key is checked — a browser never attaches one to a

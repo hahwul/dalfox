@@ -1082,3 +1082,74 @@ fn test_mcp_startup_failure_exits_nonzero() {
         "a failed MCP start must not exit 0; stderr:\n{stderr}"
     );
 }
+
+/// `dalfox server` must exit 0 on SIGTERM. The signal path — handler install,
+/// the cancel sweep, the bounded scan drain — only runs in a real process.
+#[cfg(unix)]
+#[test]
+fn test_server_exits_cleanly_on_sigterm() {
+    use std::io::{BufRead, BufReader};
+
+    // A free port: bind to 0, read it back, release it.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind probe listener")
+        .local_addr()
+        .expect("probe addr")
+        .port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["server", "--port", &port.to_string()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn dalfox server");
+
+    // "listening on" is the server's own "it came up" line.
+    let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
+    let came_up = lines
+        .by_ref()
+        .map_while(Result::ok)
+        .any(|line| line.contains("listening on"));
+    assert!(came_up, "the server never announced its listener");
+
+    // A scan in flight when the signal lands: its target accepts the
+    // connection and never answers, so the job is still active.
+    let stalled = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stalled target");
+    let body = format!(
+        r#"{{"target":"http://{}/?q=1"}}"#,
+        stalled.local_addr().expect("stalled addr")
+    );
+    let mut conn =
+        std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect to the server");
+    write!(
+        conn,
+        "POST /scan HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .expect("send the scan request");
+    let mut reply = String::new();
+    std::io::Read::read_to_string(&mut conn, &mut reply).expect("read the reply");
+    assert!(
+        reply.contains("scan_id"),
+        "the scan must be accepted: {reply}"
+    );
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .expect("run kill");
+    assert!(killed.success());
+
+    let rest: Vec<String> = lines.map_while(Result::ok).collect();
+    let status = child.wait().expect("wait for the server");
+    assert_eq!(status.code(), Some(0), "a clean shutdown exits 0: {rest:?}");
+    assert!(
+        rest.iter().any(|l| l.contains("shutdown signal received")),
+        "the shutdown must be logged: {rest:?}"
+    );
+    assert!(
+        rest.iter()
+            .any(|l| l.contains("cancelling 1 active scan(s)")),
+        "the in-flight scan must be cancelled, not abandoned: {rest:?}"
+    );
+}
