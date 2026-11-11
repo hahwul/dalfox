@@ -337,23 +337,19 @@ pub(crate) fn parse_http_method_arg(s: &str) -> std::result::Result<String, Stri
 #[derive(Clone, Debug, PartialEq, Args)]
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
-    /// Input type: auto, url, file, pipe, raw-http, har, openapi, postman
+    /// Input type (auto detects a URL, a file of targets, or piped stdin)
     #[arg(short = 'i', long, default_value = "auto", value_parser = clap::builder::PossibleValuesParser::new(INPUT_TYPE_VALUES.iter().copied()))]
     pub input_type: String,
 
     #[clap(help_heading = "INPUT")]
-    /// Where the API of an `-i openapi` / `-i postman` input lives. Supplies
-    /// scheme, host and port for every request and is a path prefix; the
-    /// spec server's path (or each Postman request's path) is appended.
-    /// Example: --base-url https://staging.example.com
+    /// Base URL (scheme, host, port, path prefix) for `-i openapi` / `-i postman`
+    /// requests
     #[arg(long, value_name = "URL", value_parser = parse_base_url_arg)]
     pub base_url: Option<String>,
 
     #[clap(help_heading = "INPUT")]
-    /// Target deduplication [default: exact]: exact (drop byte-identical
-    /// URL+method+request content), signature (also collapse URLs that differ only in
-    /// parameter values — keys on method+host+path+parameter names), off (scan
-    /// every input line).
+    /// Deduplicate targets: exact (same URL+method+body), signature (same
+    /// method+host+path+parameter names), or off (default: exact)
     //
     // Non-doc on purpose: clap renders `///` into `--help`, and the rest of
     // this is implementation rationale, not operator guidance.
@@ -368,27 +364,27 @@ pub struct ScanArgs {
     pub dedup_urls: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Output format: json, jsonl, plain, markdown, sarif, toml
+    /// Output format
     #[arg(short, long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(FORMAT_VALUES.iter().copied()))]
     pub format: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Write output to a file. Example: -o 'output.txt'
+    /// Write output to a file
     #[arg(short = 'o', long)]
     pub output: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Include HTTP request information in output
+    /// Include the HTTP request in output
     #[arg(long)]
     pub include_request: bool,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Include HTTP response information in output
+    /// Include the HTTP response in output
     #[arg(long)]
     pub include_response: bool,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Include both HTTP request and response information in output (equivalent to --include-request --include-response)
+    /// Include both the HTTP request and response in output
     #[arg(long)]
     pub include_all: bool,
 
@@ -399,62 +395,63 @@ pub struct ScanArgs {
     // flag on receives it, and `main.rs` OR-merges `cli.{no_color,
     // silence}` into these fields before invoking `run_scan`.
     #[clap(help_heading = "OUTPUT")]
-    /// Disable colored output (also respects NO_COLOR env var)
+    /// Disable colored output (also set by NO_COLOR)
     #[arg(long)]
     pub no_color: bool,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Silence all logs except POC output to STDOUT
+    /// Suppress logs; print only PoC lines to stdout
     #[arg(short = 'S', long)]
     pub silence: bool,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Dry-run mode: parse targets, run parameter discovery, and report what would be scanned without sending attack payloads. Outputs target count, discovered parameters, and estimated request count.
+    /// Discover parameters and estimate the request count without sending payloads
     #[arg(long)]
     pub dry_run: bool,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Emit each finding (POC + Issue / Payload / Line) the moment it is verified, instead of waiting for end-of-scan. Useful for long scans where you want immediate feedback; off by default so the default flow shows findings after `WRN XSS found N XSS`.
+    /// Print each finding as soon as it is verified instead of at the end
     #[arg(long = "stream-findings")]
     pub stream_findings: bool,
 
     #[clap(help_heading = "OUTPUT")]
-    /// POC output type: plain, curl, httpie, http-request
+    /// PoC output type
     #[arg(long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(POC_TYPE_VALUES.iter().copied()))]
     pub poc_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Limit the number of results to display (must be >=1). Example: --limit 10
+    /// Limit the number of findings reported (>= 1)
     #[arg(long, value_parser = parse_limit_arg)]
     pub limit: Option<usize>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Filter which finding types count toward --limit: all, v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --limit-result-type v
+    /// Finding types that count toward --limit: all, v (vulnerable), r (reflected),
+    /// a (AST DOM XSS), i (informational)
     #[arg(long, default_value = "all", value_parser = clap::builder::PossibleValuesParser::new(LIMIT_RESULT_TYPE_VALUES.iter().copied()))]
     pub limit_result_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Filter output to show only specific finding types (comma-separated). Options: v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --only-poc "v,r"
+    /// Show only these finding types (comma-separated): v, r, a, i
     #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(ONLY_POC_VALUES.iter().copied()))]
     pub only_poc: Vec<String>,
 
     #[clap(help_heading = "INPUT")]
-    /// Record which targets finished to PATH and skip them when the same scan
-    /// is re-run, so an interrupted mass scan resumes instead of restarting.
+    /// Record finished targets in PATH and skip them on re-run, to resume an
+    /// interrupted scan
+    ///
     /// Only fully completed targets are skipped; ones cut short by Ctrl-C or
-    /// --scan-timeout are retried. Example: --state-file scan.state
+    /// --scan-timeout are retried.
     #[arg(long, value_name = "PATH")]
     pub state_file: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Diff against a previous dalfox JSON/JSONL report and report only findings new since it. The baseline is an ordinary `--format json --output` report. Example: --baseline baseline.json
+    /// Report only findings that are not in a previous dalfox JSON/JSONL report
     #[arg(long)]
     pub baseline: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// What --baseline does with already-known findings [default: filter]:
-    /// filter (drop them, so the exit code gates on new findings only) or
-    /// annotate (keep them and mark each `new`). Example: --baseline-mode annotate
+    /// With --baseline: filter (drop known findings) or annotate (keep them, mark
+    /// new ones) (default: filter)
     //
     // `None` (not `Some("filter")`) — absence is meaningful: it lets a config
     // file supply the mode, while `Some(_)` is an explicit CLI choice that
@@ -463,72 +460,71 @@ pub struct ScanArgs {
     pub baseline_mode_arg: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Drop findings graded below this confidence before output, per-target
-    /// counts, --baseline, and the exit code: low (default, keep everything)
-    /// or high (keep only findings dalfox can claim are exploitable;
-    /// informational findings carry no grade and are kept). Example: --min-confidence high
+    /// Drop findings below this confidence: low keeps all, high keeps only
+    /// exploitable ones (default: low)
+    ///
+    /// Applied before output, per-target counts, --baseline and the exit code.
+    /// Informational findings carry no grade and are always kept.
     //
     // `None` so an explicit `--min-confidence low` beats a config-file `high`.
     #[arg(long, value_name = "LEVEL", value_parser = clap::builder::PossibleValuesParser::new(MIN_CONFIDENCE_VALUES.iter().copied()))]
     pub min_confidence: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, multipart, cookie, header, graphql, xml, path, fragment.
+    /// Parameter to test, as name or name:type (repeatable). Types: query, body,
+    /// json, multipart, cookie, header, graphql, xml, path, fragment
     #[arg(short = 'p', long)]
     pub param: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// HTTP request body data
+    /// HTTP request body
     #[arg(short = 'd', long)]
     pub data: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// HTTP headers (can be specified multiple times)
+    /// HTTP header to send (repeatable)
     #[arg(short = 'H', long)]
     pub headers: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// Cookies (can be specified multiple times)
+    /// Cookie to send (repeatable)
     #[arg(long)]
     pub cookies: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// Override the HTTP method. Example: -X 'PUT'
+    /// HTTP method
     #[arg(short = 'X', long, default_value = DEFAULT_METHOD, value_parser = parse_http_method_arg)]
     pub method: String,
 
     #[clap(help_heading = "TARGETS")]
-    /// Set a custom User-Agent header. Example: --user-agent 'Mozilla/5.0'
+    /// User-Agent header value
     #[arg(long)]
     pub user_agent: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// Load cookies from a raw HTTP request file. Example: --cookie-from-raw 'request.txt'
+    /// Load cookies from a raw HTTP request file
     #[arg(long)]
     pub cookie_from_raw: Option<String>,
 
     #[clap(help_heading = "SESSION")]
-    /// Regex that must keep matching the response body for the session to be
-    /// considered alive (e.g. --session-check 'Sign out'). Authoritative: when
-    /// set, the built-in heuristics (401/403, login redirect, appearing login
-    /// form) are not consulted. Without it, session monitoring still runs
-    /// automatically whenever credentials are supplied via --cookies,
-    /// --cookie-from-raw, or a Cookie/Authorization header.
+    /// Regex the response must keep matching for the session to count as alive
+    /// (e.g. 'Sign out')
+    ///
+    /// Replaces the built-in heuristics (401/403, login redirect, login form).
+    /// Without it, session monitoring still runs whenever credentials are supplied.
     #[arg(long, value_name = "REGEX")]
     pub session_check: Option<String>,
 
     #[clap(help_heading = "SESSION")]
-    /// Probe this URL instead of the scan target when re-validating the
-    /// session. Useful when the target itself is public but the app exposes a
-    /// cheap authenticated endpoint. Example: --session-check-url 'https://app/me'
+    /// URL to probe for the session check instead of the target
     #[arg(long, value_name = "URL")]
     pub session_check_url: Option<String>,
 
     #[clap(help_heading = "SESSION")]
-    /// What to do when the session is detected as lost [default: abort]: abort
-    /// stops the affected target and skips the rest of that host; continue keeps
-    /// scanning. Either way the target is reported as `incomplete` /
-    /// SESSION_LOST instead of a misleading "clean".
+    /// On session loss: abort (stop the target and skip the rest of its host) or
+    /// continue (default: abort)
+    ///
+    /// Either way the target is reported as `incomplete` / SESSION_LOST, not clean.
     //
     // `None` (not `Some("abort")`) — absence is meaningful: it lets a config
     // file supply the policy, while `Some(_)` is an explicit CLI choice that
@@ -539,67 +535,68 @@ pub struct ScanArgs {
     pub on_session_loss_arg: Option<String>,
 
     #[clap(help_heading = "SCOPE")]
-    /// Include only URLs matching these patterns (regex, can be specified multiple times)
+    /// Scan only URLs matching this regex (repeatable)
     #[arg(long)]
     pub include_url: Vec<String>,
 
     #[clap(help_heading = "SCOPE")]
-    /// Exclude URLs matching these patterns (regex, can be specified multiple times)
+    /// Skip URLs matching this regex (repeatable)
     #[arg(long)]
     pub exclude_url: Vec<String>,
 
     #[clap(help_heading = "SCOPE")]
-    /// Ignore specific parameters during scanning (can be specified multiple times)
+    /// Parameter name to leave untested (repeatable)
     #[arg(long)]
     pub ignore_param: Vec<String>,
 
     #[clap(help_heading = "SCOPE")]
-    /// Exclude targets whose domain matches these patterns (supports wildcards, e.g. *.dev.example.com)
+    /// Skip targets whose domain matches this pattern (wildcards allowed, e.g.
+    /// *.dev.example.com)
     #[arg(long)]
     pub out_of_scope: Vec<String>,
 
     #[clap(help_heading = "SCOPE")]
-    /// Load out-of-scope domains from a file (one per line, supports wildcards)
+    /// File of out-of-scope domain patterns, one per line
     #[arg(long)]
     pub out_of_scope_file: Option<String>,
 
     #[clap(help_heading = "PARAMETER DISCOVERY")]
-    /// Only perform parameter discovery (skip XSS scanning)
+    /// Run parameter discovery only; skip XSS scanning
     #[arg(long)]
     pub only_discovery: bool,
 
     #[clap(help_heading = "PARAMETER DISCOVERY")]
-    /// Skip all discovery checks
+    /// Skip parameter discovery
     #[arg(long)]
     pub skip_discovery: bool,
 
     #[clap(help_heading = "PARAMETER DISCOVERY")]
-    /// Skip header-based reflection checks
+    /// Skip header reflection checks
     #[arg(long)]
     pub skip_reflection_header: bool,
 
     #[clap(help_heading = "PARAMETER DISCOVERY")]
-    /// Skip cookie-based reflection checks
+    /// Skip cookie reflection checks
     #[arg(long)]
     pub skip_reflection_cookie: bool,
 
     #[clap(help_heading = "PARAMETER DISCOVERY")]
-    /// Skip path-based reflection checks
+    /// Skip path reflection checks
     #[arg(long)]
     pub skip_reflection_path: bool,
 
     #[clap(help_heading = "PARAMETER MINING")]
-    /// Dictionary analysis with wordlist file path
+    /// Wordlist file for parameter mining
     #[arg(short = 'W', long)]
     pub mining_dict_word: Option<String>,
 
     #[clap(help_heading = "PARAMETER MINING")]
-    /// Fetch remote parameter wordlists from providers (comma-separated). Options: burp, assetnote
+    /// Remote parameter wordlists to fetch (comma-separated): burp, assetnote
     #[arg(long = "remote-wordlists", value_delimiter = ',')]
     pub remote_wordlists: Vec<String>,
 
     #[clap(help_heading = "PARAMETER MINING")]
-    /// Skip all mining
+    /// Skip all parameter mining
     #[arg(long)]
     pub skip_mining: bool,
 
@@ -609,69 +606,58 @@ pub struct ScanArgs {
     pub skip_mining_dict: bool,
 
     #[clap(help_heading = "PARAMETER MINING")]
-    /// Skip mining parameter names from HTML input id/name attributes. Does NOT disable DOM-XSS static analysis of inline scripts (the `[A]` findings) — use --skip-ast-analysis for that.
+    /// Skip mining parameter names from HTML inputs (does not disable `[A]`
+    /// findings; see --skip-ast-analysis)
     #[arg(long)]
     pub skip_mining_dom: bool,
 
     #[clap(help_heading = "NETWORK")]
-    /// Per-request timeout in seconds (network only; does not bound total scan time)
+    /// Per-request timeout in seconds
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_TIMEOUT_SECS)]
     pub timeout: u64,
 
     #[clap(help_heading = "NETWORK")]
-    /// Hard wall-clock cap per target for the payload-injection (scan) stage in
-    /// seconds. When set, dalfox stops a target's payload-injection stage
-    /// once this budget is exceeded — useful when many sequential phases each
-    /// pay the per-request `--timeout` cost against a partially-hung
-    /// endpoint. Scope note: this caps ONLY the injection stage. The earlier
-    /// preflight and parameter-analysis (discovery + mining) phases are bounded
-    /// separately by `--timeout` × request-count, NOT by this wall-clock cap, so
-    /// a slow target can overshoot this budget during analysis. 0 disables.
+    /// Wall-clock cap per target for the payload stage, in seconds (0 = off)
+    ///
+    /// Discovery and mining are not covered: they are bounded by --timeout per
+    /// request, so a slow target can run past this budget before the payload stage
+    /// starts.
     #[arg(long, default_value_t = 0)]
     pub scan_timeout: u64,
 
     #[clap(help_heading = "NETWORK")]
-    /// Delay in milliseconds
+    /// Delay after each request of a worker, in milliseconds
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_DELAY_MS)]
     pub delay: u64,
 
     #[clap(help_heading = "NETWORK")]
-    /// Cap the global outbound request rate in requests/second, shared across
-    /// all workers and targets (0 = unlimited). Unlike --delay (which only
-    /// spaces a single worker's requests), this bounds the total in-flight
-    /// burst from workers × concurrent targets — friendlier to shared-IP /
-    /// edge WAF thresholds. Example: --rate-limit 20
+    /// Max requests per second across all workers and targets (0 = unlimited)
     #[arg(long = "rate-limit", short = 'r', visible_alias = "rl", default_value_t = crate::cmd::scan::DEFAULT_RATE_LIMIT)]
     pub rate_limit: u32,
 
     #[clap(help_heading = "NETWORK")]
-    /// Retry failed requests on HTTP 5xx and transient transport errors
-    /// (timeouts, connection resets) up to this many times (0 = off). HTTP
-    /// 429 is always retried regardless of this value. Example: --retries 2
+    /// Retries on HTTP 5xx and transient transport errors (0 = off; 429 is always
+    /// retried)
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_RETRIES)]
     pub retries: u32,
 
     #[clap(help_heading = "NETWORK")]
-    /// Base delay (ms) for the exponential backoff between retries
-    /// (--retries). Doubles each attempt and is capped internally; a server
-    /// Retry-After header takes precedence on 429. Example: --retry-delay 500
+    /// Base backoff between retries in milliseconds, doubled on each attempt
     #[arg(long = "retry-delay", default_value_t = crate::cmd::scan::DEFAULT_RETRY_DELAY_MS)]
     pub retry_delay: u64,
 
     #[clap(help_heading = "NETWORK")]
-    /// Proxy URL (e.g., http://localhost:8080, socks5://localhost:9050)
+    /// Proxy URL (e.g. http://localhost:8080, socks5://localhost:9050)
     #[arg(long)]
     pub proxy: Option<String>,
 
     #[clap(help_heading = "NETWORK")]
-    /// Skip TLS/SSL certificate verification, accepting self-signed, expired,
-    /// or hostname-mismatched certs. Enabled by default for scanner use; pass
-    /// `--insecure=false` to enforce certificate validation. Applies to the
-    /// scan target and to an OAST server named with `--blind-oob=`; the public
-    /// interactsh mesh is always verified. Example: --insecure=false
+    /// Skip TLS certificate verification (on by default; --insecure=false to
+    /// verify)
     ///
-    /// The config file key `insecure` sets the same thing; a value given on
-    /// the command line always wins over the config file.
+    /// Also applies to an OAST server named with --blind-oob=; the public
+    /// interactsh mesh is always verified. The config key `insecure` sets the same
+    /// thing, and the command line wins.
     //
     // Keep a second `///` paragraph here: it is what makes clap render
     // `scan --help` in long layout (`[default: …]` on its own line), which
@@ -692,12 +678,13 @@ pub struct ScanArgs {
     pub insecure: Option<bool>,
 
     #[clap(help_heading = "NETWORK")]
-    /// Follow HTTP redirects. Example: -F
+    /// Follow HTTP redirects
     #[arg(short = 'F', long)]
     pub follow_redirects: bool,
 
     #[clap(help_heading = "NETWORK")]
-    /// Ignore specific HTTP status codes during scanning (comma-separated). Example: --ignore-return 302,403,404
+    /// Skip responses with these HTTP status codes (comma-separated, e.g.
+    /// 302,403,404)
     #[arg(long, value_delimiter = ',')]
     pub ignore_return: Vec<u16>,
 
@@ -707,32 +694,32 @@ pub struct ScanArgs {
     pub workers: usize,
 
     #[clap(help_heading = "ENGINE")]
-    /// Maximum number of concurrent targets to scan
+    /// Targets scanned at the same time
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS)]
     pub max_concurrent_targets: usize,
 
     #[clap(help_heading = "ENGINE")]
-    /// Maximum number of targets per host
+    /// Max targets scanned per host
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST)]
     pub max_targets_per_host: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, htmlpad, base64, unicode, zwsp
+    /// Payload encoders (comma-separated)
     #[arg(short = 'e', long, value_delimiter = ',', default_values = DEFAULT_ENCODERS, value_parser = clap::builder::PossibleValuesParser::new(ENCODER_VALUES.iter().copied()))]
     pub encoders: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Fetch remote XSS payloads from providers (comma-separated). Options: portswigger, payloadbox
+    /// Remote payload lists to fetch (comma-separated): portswigger, payloadbox
     #[arg(long = "remote-payloads", value_delimiter = ',')]
     pub remote_payloads: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Load custom blind XSS payloads from a file. Example: --custom-blind-xss-payload 'payloads.txt'
+    /// File of custom blind XSS payloads
     #[arg(long)]
     pub custom_blind_xss_payload: Option<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Blind XSS callback URL. Example: -b 'https://example.com/callback'
+    /// Blind XSS callback URL
     #[arg(short = 'b', long = "blind")]
     pub blind_callback_url: Option<String>,
 
@@ -743,12 +730,12 @@ pub struct ScanArgs {
     pub oob: BlindOobArgs,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Load custom payloads from a file. Example: --custom-payload 'payloads.txt'
+    /// File of custom payloads
     #[arg(long)]
     pub custom_payload: Option<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Only test custom payloads. Example: --only-custom-payload --custom-payload=p.txt
+    /// Test only the payloads from --custom-payload
     //
     // Deliberately NOT `requires = "custom_payload"`. The pairing is real — on
     // its own this flag yields an empty payload set and a scan that reports
@@ -762,58 +749,54 @@ pub struct ScanArgs {
     pub only_custom_payload: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Custom value for alert/prompt/confirm in payloads. Example: --custom-alert-value 'document.domain'
+    /// Value passed to alert/prompt/confirm in payloads (e.g. document.domain)
     #[arg(long, default_value = "1")]
     pub custom_alert_value: String,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Custom alert function type. Options: none (keep original), str (wrap value in quotes)
+    /// How the alert value is written: none (as is) or str (quoted)
     #[arg(long, default_value = "none", value_parser = clap::builder::PossibleValuesParser::new(CUSTOM_ALERT_TYPE_VALUES.iter().copied()))]
     pub custom_alert_type: String,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Custom injection point marker. Replace this string with payloads in URL/headers/body.
-    /// Example: --inject-marker 'FUZZ' with URL 'http://example.com/?q=FUZZ'
+    /// Marker that payloads replace in the URL, headers or body (e.g. FUZZ in
+    /// ?q=FUZZ)
     #[arg(long)]
     pub inject_marker: Option<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Skip XSS scanning entirely
+    /// Skip XSS scanning
     #[arg(long)]
     pub skip_xss_scanning: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Cap the number of base payloads tested per parameter (reflection set and DOM-verification
-    /// set are each capped independently). 0 (default) applies a built-in safety cap of 3000
-    /// per set unless --deep-scan is set; pass an explicit value to override, or --deep-scan
-    /// for a truly unlimited run. Bounds the request fan-out on large attack surfaces and on
-    /// endpoints that reflect every payload (self-/canonical-link echoes) without verifying.
-    /// Note: the cap applies to the base catalog; WAF-bypass mutation/encoder expansion and a
-    /// small set of shared CSP-bypass / tech-specific payloads are added afterwards (and never
-    /// trimmed), so the actual per-parameter total can exceed this value — substantially so when
-    /// a WAF bypass strategy is active. Use --deep-scan only to lift the built-in default cap.
+    /// Max base payloads per parameter (0 = built-in cap of 3000; --deep-scan lifts
+    /// it)
+    ///
+    /// The reflection and DOM-verification sets are capped separately. WAF-bypass
+    /// mutations, encoder variants and a few shared payloads are added on top, so
+    /// the real per-parameter total can be higher.
     #[arg(long, default_value_t = 0)]
     pub max_payloads_per_param: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Perform deep scanning - test all payloads even after finding XSS
+    /// Test every payload, even after a finding
     #[arg(long)]
     pub deep_scan: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Enable Stored XSS mode
+    /// Stored XSS mode: inject at the target, look for the payload on other
+    /// pages (see --sxss-url)
     #[arg(long)]
     pub sxss: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// URL to check for Stored XSS reflection. Repeat to check several pages
-    /// (a list view and a detail view, say). Checked in addition to the
-    /// pages auto-detected from form discovery context
+    /// URL where the stored payload shows up (repeatable)
     #[arg(long)]
     pub sxss_url: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// HTTP method for checking Stored XSS
+    /// HTTP method for the --sxss-url check
     // Same parser as `--method`. Without it `--sxss-method post` went on the
     // wire as the literal extension verb `post` (`reqwest::Method` is
     // case-sensitive) and `--sxss-method "GET junk"` failed to parse and
@@ -822,66 +805,59 @@ pub struct ScanArgs {
     pub sxss_method: String,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Number of times to re-check the Stored XSS URL to handle slow
-    /// session/content propagation. Each retry waits 500ms * attempt_index.
+    /// Re-checks of --sxss-url, for stores that show up late
     #[arg(long, default_value_t = DEFAULT_SXSS_RETRIES)]
     pub sxss_retries: u32,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Skip AST-based DOM XSS detection — the source→sink analysis of
-    /// JavaScript in responses that emits [A] findings. This is the flag
-    /// that silences them; --skip-mining-dom does not
+    /// Skip AST-based DOM XSS analysis (`[A]` findings)
     #[arg(long)]
     pub skip_ast_analysis: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Fetch and AST-analyze same-origin external <script src> bundles for DOM-XSS
-    /// (off by default to preserve request budget)
+    /// Also AST-analyze same-origin external <script src> files (extra requests)
     #[arg(long)]
     pub analyze_external_js: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Enable HTTP Parameter Pollution (HPP) — duplicate query params to bypass WAF
+    /// HTTP Parameter Pollution: duplicate query parameters to bypass WAFs
     #[arg(long)]
     pub hpp: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Also report outdated / known-vulnerable JS libraries (informational,
-    /// CWE-1104). Off by default: dalfox focuses on verified XSS; this is an
-    /// opt-in retire.js-style add-on that inspects <script> tags (0 extra requests).
+    /// Also report outdated / known-vulnerable JS libraries (informational, no
+    /// extra requests)
     #[arg(long)]
     pub detect_outdated_libs: bool,
 
     #[clap(help_heading = "WAF")]
-    /// WAF bypass mode: auto (detect+bypass), force (same as auto; pin a WAF with --force-waf), off (detect-only; no payload mutations)
+    /// WAF handling: auto (detect and bypass), force (same as auto), off (detect
+    /// only)
     #[arg(long, default_value = DEFAULT_WAF_BYPASS, value_parser = clap::builder::PossibleValuesParser::new(WAF_BYPASS_VALUES.iter().copied()))]
     pub waf_bypass: String,
 
     #[clap(help_heading = "WAF")]
-    /// Skip the WAF provocation probe; detect only from the normal preflight response (headers and body)
+    /// Skip the active WAF probe; detect from normal responses only
     #[arg(long)]
     pub skip_waf_probe: bool,
 
     #[clap(help_heading = "WAF")]
-    /// Force a specific WAF type for bypass strategies (e.g., cloudflare, akamai, modsecurity)
+    /// Assume this WAF for bypass strategies (e.g. cloudflare, akamai, modsecurity)
     #[arg(long, value_parser = parse_force_waf_arg)]
     pub force_waf: Option<String>,
 
     #[clap(help_heading = "WAF")]
-    /// Cautious, stealthy pacing whether or not a WAF is detected: one request
-    /// at a time per parameter, a randomized pause between requests (at least
-    /// ~150 ms on average), and an escalating cooldown on runs of 403/406
-    /// blocks. Pairs well with --rate-limit. The per-WAF pacing hint is
-    /// applied automatically on detection even without this flag.
+    /// Slow, randomized pacing with a cooldown on 403/406 blocks
+    ///
+    /// One request at a time per parameter with a randomized pause (about 150 ms on
+    /// average), whether or not a WAF is detected. Pairs well with --rate-limit.
     #[arg(long)]
     pub waf_evasion: bool,
 
     #[clap(help_heading = "WAF")]
-    /// Discard WAF fingerprints below this confidence (0.0–1.0); a match at
-    /// exactly the threshold is kept. The default (0.3) filters weak signals
-    /// like `Server: Google Frontend` (0.15, sent by every Google-hosted
-    /// property regardless of Cloud Armor). Real WAF signatures (Cloudflare
-    /// 0.9+, AWS WAF 0.95) are kept. Pass `--waf-min-confidence 0.0` to keep
+    /// Ignore WAF fingerprints below this confidence (0.0-1.0)
+    ///
+    /// The default drops weak signals such as `Server: Google Frontend`; 0.0 keeps
     /// every match.
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE)]
     pub waf_min_confidence: f32,
@@ -1061,8 +1037,8 @@ pub struct PreflightOptions {
 #[derive(Args, Clone, Debug, Default, PartialEq)]
 pub struct BlindOobArgs {
     #[clap(help_heading = "XSS SCANNING")]
-    /// Enable OOB blind XSS via interactsh. Optional comma-separated server
-    /// domains (default: public servers). Example: --blind-oob=oast.fun,oast.me
+    /// Blind XSS via interactsh (OOB); optional server list, e.g.
+    /// --blind-oob=oast.fun,oast.me
     //
     // `require_equals` is deliberate (kept out of `--help`): with a bare
     // `num_args = 0..` this option would greedily swallow the following
@@ -1073,14 +1049,12 @@ pub struct BlindOobArgs {
     pub blind_oob: Option<Vec<String>>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Auth token (secret) for a self-hosted interactsh server; sent as the
-    /// Authorization header on register/poll/deregister.
+    /// Auth token for a self-hosted interactsh server
     #[arg(long = "blind-oob-secret")]
     pub blind_oob_secret: Option<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Seconds to keep polling for OOB callbacks after all payloads are sent
-    /// (default 30; 0 = no extra end-of-scan wait).
+    /// Seconds to keep polling for OOB callbacks after the scan (default: 30)
     #[arg(long = "blind-oob-wait")]
     pub blind_oob_wait: Option<u64>,
 }

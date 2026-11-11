@@ -63,20 +63,16 @@ fn closest_selector(input: &str) -> Option<&'static str> {
 /// and usage tips. Payload selection and application during a scan is handled
 /// by the scanning engine.
 #[derive(Args, Debug, Clone)]
-#[command(
-    about = "Manage or inspect payloads",
-    long_about = "Selectors:\n  - javascript: print the canonical JavaScript execution payloads used in JS-string / script contexts (alert(1), backtick and keyword-split variants, ...)\n  - event-handlers: list all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: list useful HTML tag names often used in XSS contexts (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
-)]
 pub struct PayloadArgs {
     #[arg(
         value_name = "SELECTOR",
-        help = "Payload selector\nAvailable selectors:\n  - javascript\n  - event-handlers\n  - useful-tags\n  - payloadbox\n  - portswigger\n  - uri-scheme\n  - special-chars\n  - functions\n  - awesome-alert\n  - dom-clobbering\n  - mxss\n  - blind\n  - all",
-        long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - javascript: print the canonical JavaScript execution payloads used in JS-string / script contexts (alert(1), backtick and keyword-split variants, ...)\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
+        help = "Payload set to print (see --help for the list); omit for a summary",
+        long_help = "Payload set to print; omit for a summary of every set.\n  - javascript: JS execution payloads for script / JS-string contexts\n  - event-handlers: DOM event handler attribute names\n  - useful-tags: HTML tags useful for XSS\n  - uri-scheme: scheme payloads (javascript:, data:, ...)\n  - special-chars: special characters and encoded variants for context probing\n  - functions: visibly confirmable sinks (alert, prompt, ...) and filter-surviving variants\n  - awesome-alert: alert PoCs for screenshots and demos\n  - dom-clobbering: DOM clobbering payloads\n  - mxss: mutation-XSS / sanitizer-bypass payloads\n  - blind: blind-XSS skeletons ({} = your callback URL)\n  - payloadbox: remote payloads from PayloadBox (network fetch)\n  - portswigger: remote payloads from PortSwigger (network fetch)\n  - all: every local set, each under a '# name' header"
     )]
     pub selector: Option<String>,
 
     /// Print payloads as a JSON array instead of one item per line.
-    #[arg(long, help = "Print payloads as a JSON array")]
+    #[arg(long, help = "Print as a JSON array")]
     pub json: bool,
 }
 

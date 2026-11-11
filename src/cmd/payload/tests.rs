@@ -367,21 +367,16 @@ fn test_all_selector_groups_cover_every_static_selector_in_order() {
     );
 }
 
-/// Each help surface lists the selectors by hand. Pin every one of them to
-/// `KNOWN_SELECTORS` so adding or removing a selector cannot leave a stale list.
+/// `--help` lists the selectors by hand (`-h` only points at it). Pin the list
+/// to `KNOWN_SELECTORS` so adding or removing a selector cannot leave it stale.
 #[test]
 fn test_help_lists_every_known_selector() {
     use clap::Args;
     let mut cmd = PayloadArgs::augment_args(clap::Command::new("payload"));
-    let short_help = cmd.render_help().to_string();
     let long_help = cmd.render_long_help().to_string();
     for selector in KNOWN_SELECTORS {
         // Match the list bullet, not the bare word: "all" appears in prose too.
-        let bullet = format!("- {selector}");
-        assert!(
-            short_help.contains(&bullet),
-            "selector {selector} missing from help"
-        );
+        let bullet = format!("- {selector}:");
         assert!(
             long_help.contains(&bullet),
             "selector {selector} missing from long help"

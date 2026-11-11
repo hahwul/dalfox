@@ -4,101 +4,72 @@ use super::*;
 
 #[derive(Args)]
 pub struct ServerArgs {
-    /// Port to run the server on
+    /// Port to listen on
     #[clap(help_heading = "SERVER")]
     #[arg(short, long, default_value = "6664")]
     pub port: u16,
 
-    /// Host to bind the server to
+    /// Address to bind
     #[clap(help_heading = "SERVER")]
     #[arg(short = 'H', long, default_value = "127.0.0.1")]
     pub host: String,
 
-    /// API key required in the X-API-KEY header, or as `Authorization: Bearer <key>`
-    /// (or set via DALFOX_API_KEY). Leave empty to disable auth.
+    /// API key clients must send as X-API-KEY or `Authorization: Bearer` (or set
+    /// DALFOX_API_KEY); empty disables auth
     #[clap(help_heading = "SERVER")]
     #[arg(long = "api-key")]
     pub api_key: Option<String>,
 
-    /// Path to a log file to also write logs (plain text, no ANSI colors).
-    /// Created mode 0600 on Unix — the log records every submitted target URL,
-    /// which routinely carries the credential that made it worth scanning. An
-    /// existing file keeps its current permissions; the server warns at startup
-    /// if it is readable by group or other.
+    /// Also write logs to this file (plain text, created with mode 0600)
     #[clap(help_heading = "SERVER")]
     #[arg(long = "log-file")]
     pub log_file: Option<String>,
 
-    /// Server-wide cap on each scan's outbound request rate (requests/second;
-    /// 0 or unset = unlimited). Applied to every submitted scan: a request's
-    /// own `rate_limit` may be lower but cannot exceed or disable this cap.
+    /// Cap on each scan's requests per second (0 or unset = unlimited)
     #[clap(help_heading = "SERVER")]
     #[arg(long = "rate-limit")]
     pub rate_limit: Option<u32>,
 
-    /// Server-wide cap on each scan's total wall-clock runtime, in seconds
-    /// (0 or unset = unbounded). Applied to every submitted scan: a request's
-    /// own scan_timeout may be shorter but cannot exceed or disable this cap.
-    /// Bounds long/deep scans so a single target can't pin a worker indefinitely.
+    /// Cap on each scan's runtime in seconds (0 or unset = unlimited)
     #[clap(help_heading = "SERVER")]
     #[arg(long = "scan-timeout")]
     pub scan_timeout: Option<u64>,
 
-    /// Maximum number of concurrently active (queued + running) scans. Once the
-    /// cap is hit, new submissions get HTTP 503 until a slot frees. 0 disables
-    /// the cap (unbounded). Bounds memory + the blocking-pool against a flood
-    /// of submissions.
+    /// Max active scans; further submissions get 503 (0 = unlimited)
     #[clap(help_heading = "SERVER")]
     #[arg(long = "max-concurrent-scans", default_value_t = 100)]
     pub max_concurrent_scans: usize,
 
-    /// Comma-separated hostnames accepted in the request `Host` header, on top
-    /// of the bind host, `localhost`, and any IP literal (which cannot be
-    /// rebound). Requests naming anything else are refused, which is what a DNS
-    /// rebinding attack looks like. Set this when a reverse proxy forwards a
-    /// public hostname to this server.
+    /// Extra hostnames accepted in the Host header (comma-separated), e.g. behind a
+    /// reverse proxy
     #[clap(help_heading = "SERVER")]
     #[arg(long = "allowed-hosts")]
     pub allowed_hosts: Option<String>,
 
-    /// Maximum number of finished (done/error/cancelled) scans kept in memory.
-    /// Once exceeded, the oldest finished scans are dropped to make room; scans
-    /// still queued or running are never dropped. 0 disables the cap. This
-    /// bounds memory independently of `--max-concurrent-scans`, which only
-    /// counts active scans, so a flood of quick scans could otherwise retain
-    /// their results (including response bodies) until the retention TTL.
+    /// Max finished scans kept in memory; oldest dropped first (0 = unlimited)
     #[clap(help_heading = "SERVER")]
     #[arg(long = "max-retained-scans", default_value_t = 1000)]
     pub max_retained_scans: usize,
 
-    /// Seconds a finished (done/error/cancelled) scan stays readable before it
-    /// is dropped. Swept at most once a minute, so shorter values act as a
-    /// minute. 0 keeps finished scans until `--max-retained-scans` evicts them.
+    /// Seconds a finished scan stays readable (0 = no expiry)
     #[clap(help_heading = "SERVER")]
     #[arg(long = "retention-secs", default_value_t = crate::job::JOB_RETENTION_SECS as u32)]
     pub retention_secs: u32,
 
-    /// Maximum accepted request-body size (bytes) for POST /scan and /preflight.
-    /// Replaces axum's implicit 2 MiB default with an explicit, documented bound.
+    /// Max request body size in bytes
     #[clap(help_heading = "SERVER")]
     #[arg(long = "max-body-bytes", default_value_t = 1_048_576)]
     pub max_body_bytes: usize,
 
-    /// Comma-separated list of allowed origins for CORS. Supports:
-    /// - "*" (match all; also switches the cross-site gate off)
-    /// - exact origins (http://localhost:3000), compared case-insensitively
-    /// - "regex:<pattern>" for regex
-    ///
-    /// Both pattern forms are anchored to the whole `Origin`.
     #[clap(help_heading = "CORS")]
     #[arg(
         long = "allowed-origins",
-        help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all, and switches the cross-site gate off)\n  - exact origins (http://localhost:3000), compared case-insensitively\n  - \"regex:<pattern>\" for regex\nPatterns match the whole Origin, so they must cover the port too.",
-        long_help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all, and switches the cross-site gate off)\n  - exact origins (http://localhost:3000), compared case-insensitively\n  - \"regex:<pattern>\" for regex\n\nBoth pattern forms are anchored to the whole Origin, so a longer host that\nmerely contains one is refused — and a pattern must cover the port when the\norigins it describes carry one (https://app.example.com:8443)."
+        help = "CORS allowed origins (comma-separated): exact origins, regex:<pattern>, or *",
+        long_help = "CORS allowed origins (comma-separated):\n  - exact origins (http://localhost:3000), compared case-insensitively\n  - regex:<pattern>, matched against the whole Origin, port included\n  - * allows every origin and turns the cross-site request check off"
     )]
     pub allowed_origins: Option<String>,
 
-    /// Allow JSONP responses (wrap JSON in callback())
+    /// Enable JSONP responses (turns the cross-site request check off)
     #[clap(help_heading = "JSONP")]
     #[arg(long = "jsonp")]
     pub jsonp: bool,
@@ -108,12 +79,12 @@ pub struct ServerArgs {
     #[arg(long = "callback-param-name", default_value = "callback")]
     pub callback_param_name: String,
 
-    /// CORS allow methods (comma-separated). Default: GET,POST,OPTIONS,PUT,PATCH,DELETE
+    /// CORS allowed methods (default: GET,POST,OPTIONS,PUT,PATCH,DELETE)
     #[clap(help_heading = "CORS")]
     #[arg(long = "cors-allow-methods")]
     pub cors_allow_methods: Option<String>,
 
-    /// CORS allow headers (comma-separated). Default: Content-Type,X-API-KEY,Authorization
+    /// CORS allowed headers (default: Content-Type,X-API-KEY,Authorization)
     #[clap(help_heading = "CORS")]
     #[arg(long = "cors-allow-headers")]
     pub cors_allow_headers: Option<String>,
