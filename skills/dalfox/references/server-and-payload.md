@@ -10,12 +10,13 @@ Runs an async HTTP API (axum) that exposes the same scanning engine.
 |------|---------|---------|
 | `-p, --port` | 6664 | Listen port |
 | `-H, --host` | 127.0.0.1 | Bind address (use 0.0.0.0 carefully) |
-| `--api-key` | (none) | Required value for `X-API-KEY` header (or `DALFOX_API_KEY` env) |
+| `--api-key` | (none) | Key every request must send, as `X-API-KEY` or `Authorization: Bearer` (or `DALFOX_API_KEY` env) |
 | `--log-file` | (none) | Plain-text log file (no ANSI). Created `0600` on Unix; an existing file keeps its mode and is warned about if group/other-readable |
 | `--rate-limit` | 0 (unlimited) | Server-wide ceiling on each scan's req/sec; a request's `rate_limit` may go lower, never higher or off |
 | `--scan-timeout` | 0 (unbounded) | Server-wide ceiling on each scan's wall-clock seconds; also bounds `POST /preflight` (`504`) |
-| `--max-concurrent-scans` | 100 | Active (queued + running) cap; past it `POST`/`GET /scan` → `503`. `0` = no cap |
+| `--max-concurrent-scans` | 100 | Active (queued + running) cap; past it `POST`/`GET /scan` → `503` with `Retry-After`. `0` = no cap |
 | `--max-retained-scans` | 1000 | Finished jobs kept in memory; oldest evicted first. `0` = no cap |
+| `--retention-secs` | 3600 | Seconds a finished job stays readable. `0` = no TTL |
 | `--max-body-bytes` | 1048576 | Request-body limit for `POST /scan` and `/preflight` (`413` past it) |
 | `--allowed-hosts` | (none) | Extra `Host` header names accepted (DNS-rebinding gate). Set it behind a reverse proxy that forwards a public hostname |
 | `--allowed-origins` | (none) | Comma-separated. Supports `*`, exact origins (case-insensitive), `regex:<pattern>`. Patterns match the whole `Origin` (anchored), so a longer host that merely contains one is refused — and a pattern must cover the port. `*` switches the cross-site gate off, like `--jsonp` |
@@ -33,7 +34,7 @@ Runs an async HTTP API (axum) that exposes the same scanning engine.
 - `GET /scans` — list jobs (supports `?status=running`)
 - `GET /result/{id}` — alias of `/scan/{id}`
 - `POST /preflight` — discovery only
-- `GET /health` — liveness
+- `GET /health` — liveness; with the API key also `scans: {active, max_concurrent}` (room before a `503`)
 
 Jobs are in-memory only. Same `queued / running / done / error / cancelled` lifecycle as MCP.
 
@@ -58,13 +59,13 @@ curl -s -X POST http://127.0.0.1:6664/scan -H 'Content-Type: application/json' -
 
 Blind OOB and session-loss detection reach parity with the CLI here: the `options` body (and `GET /scan` query) accept `blind_oob` (`true` / server list — `?blind_oob=true` or `?blind_oob=oast.fun,oast.me`), `blind_oob_wait`, `session_check`, and `session_check_url`. The OOB poller is started and stopped with the job (cancel/delete stop it; it counts against the job caps). A job whose authenticated session dies mid-scan settles `status: "error"` with `error_message` starting `SESSION_LOST:` rather than a false `done` (cancelled/timed out after the loss: stays `cancelled`, `SESSION_LOST:` goes to `warnings`). `--blind-oob-secret` (self-hosted auth) stays CLI/config-only; `--state-file` resume is CLI-only by design (jobs are in-memory). `GET /scan/{id}` adds a `warnings` list (absent when empty) for non-fatal conditions — OOB registration or polling failed, session monitoring inactive, params capped — so a `done` with zero findings is never silently read as clean.
 
-`POST`/`GET /scan` require an `http(s)` `target` (`url` is a legacy alias; other schemes → `400`, like `/preflight`). Unknown keys in the body or in `options` → `400`. An unreachable target ends as `error` (message contains `CONNECTION_FAILED`), not `done` with zero findings. `GET /scan` numeric query params (`worker`/`delay`/`timeout`/`rate_limit`/`scan_timeout`/`max_payloads_per_param`) that are present but unparseable → `400` rather than silently using the default. `progress.params_tested` advances live during the scan.
+`POST`/`GET /scan` require an `http(s)` `target` (`url` is a legacy alias; other schemes → `400`, like `/preflight`). Unknown keys in the body, in `options`, or in the `GET /scan` query → `400`. The submit reply is `{scan_id, target, limits: {rate_limit, scan_timeout}}`, where `limits` is what the scan runs with after the server-wide caps (`0` = unlimited). An unreachable target ends as `error` (message contains `CONNECTION_FAILED`), not `done` with zero findings. `GET /scan` numeric query params (`worker`/`delay`/`timeout`/`rate_limit`/`scan_timeout`/`max_payloads_per_param`) that are present but unparseable → `400` rather than silently using the default. `progress.params_tested` advances live during the scan.
 
-Body errors: over `--max-body-bytes` → `413`, no JSON `Content-Type` → `415`, malformed JSON or schema errors → `400`. `POST /preflight` is bounded by `--scan-timeout` (`504` on expiry). `DELETE /scan/{id}?purge=1` is `409` while a cancelled scan's worker is still draining. The completion webhook body carries `error_message` (null unless the scan errored, timed out or lost its session) and, when non-empty, the same `warnings` list.
+Body errors: over `--max-body-bytes` → `413`, no JSON `Content-Type` → `415`, malformed JSON or schema errors → `400`. `POST /preflight` is bounded by `--scan-timeout` (`504` on expiry). `DELETE /scan/{id}?purge=1` is `409` while a cancelled scan's worker is still draining. The completion webhook body carries `target` (`url` repeats it for older subscribers), the job timing (`queued_at_ms`, `started_at_ms`, `finished_at_ms`, `duration_ms`), `error_message` (null unless the scan errored, timed out or lost its session) and, when non-empty, the same `warnings` list.
 
 **Webhook/SSRF**: `callback_url` (and the scan target itself) are dialed server-side with no host filtering — loopback/link-local/private hosts are reachable. Set `--api-key` and restrict egress on untrusted binds. `--jsonp` exposes the API cross-origin (bypasses the CORS allow-list); enable deliberately.
 
-**Authentication**: when `--api-key` is set, every endpoint requires it in `X-API-KEY` except `GET /health` and the `OPTIONS` CORS preflights — a browser attaches no key to a preflight. Reads (`GET /scan/{id}`, `/scans`) are included. `/health` and the preflights stay key-free but are still subject to the cross-site/`Host` gate. There is no per-caller identity: any caller holding the key can read or cancel any scan. Nothing rate-limits a wrong key, so use at least 24 random characters (the server warns below that).
+**Authentication**: when `--api-key` is set, every endpoint requires it in `X-API-KEY` (or `Authorization: Bearer <key>`) except `GET /health` and the `OPTIONS` CORS preflights — a browser attaches no key to a preflight. Reads (`GET /scan/{id}`, `/scans`) are included. `/health` and the preflights stay key-free but are still subject to the cross-site/`Host` gate. There is no per-caller identity: any caller holding the key can read or cancel any scan. Nothing rate-limits a wrong key, so use at least 24 random characters (the server warns below that).
 
 **JSONP**: with `--jsonp`, every endpoint wraps its response when the callback query parameter is present (in practice a browser `<script>` can only issue GETs). The callback name is strict — 1–64 chars, first `[A-Za-z_$]`, then `[A-Za-z0-9_$.]`; anything else gets plain JSON. Every response with a body carries `X-Content-Type-Options: nosniff` and `Cache-Control: no-store` (the bodyless `OPTIONS` 204s do not).
 

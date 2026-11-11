@@ -36,8 +36,8 @@ pub(crate) use serde::{Deserialize, Serialize};
 
 pub(crate) use crate::cmd::scan::ScanArgs;
 pub(crate) use crate::job::{
-    JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_CONCURRENT_PREFLIGHT, ProgressPayload,
-    WorkerLease, effective_rate_limit, effective_scan_timeout, has_http_scheme,
+    Job, JobProgress, JobStatus, MAX_CONCURRENT_PREFLIGHT, ProgressPayload, WorkerLease,
+    effective_rate_limit, effective_scan_timeout, has_http_scheme,
     purge_expired_jobs as purge_jobs_map, split_cookie_pairs, unreachable_error_message,
 };
 pub(crate) use crate::scanning::result::SanitizedResult;
@@ -155,6 +155,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         max_concurrent_scans: args.max_concurrent_scans,
         allowed_hosts,
         max_retained_scans: args.max_retained_scans,
+        retention_secs: args.retention_secs,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     };

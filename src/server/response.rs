@@ -144,6 +144,15 @@ impl<'a> Reply<'a> {
     }
 
     /// Log a refused request under `route` and answer with its envelope.
+    /// A 503 for a full server, with `Retry-After` so a client backs off for a
+    /// stated time instead of guessing. The value is a floor, not a promise:
+    /// nothing knows when a scan slot frees.
+    pub(crate) fn busy(&self, msg: impl Into<String>) -> ApiReply {
+        let mut reply = self.err(StatusCode::SERVICE_UNAVAILABLE, msg);
+        reply.1.insert("Retry-After", HeaderValue::from_static("5"));
+        reply
+    }
+
     pub(crate) fn deny(&self, denied: &Denied, route: &str) -> ApiReply {
         log(self.state, "AUTH", &denied.log_message(route));
         let resp = denied.api_response();

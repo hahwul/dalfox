@@ -1,4 +1,5 @@
 use super::*;
+use crate::job::JOB_RETENTION_SECS;
 use axum::{
     Router, body,
     extract::{Path, Query, State},
@@ -35,6 +36,7 @@ fn make_state(
         allowed_hosts: vec![],
         // 0 = unlimited, so a test that stages jobs by hand keeps all of them.
         max_retained_scans: 0,
+        retention_secs: JOB_RETENTION_SECS as u32,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     }
@@ -267,6 +269,40 @@ fn test_check_api_key_variants() {
     let mut bad_headers = HeaderMap::new();
     bad_headers.insert("X-API-KEY", HeaderValue::from_static("wrong"));
     assert!(!check_api_key(&state_with_key, &bad_headers));
+}
+
+#[test]
+fn test_check_api_key_accepts_a_bearer_token() {
+    let state = make_state(Some("secret"), None, false, false, "callback");
+    let with = |name: &'static str, value: &'static str| {
+        let mut h = HeaderMap::new();
+        h.insert(name, HeaderValue::from_static(value));
+        h
+    };
+    assert!(check_api_key(
+        &state,
+        &with("Authorization", "Bearer secret")
+    ));
+    // The scheme is case-insensitive (RFC 9110).
+    assert!(check_api_key(
+        &state,
+        &with("Authorization", "bearer secret")
+    ));
+    assert!(!check_api_key(
+        &state,
+        &with("Authorization", "Bearer wrong")
+    ));
+    // Only the Bearer scheme carries the key; a bare or Basic value does not.
+    assert!(!check_api_key(&state, &with("Authorization", "secret")));
+    assert!(!check_api_key(
+        &state,
+        &with("Authorization", "Basic secret")
+    ));
+
+    // A wrong X-API-KEY is not rescued by a right Authorization.
+    let mut both = with("Authorization", "Bearer secret");
+    both.insert("X-API-KEY", HeaderValue::from_static("wrong"));
+    assert!(!check_api_key(&state, &both));
 }
 
 #[test]
@@ -811,6 +847,76 @@ async fn test_start_scan_handler_success_creates_queued_job() {
         job.queued_at_ms > 0,
         "queued_at_ms must be set on submission"
     );
+}
+
+#[tokio::test]
+async fn test_submit_reports_the_limits_the_scan_runs_with() {
+    // The server caps win over a request that asks for more, and the reply
+    // says so; a request under the cap keeps its own value.
+    let mut state = make_state(None, None, false, false, "cb");
+    state.rate_limit = Some(5);
+    state.scan_timeout = Some(30);
+    let resp = start_scan_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://127.0.0.1:1/".to_string(),
+            options: Some(ScanOptions {
+                rate_limit: Some(100),
+                scan_timeout: Some(10),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(
+        parsed["data"]["limits"],
+        serde_json::json!({ "rate_limit": 5, "scan_timeout": 10 })
+    );
+}
+
+#[tokio::test]
+async fn test_get_scan_rejects_an_unknown_query_parameter() {
+    let state = make_state(None, None, false, true, "cb");
+    let query = |extra: &[(&str, &str)]| {
+        let mut params = Map::new();
+        params.insert("target".to_string(), "http://127.0.0.1:1/".to_string());
+        for (k, v) in extra {
+            params.insert(k.to_string(), v.to_string());
+        }
+        params
+    };
+
+    // `workers` is the MCP spelling; the query form reads `worker`. It used to
+    // be dropped, and the scan ran with the default worker count.
+    let resp = get_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(query(&[("workers", "3")])),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = response_body_string(resp).await;
+    assert!(
+        body.contains("unknown query parameter 'workers'"),
+        "got {body}"
+    );
+    assert!(state.jobs.lock().await.is_empty(), "nothing may be queued");
+
+    // The JSONP callback and jQuery's `_` cache-buster are not options.
+    let resp = get_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(query(&[("cb", "f"), ("_", "1700000000")])),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -2021,6 +2127,7 @@ async fn test_run_server_returns_on_invalid_bind_address() {
         allowed_hosts: None,
         max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
+        retention_secs: 3600,
         allowed_origins: None,
         jsonp: false,
         callback_param_name: "callback".to_string(),
@@ -2053,6 +2160,7 @@ async fn test_run_server_returns_on_bind_failure_after_state_build() {
         allowed_hosts: None,
         max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
+        retention_secs: 3600,
         allowed_origins: Some(
             "*,regex:^https://.*\\.example\\.com$,https://*.corp.local".to_string(),
         ),
@@ -2090,6 +2198,7 @@ async fn test_run_server_reports_an_unwritable_log_file() {
         allowed_hosts: None,
         max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
+        retention_secs: 3600,
         allowed_origins: None,
         jsonp: false,
         callback_param_name: "callback".to_string(),
@@ -3010,6 +3119,35 @@ async fn test_list_scans_handler_emits_timestamps() {
 }
 
 #[tokio::test]
+async fn test_purge_honors_the_configured_retention() {
+    // Finished 2 minutes ago: inside the default hour, outside a 60s TTL.
+    let staged = |retention_secs| async move {
+        let state = AppState {
+            retention_secs,
+            ..make_state(None, None, false, false, "cb")
+        };
+        let mut job = test_job(JobStatus::Done, None, "");
+        job.finished_at_ms = Some(crate::job::now_ms() - 120_000);
+        state.jobs.lock().await.insert("j".to_string(), job);
+        purge_expired_jobs(&state).await;
+        state.jobs.lock().await.contains_key("j")
+    };
+    assert!(staged(3600).await, "the default hour keeps it");
+    assert!(!staged(60).await, "--retention-secs 60 drops it");
+
+    // 0 = no TTL, however old the scan is.
+    let state = AppState {
+        retention_secs: 0,
+        ..make_state(None, None, false, false, "cb")
+    };
+    let mut old = test_job(JobStatus::Done, None, "");
+    old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+    state.jobs.lock().await.insert("old".to_string(), old);
+    purge_expired_jobs(&state).await;
+    assert!(state.jobs.lock().await.contains_key("old"));
+}
+
+#[tokio::test]
 async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     let state = make_state(None, None, false, false, "cb");
     {
@@ -3348,6 +3486,13 @@ async fn test_webhook_carries_the_error_message_for_error_and_timeout() {
     let payload = captured.lock().await.clone().expect("webhook fired");
     assert_eq!(payload["status"], "error");
     assert_eq!(payload["error_message"], "boom: target down");
+    // `target` like every other surface, `url` kept for existing subscribers,
+    // and the job's timing.
+    assert_eq!(payload["target"], "http://t/");
+    assert_eq!(payload["url"], "http://t/");
+    assert!(payload["queued_at_ms"].is_i64(), "{payload}");
+    assert!(payload["finished_at_ms"].is_i64(), "{payload}");
+    assert!(payload.get("duration_ms").is_some(), "{payload}");
 
     // Timeout path: a scan_timeout expiry settles as `cancelled`; without the
     // message it is indistinguishable from a DELETE.
@@ -3721,6 +3866,11 @@ async fn test_start_scan_handler_503_when_at_capacity() {
     .await
     .into_response();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        resp.headers().get("Retry-After").map(|v| v.as_bytes()),
+        Some(&b"5"[..]),
+        "a full server must say when to come back"
+    );
     let body = response_body_string(resp).await;
     assert!(body.contains("at capacity"), "got {body}");
     // No new job queued — still just the one we seeded.
@@ -4908,6 +5058,37 @@ async fn test_health_stays_open_without_an_api_key() {
 }
 
 #[tokio::test]
+async fn test_health_reports_load_only_to_an_authenticated_caller() {
+    let mut state = make_state(Some("secret"), None, false, false, "callback");
+    state.max_concurrent_scans = 4;
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert("a".to_string(), test_job(JobStatus::Running, None, ""));
+        jobs.insert("b".to_string(), test_job(JobStatus::Queued, None, ""));
+        jobs.insert("c".to_string(), test_job(JobStatus::Done, None, ""));
+    }
+    let health = |headers: HeaderMap| {
+        let state = state.clone();
+        async move {
+            let resp = health_handler(State(state), headers, Query(Map::new()))
+                .await
+                .into_response();
+            let body = response_body_string(resp).await;
+            serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"]["scans"].clone()
+        }
+    };
+
+    assert!(health(HeaderMap::new()).await.is_null());
+
+    let mut authed = HeaderMap::new();
+    authed.insert("X-API-KEY", HeaderValue::from_static("secret"));
+    assert_eq!(
+        health(authed).await,
+        serde_json::json!({ "active": 2, "max_concurrent": 4 })
+    );
+}
+
+#[tokio::test]
 async fn test_non_browser_client_is_unaffected_by_the_gate() {
     // curl / CLI / agent clients send neither Origin nor Sec-Fetch-*; they must
     // keep working exactly as before.
@@ -5743,6 +5924,7 @@ async fn test_run_server_warns_about_misconfiguration_before_serving() {
             allowed_hosts: None,
             max_retained_scans: 1000,
             max_body_bytes: 1_048_576,
+            retention_secs: 3600,
             allowed_origins: Some("*,regex:https://(unclosed,regex:".to_string()),
             jsonp: false,
             callback_param_name: "callback".to_string(),

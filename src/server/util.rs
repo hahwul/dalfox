@@ -67,8 +67,11 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
 /// retention sweep doesn't run (and serialize all handlers on the jobs lock)
 /// on every request, including the high-frequency poll path.
 pub(crate) async fn purge_expired_jobs(state: &AppState) {
-    if crate::job::purge_due(&state.last_purge_ms) {
-        purge_jobs_map(&mut *state.jobs.lock().await, JOB_RETENTION_SECS);
+    if state.retention_secs > 0 && crate::job::purge_due(&state.last_purge_ms) {
+        purge_jobs_map(
+            &mut *state.jobs.lock().await,
+            i64::from(state.retention_secs),
+        );
     }
 }
 

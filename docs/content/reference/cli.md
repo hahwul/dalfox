@@ -220,7 +220,7 @@ dalfox server [FLAGS]
 |------|---------|-------------|
 | `-p`, `--port` | `6664` | Listen port |
 | `-H`, `--host` | `127.0.0.1` | Bind address |
-| `--api-key` |  | Required `X-API-KEY` header value (or `DALFOX_API_KEY`; the flag wins over the variable). An empty `--api-key ""` disables auth |
+| `--api-key` |  | Key every request must send, as `X-API-KEY` or `Authorization: Bearer` (or `DALFOX_API_KEY`; the flag wins over the variable). An empty `--api-key ""` disables auth |
 | `--log-file` |  | Plain-text log file (created mode `0600` on Unix; the server warns at startup if an existing file is group/other-readable) |
 | `--allowed-origins` |  | CORS origins (comma-separated). Exact origins, `regex:<pattern>`, or `*`. Patterns must match the whole origin, port included. `*` allows every origin and also turns off the cross-site request check |
 | `--jsonp` | false | Wrap responses in JSONP |
@@ -232,6 +232,7 @@ dalfox server [FLAGS]
 | `--max-concurrent-scans` | `100` | Limit on simultaneous (queued + running) scans; further submissions get `503` (`0` = unlimited) |
 | `--allowed-hosts` |  | Comma-separated extra hostnames accepted in the request `Host` header, on top of the bind host, `localhost`, and any IP literal. Needed behind a reverse proxy that forwards a public hostname |
 | `--max-retained-scans` | `1000` | Cap on *finished* scans kept in memory; the oldest are dropped once exceeded (`0` = unlimited). Queued and running scans are never dropped |
+| `--retention-secs` | `3600` | Seconds a finished scan stays readable before it is dropped (`0` = no TTL; `--max-retained-scans` still applies) |
 | `--max-body-bytes` | `1048576` | Maximum accepted request body size (bytes) for `POST /scan` and `/preflight`; an oversized body is rejected with `413` before the handler parses it |
 
 See [REST API Server](../../integrations/server/) for endpoints.

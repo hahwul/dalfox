@@ -1267,6 +1267,31 @@ fn rest_and_mcp_accept_the_same_scan_option_names() {
     }
 }
 
+/// `GET /scan` refuses a query key it does not read, so its key list has to
+/// track `ScanOptions`: an option added to the struct and not to the list
+/// would be accepted on POST and a 400 on GET.
+#[test]
+fn get_scan_query_keys_cover_every_scan_option() {
+    use std::collections::BTreeSet;
+
+    /// The MCP spellings the JSON body takes as serde aliases. The query form
+    /// reads only the REST names.
+    const BODY_ONLY_ALIASES: &[&str] = &["cookies", "workers", "headers", "blind_callback_url"];
+
+    let mut body = accepted_field_names::<crate::server::types::ScanRequest>();
+    body.extend(accepted_field_names::<crate::server::types::ScanOptions>());
+    body.remove("options");
+    for alias in BODY_ONLY_ALIASES {
+        assert!(body.remove(*alias), "`{alias}` is no longer a body alias");
+    }
+
+    let query: BTreeSet<String> = crate::server::SCAN_QUERY_KEYS
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(query, body);
+}
+
 /// Parity of *names* is only half of it: the REST-spelled values have to reach
 /// `ScanArgs`. The whole point is that an agent using `cookie`/`header`/
 /// `worker`/`blind` on the MCP tool gets an authenticated scan, not a

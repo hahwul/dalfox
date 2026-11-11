@@ -22,16 +22,26 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
+/// The key a request presents: `X-API-KEY`, or `Authorization: Bearer <key>`
+/// for clients and gateways that only speak the standard header (the default
+/// `--cors-allow-headers` has always advertised `Authorization`). `X-API-KEY`
+/// wins when both are sent, so a wrong one is never rescued by the other.
+fn presented_api_key(headers: &HeaderMap) -> Option<&str> {
+    if let Some(h) = headers.get("X-API-KEY") {
+        return h.to_str().ok();
+    }
+    let (scheme, token) = headers
+        .get("Authorization")?
+        .to_str()
+        .ok()?
+        .split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
+}
+
 pub(crate) fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
     match &state.api_key {
-        Some(required) if !required.is_empty() => {
-            if let Some(h) = headers.get("X-API-KEY")
-                && let Ok(v) = h.to_str()
-            {
-                return constant_time_eq(v.as_bytes(), required.as_bytes());
-            }
-            false
-        }
+        Some(required) if !required.is_empty() => presented_api_key(headers)
+            .is_some_and(|v| constant_time_eq(v.as_bytes(), required.as_bytes())),
         _ => true, // no API key set -> allow all
     }
 }

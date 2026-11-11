@@ -38,6 +38,9 @@ dalfox server \
 X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73
 ```
 
+표준 헤더만 쓰는 클라이언트나 게이트웨이를 위해 `Authorization: Bearer <key>`로도 같은
+키를 보낼 수 있습니다. 둘 다 보내면 `X-API-KEY`만 검사합니다.
+
 API 키를 설정하지 않으면 서버는 인증 없는 요청도 받습니다. 그럴 때는 `127.0.0.1`에 바인딩하세요. API 키 없이 루프백이 아닌 주소에 바인딩하면 서버가 기동 시 경고합니다.
 
 틀린 키에 대한 제한이나 잠금이 없으므로, 포트에 접근할 수 있는 공격자와 유효한 키 사이를
@@ -149,7 +152,7 @@ JSONP는 `<script src>` 로드로 전달되는데, 스크립트 로드에는 검
 요청 또는 신뢰하지 않는 `Host`,
 [브라우저 요청](#브라우저-요청) 참고), `404`(알 수 없는 스캔 id), `409`(아직 활성
 이거나 정리 중인 스캔의 purge), `413`(`--max-body-bytes`를 넘는 본문), `415`(JSON
-`Content-Type`이 아닌 본문), `500`(서버 내부에서 실패한 preflight), `503`(용량 초과),
+`Content-Type`이 아닌 본문), `500`(서버 내부에서 실패한 preflight), `503`(용량 초과, `Retry-After` 헤더 포함),
 `504`(요청의 `scan_timeout`이나 서버의 `--scan-timeout`을 넘긴 preflight)입니다.
 예외는 두 가지입니다. CORS 사전 요청(`OPTIONS`)은 본문 없이 `204`로 답하고(브라우저
 게이트가 거부하면 본문 없는 `403`), 표에 없는 경로나 메서드는 본문 없는 `404` / `405`를
@@ -187,10 +190,15 @@ curl -X POST http://127.0.0.1:6664/scan \
   "msg": "ok",
   "data": {
     "scan_id": "9f2c…",
-    "target": "https://target.app?q=test"
+    "target": "https://target.app?q=test",
+    "limits": { "rate_limit": 0, "scan_timeout": 0 }
   }
 }
 ```
+
+`limits`는 서버의 `--rate-limit`과 `--scan-timeout` 상한을 적용한 뒤 스캔이 실제로
+쓰는 값입니다(`0` = 무제한). 서버 허용치보다 크게 요청했을 때 얼마로 깎였는지 여기서
+확인할 수 있습니다.
 
 ### 상태 폴링
 
@@ -320,7 +328,11 @@ params: [{name, location, estimated_requests}]}` 형태로 돌아옵니다. 도�
 curl http://127.0.0.1:6664/health
 ```
 
-`status: "ok"`, `version`, `auth_required`, `endpoints`(지원 엔드포인트 목록, 각각 `{method, path, description}`)를 반환합니다. 가동 상태 확인에 유용합니다. API 키는 필요 없지만 [브라우저 요청](#브라우저-요청)의 브라우저 게이트는 그대로 적용됩니다.
+`status: "ok"`, `version`, `auth_required`, `scans`, `endpoints`(지원 엔드포인트 목록, 각각 `{method, path, description}`)를 반환합니다. 가동 상태 확인에 유용합니다. API 키는 필요 없지만 [브라우저 요청](#브라우저-요청)의 브라우저 게이트는 그대로 적용됩니다.
+
+`scans`는 `{active, max_concurrent}`입니다. 지금 자리를 차지한 스캔 수와
+`--max-concurrent-scans` 값(`0` = 상한 없음)이어서, 제출 전에 여유가 있는지 확인할 수
+있습니다. API 키를 보내지 않은 호출에는 `null`입니다.
 
 ## ScanOptions 참조 (요청 본문)
 
@@ -455,8 +467,8 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 
 `GET /scan`은 같은 옵션 이름을 쿼리 파라미터로 받습니다. `target` 대신 `url`도
 받지만, MCP 별칭(`workers`, `headers`, `cookies`, `blind_callback_url`)은 읽지
-않습니다. JSON 본문과 달리 모르는 쿼리 파라미터는 거부하지 않고 무시하므로 철자를
-확인하세요. 리스트 옵션(`encoders`,
+않습니다. JSON 본문과 마찬가지로 모르는 쿼리 파라미터는 `400`입니다. JSONP 콜백
+파라미터와 jQuery가 붙이는 `_` 캐시 버스터만 예외입니다. 리스트 옵션(`encoders`,
 `param`, `remote_payloads`, `remote_wordlists`)은 쉼표로 구분합니다. `header`는 여러
 헤더를 한 값에 담으며, 새 `Name:`이 시작되는 쉼표에서만 나눕니다. 그래서
 `Accept: text/html,application/xhtml+xml`처럼 값 안에 든 쉼표는 그대로 남습니다.
@@ -471,13 +483,25 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
 정리를 마친 뒤에 POST가 나갑니다:
 
 ```json
-{ "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [], "error_message": null }
+{
+  "scan_id": "9f2c…",
+  "status": "done",
+  "target": "https://target.app?q=test",
+  "url": "https://target.app?q=test",
+  "results": [],
+  "error_message": null,
+  "queued_at_ms": 1758700000000,
+  "started_at_ms": 1758700000120,
+  "finished_at_ms": 1758700008570,
+  "duration_ms": 8450
+}
 ```
 
 `status`는 `done`, `error`, `cancelled` 중 하나로, `GET /scan/{id}`가 보고하는 값과
 같습니다. `error_message`도 그 엔드포인트의 값과 같아서, 정상 종료나 단순 취소에서는
 `null`이고 그 밖에는 사유(대상 접근 불가, `scan_timeout` 만료, 세션 소실, 워커 패닉)입니다. 잡에 `warnings`가 있으면
-`GET /scan/{id}`와 같은 목록이 함께 붙습니다. 여기서는 대상이 `target`이 아니라 `url` 아래에 있습니다. 이 POST는 스캔 자신의
+`GET /scan/{id}`와 같은 목록이 함께 붙습니다. 시간 필드 네 개도 그 엔드포인트의 값과 같습니다. `url`은 예전 본문에
+맞춰 만든 수신 측을 위해 `target`을 한 번 더 싣는 필드입니다. 이 POST는 스캔 자신의
 프록시·TLS 설정을 따르며, 10초 뒤 타임아웃되고, 재시도하지 않습니다.
 
 ### 설정해 둘 만한 서버 플래그
@@ -496,9 +520,11 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
   `413`으로 거부됩니다.
 - `--max-retained-scans <n>`: 메모리에 보관하는 종료된 스캔 수 상한(기본값 `1000`,
   `0` = 무제한). `--max-concurrent-scans`는 활성 스캔만 세기 때문에, 이 상한이 없으면
-  짧은 스캔이 몰릴 때 모든 결과가(`include_response`를 켰다면 응답 본문까지) 1시간
+  짧은 스캔이 몰릴 때 모든 결과가(`include_response`를 켰다면 응답 본문까지)
   보존 TTL이 만료될 때까지 남습니다. 상한에 도달하면 가장 오래된 종료 스캔부터
   제거되며, 큐에 있거나 실행 중인 스캔은 제거되지 않습니다.
+- `--retention-secs <secs>`: 종료된 스캔을 조회할 수 있는 기간(기본값 `3600`).
+  `0`이면 TTL을 끄고 `--max-retained-scans`만 상한으로 남깁니다.
 - `--allowed-hosts <names>`: 요청 `Host` 헤더에서 추가로 허용할 호스트명. 바인딩
   호스트, `localhost`, 모든 IP 리터럴은 기본으로 허용됩니다. 리버스 프록시가 공개
   호스트명을 전달할 때 필요합니다. [브라우저 요청](#브라우저-요청) 참고.
@@ -513,8 +539,8 @@ queued → cancelled
 ```
 
 종료 상태(`done`, `error`, `cancelled`)는 고정되어 변하지 않습니다. 대기 중인 스캔은
-시작 전에 취소될 수 있습니다. 작업은 메모리에만 존재합니다. 종료된 스캔은 1시간 동안(또는
-`--max-retained-scans`가 밀어낼 때까지) 보관되며, 재시작하면 아무것도 남지 않습니다.
+시작 전에 취소될 수 있습니다. 작업은 메모리에만 존재합니다. 종료된 스캔은 기본 1시간 동안(`--retention-secs`), 또는
+`--max-retained-scans`가 밀어낼 때까지 보관되며, 재시작하면 아무것도 남지 않습니다.
 `SIGINT`/`SIGTERM`을 받으면 서버는 새 연결을 받지 않고, 이미 처리 중인 HTTP 응답을 최대
 10초 기다린 뒤 종료합니다. 실행 중인 스캔은 끝나기를 기다리지 않고 버려지며, 완료 웹훅도
 보내지 않습니다.

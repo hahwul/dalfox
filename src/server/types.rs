@@ -14,7 +14,8 @@ pub struct ServerArgs {
     #[arg(short = 'H', long, default_value = "127.0.0.1")]
     pub host: String,
 
-    /// API key required in X-API-KEY header (or set via DALFOX_API_KEY). Leave empty to disable auth.
+    /// API key required in the X-API-KEY header, or as `Authorization: Bearer <key>`
+    /// (or set via DALFOX_API_KEY). Leave empty to disable auth.
     #[clap(help_heading = "SERVER")]
     #[arg(long = "api-key")]
     pub api_key: Option<String>,
@@ -69,6 +70,13 @@ pub struct ServerArgs {
     #[clap(help_heading = "SERVER")]
     #[arg(long = "max-retained-scans", default_value_t = 1000)]
     pub max_retained_scans: usize,
+
+    /// Seconds a finished (done/error/cancelled) scan stays readable before it
+    /// is dropped. 0 keeps finished scans until `--max-retained-scans` evicts
+    /// them.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "retention-secs", default_value_t = crate::job::JOB_RETENTION_SECS as u32)]
+    pub retention_secs: u32,
 
     /// Maximum accepted request-body size (bytes) for POST /scan and /preflight.
     /// Replaces axum's implicit 2 MiB default with an explicit, documented bound.
@@ -143,6 +151,8 @@ pub(crate) struct AppState {
     pub(crate) allowed_hosts: Vec<String>,
     /// Max finished scans retained in the jobs map; 0 = unlimited.
     pub(crate) max_retained_scans: usize,
+    /// Seconds a finished scan is kept before the purge drops it; 0 = no TTL.
+    pub(crate) retention_secs: u32,
     /// Throttle state for the best-effort job-retention purge: the last time
     /// (ms since epoch) a sweep ran. The purge is O(n) over the whole job map
     /// and used to run on every request (including the high-frequency poll
