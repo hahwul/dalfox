@@ -387,18 +387,8 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         wait_for_signal(),
     )
     .await;
-    match drain {
-        ScanDrain::Drained => {}
-        ScanDrain::GraceElapsed => log(
-            &state,
-            "SERVER",
-            "scan drain grace elapsed — exiting with scans still winding down",
-        ),
-        ScanDrain::Interrupted => log(
-            &state,
-            "SERVER",
-            "second signal — exiting without waiting for scans",
-        ),
+    if let Some(line) = drain.log_line() {
+        log(&state, "SERVER", line);
     }
     Ok(())
 }
@@ -412,6 +402,19 @@ pub(crate) enum ScanDrain {
     GraceElapsed,
     /// `interrupt` resolved first (a second signal).
     Interrupted,
+}
+
+impl ScanDrain {
+    /// What the operator is told when scans were left running.
+    pub(crate) fn log_line(&self) -> Option<&'static str> {
+        match self {
+            ScanDrain::Drained => None,
+            ScanDrain::GraceElapsed => {
+                Some("scan drain grace elapsed — exiting with scans still winding down")
+            }
+            ScanDrain::Interrupted => Some("second signal — exiting without waiting for scans"),
+        }
+    }
 }
 
 /// Wait for the scan workers, for at most `grace`, unless `interrupt` resolves.

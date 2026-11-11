@@ -3805,6 +3805,10 @@ async fn test_mark_job_error_drops_the_raw_findings() {
     )
     .await;
     assert!(live.lock().await.is_empty());
+
+    // A job purged in the meantime is simply not there to mark.
+    mark_job_error(&state, "gone", "http://t/", "late".to_string(), None).await;
+    assert!(!state.jobs.lock().await.contains_key("gone"));
 }
 
 /// A scan still queued when the server stops never runs, but its subscriber
@@ -3826,6 +3830,9 @@ async fn test_shutdown_tells_a_queued_scans_webhook_why() {
         "http://127.0.0.1:1/".to_string(),
         ScanOptions {
             callback_url: Some(hook),
+            // The job's `ScanArgs` are built before the worker claims the job,
+            // so every option is resolved on this path too.
+            force_waf: Some("cloudflare".to_string()),
             ..ScanOptions::default()
         },
     )
@@ -3865,6 +3872,19 @@ async fn test_drain_scans_ends_on_drain_grace_or_second_signal() {
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "a second signal must not wait out the grace"
+    );
+
+    // Only the two endings that leave scans running are worth a log line.
+    assert_eq!(ScanDrain::Drained.log_line(), None);
+    assert!(
+        ScanDrain::GraceElapsed
+            .log_line()
+            .is_some_and(|l| l.contains("grace elapsed"))
+    );
+    assert!(
+        ScanDrain::Interrupted
+            .log_line()
+            .is_some_and(|l| l.contains("second signal"))
     );
 }
 
