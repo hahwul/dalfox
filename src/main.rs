@@ -29,11 +29,11 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Path to a config file (TOML or JSON). Overrides default search path.
+    /// Config file path (TOML or JSON); overrides the default search path
     #[arg(long = "config", global = true, value_name = "FILE")]
     config: Option<String>,
 
-    /// Enable debug logging (show DBG lines)
+    /// Enable debug logging
     #[arg(long = "debug", global = true)]
     debug: bool,
 
@@ -45,15 +45,15 @@ struct Cli {
     // (flag *after* the scan subcommand) keeps working — the derive
     // macro doesn't always propagate `global = true` to the parent
     // struct, so main.rs OR-merges both locations when dispatching scan.
-    /// Disable colored output (also respects NO_COLOR env var)
+    /// Disable colored output (also set by NO_COLOR)
     #[arg(long = "no-color", global = true)]
     no_color: bool,
 
-    /// Silence all logs except POC output to STDOUT
+    /// Suppress logs; print only PoC lines to stdout
     #[arg(short = 'S', long = "silence", global = true)]
     silence: bool,
 
-    /// Targets (when no subcommand is provided, defaults to scan)
+    /// Targets (scanned when no subcommand is given)
     #[arg(value_name = "TARGET")]
     targets: Vec<String>,
 }
@@ -62,11 +62,11 @@ struct Cli {
 enum Commands {
     /// Scan targets for XSS
     Scan(cmd::scan::ScanArgs),
-    /// Run API/server mode
+    /// Run the REST API server
     Server(server::ServerArgs),
-    /// Manage or enumerate payloads
+    /// Print built-in or remote payload lists
     Payload(cmd::payload::PayloadArgs),
-    /// Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
+    /// Run the MCP (Model Context Protocol) stdio server
     Mcp,
     /// Generate shell completion scripts
     Completion {
