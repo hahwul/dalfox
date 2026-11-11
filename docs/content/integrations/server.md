@@ -385,7 +385,15 @@ before it submits. It is `null` for a caller that did not send the API key.
     "blind_oob": true,
     "blind_oob_wait": 30,
     "session_check": "Sign out",
-    "session_check_url": "https://app/me"
+    "session_check_url": "https://app/me",
+    "sxss": true,
+    "sxss_url": ["https://app/comments"],
+    "sxss_method": "GET",
+    "sxss_retries": 3,
+    "ignore_param": ["csrf_token"],
+    "ignore_return": [302, 404],
+    "retries": 0,
+    "retry_delay": 1000
   }
 }
 ```
@@ -399,7 +407,8 @@ as aliases, so an argument dict written for `scan_with_dalfox` works here too:
 
 Numeric options are range-checked and an out-of-range value is a `400`:
 `timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `worker` `1`–`500`,
-`scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`.
+`scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`,
+`sxss_retries` `0`–`20`, `retries` `0`–`100`, `retry_delay` `0`–`60000` ms.
 
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
 outdated / known-vulnerable JS libraries as informational `[I]` findings
@@ -473,6 +482,20 @@ turn on session-loss detection even without cookies (see the dead-session note
 further down). A regex that does not compile or a non-`http(s)` probe URL is a
 `400`.
 
+`sxss` turns on [stored XSS](../../guide/stored-xss/) mode: payloads are
+injected at the target and looked for on `sxss_url` (a list of absolute
+`http(s)` URLs) and on the pages discovery ties to the injected form.
+`sxss_method` (default `GET`) is the method of that check request and
+`sxss_retries` (default `3`) how often it is repeated for a store that shows up
+late. `sxss_url` without `sxss: true` is a `400`, because the URL would never be
+read.
+
+`ignore_param` lists parameter names to leave untested (a CSRF token, say), and
+`ignore_return` lists HTTP status codes (`100`–`599`) whose responses are
+skipped. `retries` (default `0`) retries a request that failed with a 5xx or a
+transient transport error, waiting `retry_delay` ms (default `1000`, doubling
+per attempt) in between; a `429` is retried regardless.
+
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached
 the scan stops, keeps whatever partial findings it gathered, and settles as
@@ -487,8 +510,9 @@ flag caps every submitted scan the same way `--rate-limit` does.
 `blind_callback_url`) are not read here. As in the JSON body, an unknown query
 parameter is a `400`; the JSONP callback parameter and jQuery's `_` cache-buster
 are the two exceptions. List options
-(`encoders`, `param`, `remote_payloads`, `remote_wordlists`) are
-comma-separated. `header` packs several headers into one value and is split
+(`encoders`, `param`, `remote_payloads`, `remote_wordlists`, `ignore_param`,
+`ignore_return`) are comma-separated. `sxss_url` is the exception: a comma is
+legal inside a URL, so the query takes one URL whole (use `POST` for several). `header` packs several headers into one value and is split
 only at a comma that starts a new `Name:`, so a comma inside a value such as
 `Accept: text/html,application/xhtml+xml` survives. Booleans read `1`, `true`,
 `yes` or `on` (any case) as true and anything else as false. A number that is

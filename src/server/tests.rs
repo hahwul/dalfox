@@ -920,6 +920,46 @@ async fn test_get_scan_rejects_an_unknown_query_parameter() {
 }
 
 #[tokio::test]
+async fn test_get_scan_reads_the_stored_xss_and_retry_options() {
+    let query = |pairs: &[(&str, &str)]| -> Map<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    let opts = scan_options_from_query(&query(&[
+        ("sxss", "1"),
+        // A comma is legal in a URL: the value is one URL, not a list.
+        ("sxss_url", "https://app/list?ids=1,2"),
+        ("sxss_method", "POST"),
+        ("sxss_retries", "5"),
+        ("ignore_param", "csrf, token"),
+        ("ignore_return", "302, 404"),
+        ("retries", "2"),
+        ("retry_delay", "250"),
+    ]))
+    .expect("valid query");
+    assert_eq!(opts.sxss, Some(true));
+    assert_eq!(
+        opts.sxss_url,
+        Some(vec!["https://app/list?ids=1,2".to_string()])
+    );
+    assert_eq!(opts.sxss_method.as_deref(), Some("POST"));
+    assert_eq!(opts.sxss_retries, Some(5));
+    assert_eq!(
+        opts.ignore_param,
+        Some(vec!["csrf".to_string(), "token".to_string()])
+    );
+    assert_eq!(opts.ignore_return, Some(vec![302, 404]));
+    assert_eq!(opts.retries, Some(2));
+    assert_eq!(opts.retry_delay, Some(250));
+
+    let err = scan_options_from_query(&query(&[("ignore_return", "302,nope")]))
+        .expect_err("a non-numeric status code");
+    assert!(err.contains("ignore_return"), "{err}");
+}
+
+#[tokio::test]
 async fn test_start_scan_handler_success_jsonp_response() {
     let state = make_state(None, None, false, true, "cb");
     let mut q = Map::new();
@@ -1466,6 +1506,96 @@ async fn test_run_scan_job_without_credentials_is_untouched_by_session_monitorin
         "an unauthenticated job has no session to lose: {error:?}"
     );
     assert!(error.is_none(), "{error:?}");
+}
+
+/// A stored-XSS target: `/save?msg=` keeps the value and answers with a fixed
+/// page that reflects nothing; `/view` renders the stored value unescaped.
+async fn start_stored_xss_target_server() -> SocketAddr {
+    let stored = Arc::new(std::sync::Mutex::new(String::new()));
+    let html = |body: String| {
+        (
+            StatusCode::OK,
+            [("content-type", "text/html; charset=utf-8")],
+            body,
+        )
+    };
+    let save_store = stored.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            any(move |Query(q): Query<Map<String, String>>| {
+                if let Some(msg) = q.get("msg") {
+                    *save_store.lock().unwrap() = msg.clone();
+                }
+                async move { html("<html><body>saved</body></html>".to_string()) }
+            }),
+        )
+        .route(
+            "/view",
+            any(move || {
+                let body = format!(
+                    "<html><body><div>{}</div></body></html>",
+                    stored.lock().unwrap()
+                );
+                async move { html(body) }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind stored-xss target listener");
+    let addr = listener.local_addr().expect("stored-xss target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
+/// Stored XSS through a REST job. The injection point reflects nothing, so the
+/// same scan without `sxss` is clean — which is all the API could report before
+/// the option existed on this surface.
+#[tokio::test]
+async fn test_run_scan_job_finds_stored_xss_only_in_sxss_mode() {
+    crate::ensure_crypto_provider();
+    let run = |sxss: bool| async move {
+        let addr = start_stored_xss_target_server().await;
+        let state = make_state(None, None, false, false, "callback");
+        let id = "sxss".to_string();
+        state
+            .jobs
+            .lock()
+            .await
+            .insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+        let mut opts = ScanOptions {
+            param: Some(vec!["msg".to_string()]),
+            skip_mining: Some(true),
+            skip_ast_analysis: Some(true),
+            ..ScanOptions::default()
+        };
+        if sxss {
+            opts.sxss = Some(true);
+            opts.sxss_url = Some(vec![format!("http://{addr}/view")]);
+        }
+        validate_scan_options(&mut opts).expect("valid options");
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            run_scan_job(
+                state.clone(),
+                id.clone(),
+                format!("http://{addr}/save?msg=hello"),
+                opts,
+            ),
+        )
+        .await
+        .expect("scan finishes in time");
+        let jobs = state.jobs.lock().await;
+        let job = jobs.get(&id).expect("job");
+        assert_eq!(job.status, JobStatus::Done, "{:?}", job.error_message);
+        job.results.as_ref().map_or(0, |r| r.len())
+    };
+
+    assert_eq!(run(false).await, 0, "the injection point reflects nothing");
+    assert!(run(true).await > 0, "sxss must find the payload on /view");
 }
 
 #[tokio::test]

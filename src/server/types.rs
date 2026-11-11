@@ -327,6 +327,23 @@ pub(crate) struct ScanOptions {
     pub(crate) session_check: Option<String>,
     /// Probe this URL instead of the target when checking the session.
     pub(crate) session_check_url: Option<String>,
+    /// Stored-XSS mode: inject at the target, then look for the payload on
+    /// `sxss_url` and on the pages discovery ties to the injected form.
+    pub(crate) sxss: Option<bool>,
+    /// Absolute http(s) URLs to check for the stored payload. Needs `sxss`.
+    pub(crate) sxss_url: Option<Vec<String>>,
+    /// HTTP method for the stored-XSS check request (default GET).
+    pub(crate) sxss_method: Option<String>,
+    /// Re-checks of the stored-XSS URL for slow propagation (default 3, max 20).
+    pub(crate) sxss_retries: Option<u32>,
+    /// Parameter names to leave untested.
+    pub(crate) ignore_param: Option<Vec<String>>,
+    /// HTTP status codes whose responses are skipped (e.g. [302, 404]).
+    pub(crate) ignore_return: Option<Vec<u16>>,
+    /// Retries on 5xx and transient transport errors (default 0, max 100).
+    pub(crate) retries: Option<u32>,
+    /// Base backoff between retries, in ms (default 1000, max 60000).
+    pub(crate) retry_delay: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

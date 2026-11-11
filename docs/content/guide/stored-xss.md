@@ -105,6 +105,12 @@ dalfox scan https://target.app/support/ticket \
 
 You still need to wait for someone to view the page; the callback tells you when it happens. `--blind-oob` instead of `-b` has Dalfox poll an interactsh session and report a callback as a `V` finding, but only one that arrives before `--blind-oob-wait` runs out; a view hours later reaches only a listener you run yourself. See [Blind XSS](../scanning-modes/#blind-xss).
 
+## Server and MCP
+
+The [REST server](../../integrations/server/) and the [MCP](../../integrations/mcp/)
+scan tool take the same mode as request options: `sxss`, `sxss_url` (a list),
+`sxss_method` and `sxss_retries`.
+
 ## Tips
 
 - **Scope narrowly.** Use `-p` to name the fields you know are rendered on the retrieval URL, so Dalfox does not test every input it finds.

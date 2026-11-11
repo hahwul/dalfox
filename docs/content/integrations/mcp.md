@@ -63,6 +63,9 @@ Submit a scan. The call returns right away unless you pass `wait: true`.
   "blind_oob_wait": 30,
   "session_check": "Sign out",
   "session_check_url": "https://app/me",
+  "sxss": true,
+  "sxss_url": ["https://app/comments"],
+  "ignore_param": ["csrf_token"],
   "deep_scan": false,
   "skip_ast_analysis": false,
   "analyze_external_js": false,
@@ -108,6 +111,15 @@ how long polling continues after the scan's last request and counts against
 turn on session-loss detection even without cookies; an invalid regex or a
 non-`http(s)` probe URL is an `invalid_params` error. See the dead-session note
 under `get_results_dalfox`.
+
+`sxss` turns on [stored XSS](../../guide/stored-xss/) mode: payloads are
+injected at the target and looked for on `sxss_url` (a list of absolute
+`http(s)` URLs where the stored value is shown) and on the pages discovery ties
+to the injected form. `sxss_method` and `sxss_retries` (`0`–`20`) tune the
+check request. `sxss_url` without `sxss: true` is an `invalid_params` error.
+`ignore_param` names parameters to leave untested, `ignore_return` lists HTTP
+status codes whose responses are skipped, and `retries` (`0`–`100`) with
+`retry_delay` (`0`–`60000` ms) retries 5xx and transient transport failures.
 
 `insecure` controls TLS certificate validation (default `true`, scanner-friendly):
 set it `false` to enforce certificate validation and reject self-signed or
@@ -166,6 +178,14 @@ default. `target` is the only required one:
   "blind_oob_wait": 30,
   "session_check": null,
   "session_check_url": null,
+  "sxss": false,
+  "sxss_url": [],
+  "sxss_method": "GET",
+  "sxss_retries": 3,
+  "ignore_param": [],
+  "ignore_return": [],
+  "retries": 0,
+  "retry_delay": 1000,
   "workers": 50,
   "rate_limit": 0,
   "waf_bypass": "auto",

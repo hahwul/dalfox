@@ -377,7 +377,15 @@ curl http://127.0.0.1:6664/health
     "blind_oob": true,
     "blind_oob_wait": 30,
     "session_check": "Sign out",
-    "session_check_url": "https://app/me"
+    "session_check_url": "https://app/me",
+    "sxss": true,
+    "sxss_url": ["https://app/comments"],
+    "sxss_method": "GET",
+    "sxss_retries": 3,
+    "ignore_param": ["csrf_token"],
+    "ignore_return": [302, 404],
+    "retries": 0,
+    "retry_delay": 1000
   }
 }
 ```
@@ -390,7 +398,8 @@ curl http://127.0.0.1:6664/health
 
 숫자 옵션은 범위를 검사하며, 범위를 벗어나면 `400`입니다: `timeout` `1`~`299`초,
 `delay` `0`~`9999`ms, `worker` `1`~`500`, `scan_timeout` `0`~`86400`초,
-`max_payloads_per_param` `0`~`100000`.
+`max_payloads_per_param` `0`~`100000`, `sxss_retries` `0`~`20`, `retries` `0`~`100`,
+`retry_delay` `0`~`60000`ms.
 
 `detect_outdated_libs`는 옵트인 방식입니다 (기본값 `false`). `true`로 설정하면
 오래되었거나 알려진 취약점이 있는 JS 라이브러리도 정보성 `[I]` 탐지 결과로
@@ -456,6 +465,17 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 끊어진 세션 설명을 보세요. 컴파일되지 않는 정규식이나 `http(s)`가 아닌 조회 URL은
 `400`입니다.
 
+`sxss`는 [저장형 XSS](../../guide/stored-xss/) 모드를 켭니다. 대상에 페이로드를 주입한 뒤
+`sxss_url`(절대 `http(s)` URL 목록)과, 탐색이 주입한 폼과 연결한 페이지에서 그 페이로드를
+찾습니다. `sxss_method`(기본값 `GET`)는 그 조회 요청의 메서드이고, `sxss_retries`(기본값
+`3`)는 늦게 보이는 저장소를 위해 조회를 반복하는 횟수입니다. `sxss: true` 없이 `sxss_url`만
+보내면 그 URL을 읽을 일이 없으므로 `400`입니다.
+
+`ignore_param`은 테스트하지 않을 파라미터 이름 목록(CSRF 토큰 등)이고, `ignore_return`은
+응답을 건너뛸 HTTP 상태 코드(`100`~`599`) 목록입니다. `retries`(기본값 `0`)는 5xx나 일시적
+전송 오류로 실패한 요청을 다시 보내며, 그 사이에 `retry_delay`ms(기본값 `1000`, 시도마다
+두 배)를 기다립니다. `429`는 이 값과 무관하게 재시도합니다.
+
 `scan_timeout`은 스캔 전체의 벽시계 시간 예산(초)입니다 (기본값 `0` = 무제한).
 요청당 `timeout`과는 구별됩니다. 예산에 도달하면 스캔이 중단되고, 그때까지 수집한
 부분 탐지 결과를 유지하며, `SCAN_TIMEOUT:`이 담긴 `error_message`와 함께
@@ -469,7 +489,9 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 받지만, MCP 별칭(`workers`, `headers`, `cookies`, `blind_callback_url`)은 읽지
 않습니다. JSON 본문과 마찬가지로 모르는 쿼리 파라미터는 `400`입니다. JSONP 콜백
 파라미터와 jQuery가 붙이는 `_` 캐시 버스터만 예외입니다. 리스트 옵션(`encoders`,
-`param`, `remote_payloads`, `remote_wordlists`)은 쉼표로 구분합니다. `header`는 여러
+`param`, `remote_payloads`, `remote_wordlists`, `ignore_param`, `ignore_return`)은 쉼표로
+구분합니다. `sxss_url`만 예외입니다. URL 안에는 쉼표가 올 수 있어서 쿼리에서는 URL 하나를
+통째로 받습니다(여러 개는 `POST`로 보내세요). `header`는 여러
 헤더를 한 값에 담으며, 새 `Name:`이 시작되는 쉼표에서만 나눕니다. 그래서
 `Accept: text/html,application/xhtml+xml`처럼 값 안에 든 쉼표는 그대로 남습니다.
 불리언은 `1`, `true`, `yes`, `on`(대소문자 무관)을 참으로, 그 밖의 값은 거짓으로

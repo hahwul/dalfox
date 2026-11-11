@@ -541,6 +541,13 @@ pub(crate) struct ScanOptionChecks<'a, F = f32> {
     pub blind_oob_wait: Option<u64>,
     pub session_check: Option<&'a mut Option<String>>,
     pub session_check_url: Option<&'a mut Option<String>>,
+    pub sxss: bool,
+    pub sxss_url: Option<&'a mut Vec<String>>,
+    pub sxss_method: Option<&'a mut String>,
+    pub sxss_retries: Option<u32>,
+    pub ignore_return: &'a [u16],
+    pub retries: Option<u32>,
+    pub retry_delay: Option<u64>,
 }
 
 impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
@@ -658,6 +665,57 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
             self.session_check.unwrap_or(&mut None),
             self.session_check_url.unwrap_or(&mut None),
         )?;
+        // Same bounds and URL check the CLI applies at startup.
+        if let Some(urls) = self.sxss_url {
+            // Blank entries are a templated `?sxss_url=`, not a URL.
+            urls.retain_mut(|u| {
+                *u = u.trim().to_string();
+                !u.is_empty()
+            });
+            for u in urls.iter() {
+                crate::cmd::scan::validate_http_url(u, "sxss_url")?;
+            }
+            // The check URL is only read in stored-XSS mode, so on its own it
+            // would be dropped and the scan reported as an ordinary clean one.
+            if !urls.is_empty() && !self.sxss {
+                return Err("sxss_url has no effect without sxss: true".to_string());
+            }
+        }
+        if let Some(m) = self.sxss_method {
+            *m = crate::cmd::scan::parse_http_method_arg(m)?;
+        }
+        for (field, value, max) in [
+            (
+                "sxss_retries",
+                self.sxss_retries.map(u64::from),
+                u64::from(crate::cmd::scan::CLI_MAX_SXSS_RETRIES),
+            ),
+            (
+                "retries",
+                self.retries.map(u64::from),
+                u64::from(crate::cmd::scan::CLI_MAX_RETRIES),
+            ),
+            (
+                "retry_delay",
+                self.retry_delay,
+                crate::cmd::scan::CLI_MAX_RETRY_DELAY_MS,
+            ),
+        ] {
+            if let Some(v) = value
+                && v > max
+            {
+                return Err(format!("{field} must be between 0 and {max} (got {v})"));
+            }
+        }
+        if let Some(code) = self
+            .ignore_return
+            .iter()
+            .find(|c| !(100..=599).contains(*c))
+        {
+            return Err(format!(
+                "ignore_return {code} is not an HTTP status code (100-599)"
+            ));
+        }
         Ok(())
     }
 }

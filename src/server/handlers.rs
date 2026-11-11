@@ -329,13 +329,23 @@ pub(crate) const SCAN_QUERY_KEYS: &[&str] = &[
     "blind_oob",
     "session_check",
     "session_check_url",
+    "sxss",
+    "sxss_url",
+    "sxss_method",
+    "sxss_retries",
+    "ignore_param",
+    "ignore_return",
+    "retries",
+    "retry_delay",
 ];
 
 /// `ScanOptions` from the `GET /scan` query. A present-but-unparseable number
 /// is an `Err` (a 400) naming the first bad key in the order below, not a silent
 /// fallback to the default (which is what `.parse().ok()` used to do). Absent
 /// keys stay `None` and take the JSON body's defaults.
-fn scan_options_from_query(params: &HashMap<String, String>) -> Result<ScanOptions, String> {
+pub(crate) fn scan_options_from_query(
+    params: &HashMap<String, String>,
+) -> Result<ScanOptions, String> {
     let s = |k: &str| params.get(k).cloned();
     let csv = |k: &str| params.get(k).map(|v| split_csv(v));
     // Lenient boolean parse (1/true/yes/on) shared with DELETE; see parse_bool_query.
@@ -386,6 +396,28 @@ fn scan_options_from_query(params: &HashMap<String, String>) -> Result<ScanOptio
         blind_oob: params.get("blind_oob").and_then(|v| blind_oob_query(v)),
         session_check: s("session_check"),
         session_check_url: s("session_check_url"),
+        sxss: flag("sxss"),
+        // One URL, taken whole: a comma is legal inside a URL, so this is not
+        // a comma-separated list. POST takes several.
+        sxss_url: s("sxss_url").map(|u| vec![u]),
+        sxss_method: s("sxss_method"),
+        sxss_retries: parse_num_query(params, "sxss_retries")?,
+        ignore_param: csv("ignore_param"),
+        ignore_return: params
+            .get("ignore_return")
+            .map(|raw| {
+                split_csv(raw)
+                    .iter()
+                    .map(|code| {
+                        code.parse::<u16>().map_err(|_| {
+                            format!("ignore_return must list HTTP status codes (got '{code}')")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?,
+        retries: parse_num_query(params, "retries")?,
+        retry_delay: parse_num_query(params, "retry_delay")?,
     })
 }
 
