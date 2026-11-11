@@ -116,7 +116,7 @@ claude mcp add dalfox -- dalfox mcp
 페이지에서 그 페이로드를 찾습니다. `sxss_method`와 `sxss_retries`(`0`–`20`)로 조회 요청을
 조정합니다. `sxss: true` 없이 `sxss_url`만 보내면 `invalid_params` 오류입니다.
 `ignore_param`은 테스트하지 않을 파라미터 이름, `ignore_return`은 응답을 건너뛸 HTTP 상태
-코드 목록이며, `retries`(`0`–`100`)와 `retry_delay`(`0`–`60000`ms)는 5xx와 일시적 전송
+코드 목록이며, `retries`(`0`–`5`)와 `retry_delay`(`0`–`10000`ms)는 5xx와 일시적 전송
 오류를 재시도합니다.
 
 `insecure`는 TLS 인증서 검증을 제어합니다(기본값 `true`, 스캐너 친화적).

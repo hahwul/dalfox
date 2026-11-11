@@ -141,17 +141,15 @@ impl Default for ScanRequestSpec {
     /// [`ScanRequestSpec::from_rest_options`] fills its `Option` fields from
     /// here.
     fn default() -> Self {
-        // Stored-XSS defaults have no named constant; read them off the CLI's.
-        let cli = ScanArgs::default();
         Self {
-            sxss: cli.sxss,
-            sxss_url: cli.sxss_url,
-            sxss_method: cli.sxss_method,
-            sxss_retries: cli.sxss_retries,
-            ignore_param: cli.ignore_param,
-            ignore_return: cli.ignore_return,
-            retries: cli.retries,
-            retry_delay: cli.retry_delay,
+            sxss: false,
+            sxss_url: Vec::new(),
+            sxss_method: crate::cmd::scan::DEFAULT_SXSS_METHOD.to_string(),
+            sxss_retries: crate::cmd::scan::DEFAULT_SXSS_RETRIES,
+            ignore_param: Vec::new(),
+            ignore_return: Vec::new(),
+            retries: crate::cmd::scan::DEFAULT_RETRIES,
+            retry_delay: crate::cmd::scan::DEFAULT_RETRY_DELAY_MS,
             target: String::new(),
             param: Vec::new(),
             data: None,

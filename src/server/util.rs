@@ -36,6 +36,7 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
         sxss_url: opts.sxss_url.as_mut(),
         sxss_method: opts.sxss_method.as_mut(),
         sxss_retries: opts.sxss_retries,
+        ignore_param: opts.ignore_param.as_mut(),
         ignore_return: opts.ignore_return.as_deref().unwrap_or_default(),
         retries: opts.retries,
         retry_delay: opts.retry_delay,

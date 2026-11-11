@@ -118,8 +118,8 @@ injected at the target and looked for on `sxss_url` (a list of absolute
 to the injected form. `sxss_method` and `sxss_retries` (`0`–`20`) tune the
 check request. `sxss_url` without `sxss: true` is an `invalid_params` error.
 `ignore_param` names parameters to leave untested, `ignore_return` lists HTTP
-status codes whose responses are skipped, and `retries` (`0`–`100`) with
-`retry_delay` (`0`–`60000` ms) retries 5xx and transient transport failures.
+status codes whose responses are skipped, and `retries` (`0`–`5`) with
+`retry_delay` (`0`–`10000` ms) retries 5xx and transient transport failures.
 
 `insecure` controls TLS certificate validation (default `true`, scanner-friendly):
 set it `false` to enforce certificate validation and reject self-signed or

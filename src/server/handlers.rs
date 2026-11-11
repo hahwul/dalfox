@@ -83,14 +83,17 @@ async fn queue_scan(r: &Reply<'_>, url: String, mut opts: ScanOptions) -> ApiRep
 
     // `limits` is what the scan actually runs with once the server-wide
     // `--rate-limit` / `--scan-timeout` caps are folded in (0 = unlimited) —
-    // otherwise a capped request has no way to see that it was capped.
+    // otherwise a capped request has no way to see that it was capped. The
+    // capped values are written back into the options the job is spawned
+    // with, so the reply and the scan read the same numbers.
+    let rate_limit = effective_rate_limit(opts.rate_limit, r.state.rate_limit);
+    let scan_timeout = effective_scan_timeout(opts.scan_timeout, r.state.scan_timeout);
+    opts.rate_limit = Some(rate_limit);
+    opts.scan_timeout = Some(scan_timeout);
     let body = serde_json::json!({
         "scan_id": id,
         "target": url,
-        "limits": {
-            "rate_limit": effective_rate_limit(opts.rate_limit, r.state.rate_limit),
-            "scan_timeout": effective_scan_timeout(opts.scan_timeout, r.state.scan_timeout),
-        },
+        "limits": { "rate_limit": rate_limit, "scan_timeout": scan_timeout },
     });
     spawn_scan_task(r.state.clone(), id, url, opts, lease);
     r.ok(body)
@@ -703,7 +706,7 @@ pub(crate) async fn preflight_handler(
                 let mut target = hydrate_preflight_target(&target_url, &opts, timeout_secs)
                     .map_err(PreflightError::BadUrl)?;
 
-                let scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
+                let mut scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
                     target: target_url.clone(),
                     param: vec![],
                     method: opts
@@ -731,6 +734,10 @@ pub(crate) async fn preflight_handler(
                             .collect()
                     }),
                 });
+                // A stored-XSS write endpoint echoes nothing, so discovery only
+                // keeps its inputs in this mode — without it preflight answers
+                // "0 parameters" for a scan that will test them.
+                scan_args.sxss = opts.sxss.unwrap_or(false);
                 Ok(crate::job::runner::preflight(
                     &mut target,
                     &target_url,

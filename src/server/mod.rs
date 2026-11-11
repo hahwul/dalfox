@@ -264,6 +264,16 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         );
     }
 
+    // Both bounds on finished scans are off, so nothing ever drops one.
+    if state.retention_secs == 0 && state.max_retained_scans == 0 {
+        log(
+            &state,
+            "WRN",
+            "--retention-secs 0 with --max-retained-scans 0 keeps every finished scan \
+             (and its results) in memory until the server exits.",
+        );
+    }
+
     // An origin pattern that could not be compiled is dropped, which fails
     // closed: the web UI it described starts getting 403s from the cross-site
     // gate. Reported here rather than at compile time so it lands in

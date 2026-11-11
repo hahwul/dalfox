@@ -103,6 +103,7 @@ Most scan flags have direct equivalents in `scan_with_dalfox` (including `max_pa
 - Managed `--blind-oob` lifecycle and `--session-check` are now on MCP/server too (`blind_oob` / `blind_oob_wait`, `session_check` / `session_check_url`); the poller is bound to the job. Only `--blind-oob-secret` (self-hosted auth) stays CLI/config-only.
 - Multi-target / HAR / raw-http fan-out — CLI-only (call MCP once per URL)
 - `preflight_dalfox.param` is accepted but **not applied** (full discovery impact estimate); pass `param` on `scan_with_dalfox`
-- CLI-only (no MCP or REST key): scope filters (`--include-url`, `--exclude-url`, `--ignore-param`, `--out-of-scope*`), custom payloads (`--custom-payload`, `--only-custom-payload`, `--custom-blind-xss-payload`, `--inject-marker`, `--custom-alert-*`), `--sxss*`, `--hpp`, mining granularity (`--skip-mining-dom`/`-dict`, `-W`, `--skip-reflection-*`), `--retries`, `--ignore-return`, and every output/report control (`--poc-type`, `--only-poc`, `--limit`, `--baseline`, `--state-file`, `--dedup-urls`)
+- Stored XSS (`sxss`, `sxss_url`, `sxss_method`, `sxss_retries`), `ignore_param`, `ignore_return`, and `retries` / `retry_delay` (capped at 5 / 10000 ms) are on MCP/server too.
+- CLI-only (no MCP or REST key): scope filters (`--include-url`, `--exclude-url`, `--out-of-scope*`), custom payloads (`--custom-payload`, `--only-custom-payload`, `--custom-blind-xss-payload`, `--inject-marker`, `--custom-alert-*`), `--hpp`, mining granularity (`--skip-mining-dom`/`-dict`, `-W`, `--skip-reflection-*`), and every output/report control (`--poc-type`, `--only-poc`, `--limit`, `--baseline`, `--state-file`, `--dedup-urls`)
 
 When you need one of these, run the CLI with `-f json` and parse the envelope (see `results.md`).

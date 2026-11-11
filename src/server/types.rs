@@ -72,8 +72,8 @@ pub struct ServerArgs {
     pub max_retained_scans: usize,
 
     /// Seconds a finished (done/error/cancelled) scan stays readable before it
-    /// is dropped. 0 keeps finished scans until `--max-retained-scans` evicts
-    /// them.
+    /// is dropped. Swept at most once a minute, so shorter values act as a
+    /// minute. 0 keeps finished scans until `--max-retained-scans` evicts them.
     #[clap(help_heading = "SERVER")]
     #[arg(long = "retention-secs", default_value_t = crate::job::JOB_RETENTION_SECS as u32)]
     pub retention_secs: u32,
@@ -340,9 +340,9 @@ pub(crate) struct ScanOptions {
     pub(crate) ignore_param: Option<Vec<String>>,
     /// HTTP status codes whose responses are skipped (e.g. [302, 404]).
     pub(crate) ignore_return: Option<Vec<u16>>,
-    /// Retries on 5xx and transient transport errors (default 0, max 100).
+    /// Retries on 5xx and transient transport errors (default 0, max 5).
     pub(crate) retries: Option<u32>,
-    /// Base backoff between retries, in ms (default 1000, max 60000).
+    /// Base backoff between retries, in ms (default 1000, max 10000).
     pub(crate) retry_delay: Option<u64>,
 }
 

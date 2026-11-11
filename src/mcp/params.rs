@@ -367,7 +367,7 @@ pub(crate) struct ScanWithDalfoxParams {
     pub sxss_url: Vec<String>,
 
     /// HTTP method for the stored-XSS check request. Default: "GET"
-    #[serde(default = "default_method")]
+    #[serde(default = "default_sxss_method")]
     pub sxss_method: String,
 
     /// Re-checks of the stored-XSS URL for slow propagation (0-20). Default: 3
@@ -384,15 +384,15 @@ pub(crate) struct ScanWithDalfoxParams {
     #[serde(default)]
     pub ignore_return: Vec<u16>,
 
-    /// Retries on HTTP 5xx and transient transport errors (0-100; 429 is
+    /// Retries on HTTP 5xx and transient transport errors (0-5; 429 is
     /// always retried). Default: 0
     #[serde(default)]
-    #[schemars(range(max = 100))]
+    #[schemars(range(max = 5))]
     pub retries: u32,
 
-    /// Base backoff between retries in ms (0-60000). Default: 1000
+    /// Base backoff between retries in ms (0-10000). Default: 1000
     #[serde(default = "default_retry_delay")]
-    #[schemars(range(max = 60000))]
+    #[schemars(range(max = 10000))]
     pub retry_delay: u64,
 
     /// When true, block until the scan reaches a terminal status (done / error
@@ -423,8 +423,11 @@ pub(super) const MAX_WAIT_TIMEOUT_SECS: u64 = 86_400;
 pub(super) fn default_method() -> String {
     crate::cmd::scan::DEFAULT_METHOD.to_string()
 }
+pub(super) fn default_sxss_method() -> String {
+    crate::cmd::scan::DEFAULT_SXSS_METHOD.to_string()
+}
 pub(super) fn default_sxss_retries() -> u32 {
-    crate::cmd::scan::ScanArgs::default().sxss_retries
+    crate::cmd::scan::DEFAULT_SXSS_RETRIES
 }
 pub(super) fn default_retry_delay() -> u64 {
     crate::cmd::scan::DEFAULT_RETRY_DELAY_MS

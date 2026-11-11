@@ -9,7 +9,7 @@ Dalfox가 읽는 환경 변수는 아래와 같습니다.
 
 | 변수 | 사용 위치 | 용도 |
 |----------|---------|---------|
-| `DALFOX_API_KEY` | `dalfox server` | `X-API-KEY` 헤더에 요구되는 값. `--api-key`를 주지 않았을 때만 읽으며, 빈 값은 무시합니다. |
+| `DALFOX_API_KEY` | `dalfox server` | 모든 요청이 `X-API-KEY` 또는 `Authorization: Bearer`로 보내야 하는 API 키. `--api-key`를 주지 않았을 때만 읽으며, 빈 값은 무시합니다. |
 | `DALFOX_STDIN_WAIT_MS` | `dalfox scan` (auto 입력) | 명령줄에도 대상을 준 상태에서 파이프된 `stdin`의 첫 바이트를 기다릴 밀리초. 기본값 `500`, `0`이면 stdin 병합을 건너뜁니다. 정수가 아닌 값은 `500`으로 처리하고, `3600000`(1시간)을 넘는 값은 그 값으로 제한합니다. 항상 대기하는 `--input-type pipe`/`har`에는 적용되지 않습니다. |
 | `NO_COLOR` | 모든 모드 | 빈 문자열을 포함해 어떤 값이든 설정되어 있으면 ANSI 색상 출력을 끕니다. `--no-color`, 설정 파일의 `no_color = true`와 같습니다. [NO_COLOR](https://no-color.org) 관례를 따릅니다. |
 | `XDG_CONFIG_HOME` | 설정 로더 | 설정 파일의 기준 디렉터리 (`$XDG_CONFIG_HOME/dalfox/config.toml`, TOML 파일이 없으면 `config.json`). 설정되지 않았거나 비어 있으면 `$HOME/.config`로 폴백. |

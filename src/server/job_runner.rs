@@ -529,5 +529,6 @@ pub(crate) fn hydrate_preflight_target(
         .unwrap_or_default();
     crate::job::lift_cookie_headers(&mut t.headers, &mut t.cookies);
     t.data = opts.data.clone();
+    t.ignore_return = opts.ignore_return.clone().unwrap_or_default();
     Ok(t)
 }

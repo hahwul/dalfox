@@ -57,6 +57,13 @@ pub(crate) const MAX_WORKERS: usize = 500;
 /// 24h). `0` always means "no budget" (unbounded). The ceiling only exists to
 /// reject obvious typos; a real long-running deep scan can still set hours.
 pub(crate) const MAX_SCAN_TIMEOUT_SECS: u64 = 86_400;
+/// Request-level `retries` cap, far below the CLI's. A retry backoff does not
+/// poll the job's cancel flag, so every retry a caller asks for is time a
+/// cancelled job keeps sending: at 5 retries of a default-timeout request the
+/// worst case stays inside [`WORKER_DRAIN_GRACE_SECS`].
+pub(crate) const MAX_RETRIES: u32 = 5;
+/// Request-level `retry_delay` cap (ms), for the same reason.
+pub(crate) const MAX_RETRY_DELAY_MS: u64 = 10_000;
 
 /// Cap on the number of distinct parameters a single async (server/MCP) scan
 /// will test. `analyze_parameters` can discover/mine a very large parameter set
@@ -545,6 +552,7 @@ pub(crate) struct ScanOptionChecks<'a, F = f32> {
     pub sxss_url: Option<&'a mut Vec<String>>,
     pub sxss_method: Option<&'a mut String>,
     pub sxss_retries: Option<u32>,
+    pub ignore_param: Option<&'a mut Vec<String>>,
     pub ignore_return: &'a [u16],
     pub retries: Option<u32>,
     pub retry_delay: Option<u64>,
@@ -665,7 +673,7 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
             self.session_check.unwrap_or(&mut None),
             self.session_check_url.unwrap_or(&mut None),
         )?;
-        // Same bounds and URL check the CLI applies at startup.
+        // The URL check and `sxss_retries` bound are the CLI's startup ones.
         if let Some(urls) = self.sxss_url {
             // Blank entries are a templated `?sxss_url=`, not a URL.
             urls.retain_mut(|u| {
@@ -693,19 +701,23 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
             (
                 "retries",
                 self.retries.map(u64::from),
-                u64::from(crate::cmd::scan::CLI_MAX_RETRIES),
+                u64::from(MAX_RETRIES),
             ),
-            (
-                "retry_delay",
-                self.retry_delay,
-                crate::cmd::scan::CLI_MAX_RETRY_DELAY_MS,
-            ),
+            ("retry_delay", self.retry_delay, MAX_RETRY_DELAY_MS),
         ] {
             if let Some(v) = value
                 && v > max
             {
                 return Err(format!("{field} must be between 0 and {max} (got {v})"));
             }
+        }
+        // The filter is an exact name match, so stray whitespace would leave
+        // the parameter the caller excluded in the scan.
+        if let Some(names) = self.ignore_param {
+            names.retain_mut(|n| {
+                *n = n.trim().to_string();
+                !n.is_empty()
+            });
         }
         if let Some(code) = self
             .ignore_return

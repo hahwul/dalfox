@@ -143,16 +143,24 @@ impl<'a> Reply<'a> {
         make_api_response(self.state, self.headers, self.params, status, &resp)
     }
 
-    /// Log a refused request under `route` and answer with its envelope.
     /// A 503 for a full server, with `Retry-After` so a client backs off for a
     /// stated time instead of guessing. The value is a floor, not a promise:
     /// nothing knows when a scan slot frees.
     pub(crate) fn busy(&self, msg: impl Into<String>) -> ApiReply {
         let mut reply = self.err(StatusCode::SERVICE_UNAVAILABLE, msg);
         reply.1.insert("Retry-After", HeaderValue::from_static("5"));
+        // Not a CORS-safelisted response header: without this a web UI let in
+        // by `--allowed-origins` reads `null` for it.
+        if reply.1.contains_key("Access-Control-Allow-Origin") {
+            reply.1.insert(
+                "Access-Control-Expose-Headers",
+                HeaderValue::from_static("Retry-After"),
+            );
+        }
         reply
     }
 
+    /// Log a refused request under `route` and answer with its envelope.
     pub(crate) fn deny(&self, denied: &Denied, route: &str) -> ApiReply {
         log(self.state, "AUTH", &denied.log_message(route));
         let resp = denied.api_response();

@@ -16,7 +16,7 @@ Runs an async HTTP API (axum) that exposes the same scanning engine.
 | `--scan-timeout` | 0 (unbounded) | Server-wide ceiling on each scan's wall-clock seconds; also bounds `POST /preflight` (`504`) |
 | `--max-concurrent-scans` | 100 | Active (queued + running) cap; past it `POST`/`GET /scan` → `503` with `Retry-After`. `0` = no cap |
 | `--max-retained-scans` | 1000 | Finished jobs kept in memory; oldest evicted first. `0` = no cap |
-| `--retention-secs` | 3600 | Seconds a finished job stays readable. `0` = no TTL |
+| `--retention-secs` | 3600 | Seconds a finished job stays readable (swept at most once a minute). `0` = no TTL |
 | `--max-body-bytes` | 1048576 | Request-body limit for `POST /scan` and `/preflight` (`413` past it) |
 | `--allowed-hosts` | (none) | Extra `Host` header names accepted (DNS-rebinding gate). Set it behind a reverse proxy that forwards a public hostname |
 | `--allowed-origins` | (none) | Comma-separated. Supports `*`, exact origins (case-insensitive), `regex:<pattern>`. Patterns match the whole `Origin` (anchored), so a longer host that merely contains one is refused — and a pattern must cover the port. `*` switches the cross-site gate off, like `--jsonp` |

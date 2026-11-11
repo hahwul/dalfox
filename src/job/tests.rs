@@ -893,10 +893,20 @@ fn scan_option_checks_cover_the_stored_xss_and_retry_options() {
 
     assert!(check(&|c| c.sxss_retries = Some(20)).is_ok());
     assert!(check(&|c| c.sxss_retries = Some(21)).is_err());
-    assert!(check(&|c| c.retries = Some(100)).is_ok());
-    assert!(check(&|c| c.retries = Some(101)).is_err());
-    assert!(check(&|c| c.retry_delay = Some(60_000)).is_ok());
-    assert!(check(&|c| c.retry_delay = Some(60_001)).is_err());
+    assert!(check(&|c| c.retries = Some(MAX_RETRIES)).is_ok());
+    assert!(check(&|c| c.retries = Some(MAX_RETRIES + 1)).is_err());
+    assert!(check(&|c| c.retry_delay = Some(MAX_RETRY_DELAY_MS)).is_ok());
+    assert!(check(&|c| c.retry_delay = Some(MAX_RETRY_DELAY_MS + 1)).is_err());
+
+    // The ignore filter matches names exactly, so they are trimmed here.
+    let mut names = vec![" csrf_token ".to_string(), " ".to_string()];
+    ScanOptionChecks::<f32> {
+        ignore_param: Some(&mut names),
+        ..Default::default()
+    }
+    .validate()
+    .unwrap();
+    assert_eq!(names, vec!["csrf_token".to_string()]);
     assert!(check(&|c| c.ignore_return = &[302, 404]).is_ok());
     assert!(check(&|c| c.ignore_return = &[99]).is_err());
     assert!(check(&|c| c.ignore_return = &[4040]).is_err());
@@ -1541,9 +1551,9 @@ fn preflight_accepts_a_documented_subset_of_the_scan_options() {
         "skip_ast_analysis",
         "analyze_external_js",
         "detect_outdated_libs",
-        // Stored-XSS mode is about where a payload is looked for, a response
-        // filter and a retry policy apply to scan requests, and preflight
-        // reports the full discovered set rather than a filtered one.
+        // The MCP preflight has no stored-XSS mode, a response filter and a
+        // retry policy apply to scan requests, and preflight reports the full
+        // discovered set rather than a filtered one.
         "sxss",
         "sxss_url",
         "sxss_method",

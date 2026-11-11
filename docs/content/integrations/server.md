@@ -158,7 +158,7 @@ untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown sca
 id), `409` (purge of a scan that is still active or draining), `413` (body over
 `--max-body-bytes`), `415` (body without a JSON `Content-Type`), `500` (a
 preflight that failed inside the server), `503` (at capacity, with a
-`Retry-After` header) and `504` (a
+`Retry-After` header, exposed to allowed origins) and `504` (a
 preflight that outlived its `scan_timeout` or the server's `--scan-timeout`). The exceptions are a CORS
 preflight (`OPTIONS`), which answers `204` with no body (or a bare `403` when the
 browser gate refuses it), and a path or method not in the table, which gets a
@@ -330,6 +330,10 @@ server's `--rate-limit`). It is bounded by the request's `scan_timeout` and the
 server's `--scan-timeout`, and answers `504` when that runs out. At most 32
 preflights run at once; beyond that the server answers `503`.
 
+Preflight reports the full discovered set: `param` and `ignore_param` are not
+applied to it. `sxss` is, because a stored-XSS scan tests inputs that ordinary
+discovery drops for not reflecting.
+
 ### Health
 
 ```bash
@@ -408,7 +412,9 @@ as aliases, so an argument dict written for `scan_with_dalfox` works here too:
 Numeric options are range-checked and an out-of-range value is a `400`:
 `timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `worker` `1`–`500`,
 `scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`,
-`sxss_retries` `0`–`20`, `retries` `0`–`100`, `retry_delay` `0`–`60000` ms.
+`sxss_retries` `0`–`20`, `retries` `0`–`5`, `retry_delay` `0`–`10000` ms. The two
+retry caps are lower than the CLI's: a retry backoff does not stop for a cancel,
+so every retry is time a cancelled scan keeps sending.
 
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
 outdated / known-vulnerable JS libraries as informational `[I]` findings
@@ -573,8 +579,10 @@ retried.
   Once the cap is hit the oldest finished scans are dropped; queued and running
   scans are never dropped.
 - `--retention-secs <secs>`: how long a finished scan stays readable (default
-  `3600`). `0` turns the TTL off, leaving `--max-retained-scans` as the only
-  bound.
+  `3600`). Expired scans are swept at most once a minute, on the next request,
+  so this is not a precise deadline. `0` turns the TTL off, leaving
+  `--max-retained-scans` as the only bound; with both at `0` nothing is ever
+  dropped, and the server warns at startup.
 - `--allowed-hosts <names>`: extra hostnames accepted in the request `Host`
   header, on top of the bind host, `localhost`, and any IP literal. Needed when
   a reverse proxy forwards a public hostname; see

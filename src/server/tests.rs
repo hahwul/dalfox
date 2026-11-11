@@ -4001,8 +4001,42 @@ async fn test_start_scan_handler_503_when_at_capacity() {
         Some(&b"5"[..]),
         "a full server must say when to come back"
     );
+    assert!(
+        resp.headers()
+            .get("Access-Control-Expose-Headers")
+            .is_none(),
+        "no CORS configured, so nothing to expose"
+    );
     let body = response_body_string(resp).await;
     assert!(body.contains("at capacity"), "got {body}");
+
+    // Behind CORS the header is unreadable to a web UI unless it is exposed.
+    let mut cors_state = make_state(None, Some(vec!["http://ui.local"]), false, false, "cb");
+    cors_state.max_concurrent_scans = 1;
+    cors_state.jobs.lock().await.insert(
+        "active-1".to_string(),
+        test_job(JobStatus::Running, None, "http://busy/"),
+    );
+    let mut headers = HeaderMap::new();
+    headers.insert("Origin", HeaderValue::from_static("http://ui.local"));
+    let resp = start_scan_handler(
+        State(cors_state),
+        headers,
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://example.com".to_string(),
+            options: None,
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        resp.headers()
+            .get("Access-Control-Expose-Headers")
+            .map(|v| v.as_bytes()),
+        Some(&b"Retry-After"[..])
+    );
     // No new job queued — still just the one we seeded.
     assert_eq!(state.jobs.lock().await.len(), 1);
 }
@@ -4961,6 +4995,40 @@ async fn test_preflight_honors_delay_and_worker_options() {
          in {}ms, expected at least {floor_ms}ms",
         elapsed.as_millis()
     );
+}
+
+/// A stored-XSS write endpoint echoes nothing, so ordinary discovery keeps none
+/// of its inputs. Preflight has to describe the scan the same options start:
+/// with `sxss` the inputs are tested, so they must be listed.
+#[tokio::test]
+async fn test_preflight_lists_stored_xss_inputs_in_sxss_mode() {
+    crate::ensure_crypto_provider();
+    let discovered = |sxss: Option<bool>| async move {
+        let addr = start_stored_xss_target_server().await;
+        let resp = preflight_handler(
+            State(make_state(None, None, false, false, "cb")),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Ok(Json(ScanRequest {
+                target: format!("http://{addr}/save?msg=hello"),
+                options: Some(ScanOptions {
+                    timeout: Some(5),
+                    skip_mining: Some(true),
+                    sxss,
+                    ..ScanOptions::default()
+                }),
+            })),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = response_body_string(resp).await;
+        serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"]["params_discovered"]
+            .as_u64()
+            .expect("params_discovered")
+    };
+    assert_eq!(discovered(None).await, 0, "nothing reflects on /save");
+    assert!(discovered(Some(true)).await > 0, "sxss scans `msg`");
 }
 
 /// `encoders: ["none"]` collapses the encoder fan-out factor to 1, so the
