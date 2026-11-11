@@ -102,6 +102,11 @@ Terminal jobs auto-purge after 1 hour.
   "blind_oob_wait": 30,                            // sec to keep polling for callbacks after the scan (0–600; counts against scan_timeout)
   "session_check": "Sign out",                     // regex that must keep matching an authed response; a lost session → status "error", error_message "SESSION_LOST: …"
   "session_check_url": "https://app/me",           // probe this instead of the target when checking the session
+  "sxss": true,                                    // stored-XSS mode: inject at target, look for the payload on sxss_url
+  "sxss_url": ["https://app/comments"],            // where the stored value is shown (needs sxss=true); sxss_method / sxss_retries tune the check
+  "ignore_param": ["csrf_token"],                  // parameter names to leave untested
+  "ignore_return": [302, 404],                     // skip responses with these status codes
+  "retries": 0,                                    // retry 5xx / transient transport errors (0-5); retry_delay ms backoff (0-10000)
   "workers": 50,                                   // 1-500 (hard validated)
   "waf_bypass": "auto",                            // "auto" (detect then bypass) or "off" (detect only); "force" is accepted but acts like auto
   "skip_waf_probe": false,                         // skip the active WAF provocation probe; passive detection still runs
@@ -138,6 +143,8 @@ Terminal jobs auto-purge after 1 hour.
 - `blind_callback_url` must be empty (= no blind XSS) or start with `http://` / `https://`
 - `blind_oob` is `true`/`false` or a list of interactsh hosts (≤ 8, each a valid host); `blind_oob_wait` ∈ [0, 600]
 - `session_check` must be a valid regex; `session_check_url` must be an absolute `http(s)://` URL
+- `sxss_url` entries must be absolute `http(s)://` URLs and need `sxss: true`; `sxss_retries` ∈ [0, 20]
+- `retries` ∈ [0, 5]; `retry_delay` ∈ [0, 10000] ms (lower than the CLI caps: a retry backoff does not stop for a cancel); `ignore_return` codes ∈ [100, 599]
 - `remote_payloads` / `remote_wordlists` must name registered providers (`portswigger`, `payloadbox` / `burp`, `assetnote`)
 
 **`warnings`**: `get_results_dalfox` (and `wait=true`) adds a `warnings` string list when a non-fatal condition weakens the result — `blind_oob` failed to register or its polling failed, a `session_check` baseline could not be captured (monitoring inactive), params were capped. Absent when empty.

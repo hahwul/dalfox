@@ -64,6 +64,14 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         blind_oob_wait: None,
         session_check: None,
         session_check_url: None,
+        sxss: false,
+        sxss_url: vec![],
+        sxss_method: "GET".to_string(),
+        sxss_retries: 3,
+        ignore_param: vec![],
+        ignore_return: vec![],
+        retries: 0,
+        retry_delay: 1000,
         wait: false,
         wait_timeout_sec: 300,
     }
@@ -1545,6 +1553,23 @@ async fn test_scan_with_dalfox_rejects_scan_timeout_over_max() {
         .expect_err("scan_timeout over the ceiling must be rejected");
     assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
     assert!(err.message.contains("scan_timeout must be between"));
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_sxss_url_without_sxss() {
+    // The check URL is only read in stored-XSS mode; accepting it with the
+    // mode off would run an ordinary scan and report it clean.
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        sxss_url: vec!["http://127.0.0.1:1/list".to_string()],
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let err = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect_err("sxss_url without sxss must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(err.message.contains("sxss: true"), "{}", err.message);
 }
 
 #[tokio::test]

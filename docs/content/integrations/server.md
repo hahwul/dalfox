@@ -39,6 +39,10 @@ If `--api-key` is set (or `DALFOX_API_KEY` is exported), every request must incl
 X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73
 ```
 
+`Authorization: Bearer <key>` carries the same key, for clients and gateways
+that only speak the standard header. When a request sends both, `X-API-KEY` is
+the one checked.
+
 If you don't set an API key, the server accepts unauthenticated requests; bind to `127.0.0.1` in that case. The server warns at startup when it is bound to a non-loopback address with no API key.
 
 Nothing throttles or locks out a wrong key, so its length is the only thing
@@ -153,7 +157,8 @@ handler-generated statuses you will see are `400` (invalid body or option),
 untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown scan
 id), `409` (purge of a scan that is still active or draining), `413` (body over
 `--max-body-bytes`), `415` (body without a JSON `Content-Type`), `500` (a
-preflight that failed inside the server), `503` (at capacity) and `504` (a
+preflight that failed inside the server), `503` (at capacity, with a
+`Retry-After` header, exposed to allowed origins) and `504` (a
 preflight that outlived its `scan_timeout` or the server's `--scan-timeout`). The exceptions are a CORS
 preflight (`OPTIONS`), which answers `204` with no body (or a bare `403` when the
 browser gate refuses it), and a path or method not in the table, which gets a
@@ -192,10 +197,15 @@ Response:
   "msg": "ok",
   "data": {
     "scan_id": "9f2c…",
-    "target": "https://target.app?q=test"
+    "target": "https://target.app?q=test",
+    "limits": { "rate_limit": 0, "scan_timeout": 0 }
   }
 }
 ```
+
+`limits` is what the scan runs with once the server's `--rate-limit` and
+`--scan-timeout` caps are applied (`0` = unlimited), so a request that asked for
+more than the server allows can see what it got.
 
 ### Poll status
 
@@ -320,13 +330,21 @@ server's `--rate-limit`). It is bounded by the request's `scan_timeout` and the
 server's `--scan-timeout`, and answers `504` when that runs out. At most 32
 preflights run at once; beyond that the server answers `503`.
 
+Preflight reports the full discovered set: `param` and `ignore_param` are not
+applied to it. `sxss` is, because a stored-XSS scan tests inputs that ordinary
+discovery drops for not reflecting.
+
 ### Health
 
 ```bash
 curl http://127.0.0.1:6664/health
 ```
 
-Returns `status: "ok"`, `version`, `auth_required`, and `endpoints` (the supported endpoints, each as `{method, path, description}`). Good for uptime checks. It needs no API key, but the browser gate in [Browser requests](#browser-requests) still applies.
+Returns `status: "ok"`, `version`, `auth_required`, `scans`, and `endpoints` (the supported endpoints, each as `{method, path, description}`). Good for uptime checks. It needs no API key, but the browser gate in [Browser requests](#browser-requests) still applies.
+
+`scans` is `{active, max_concurrent}`: how many scans hold a slot right now
+against `--max-concurrent-scans` (`0` = no cap), so a client can check for room
+before it submits. It is `null` for a caller that did not send the API key.
 
 ## ScanOptions reference (request body)
 
@@ -371,7 +389,15 @@ Returns `status: "ok"`, `version`, `auth_required`, and `endpoints` (the support
     "blind_oob": true,
     "blind_oob_wait": 30,
     "session_check": "Sign out",
-    "session_check_url": "https://app/me"
+    "session_check_url": "https://app/me",
+    "sxss": true,
+    "sxss_url": ["https://app/comments"],
+    "sxss_method": "GET",
+    "sxss_retries": 3,
+    "ignore_param": ["csrf_token"],
+    "ignore_return": [302, 404],
+    "retries": 0,
+    "retry_delay": 1000
   }
 }
 ```
@@ -385,7 +411,10 @@ as aliases, so an argument dict written for `scan_with_dalfox` works here too:
 
 Numeric options are range-checked and an out-of-range value is a `400`:
 `timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `worker` `1`–`500`,
-`scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`.
+`scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`,
+`sxss_retries` `0`–`20`, `retries` `0`–`5`, `retry_delay` `0`–`10000` ms. The two
+retry caps are lower than the CLI's: a retry backoff does not stop for a cancel,
+so every retry is time a cancelled scan keeps sending.
 
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
 outdated / known-vulnerable JS libraries as informational `[I]` findings
@@ -459,6 +488,20 @@ turn on session-loss detection even without cookies (see the dead-session note
 further down). A regex that does not compile or a non-`http(s)` probe URL is a
 `400`.
 
+`sxss` turns on [stored XSS](../../guide/stored-xss/) mode: payloads are
+injected at the target and looked for on `sxss_url` (a list of absolute
+`http(s)` URLs) and on the pages discovery ties to the injected form.
+`sxss_method` (default `GET`) is the method of that check request and
+`sxss_retries` (default `3`) how often it is repeated for a store that shows up
+late. `sxss_url` without `sxss: true` is a `400`, because the URL would never be
+read.
+
+`ignore_param` lists parameter names to leave untested (a CSRF token, say), and
+`ignore_return` lists HTTP status codes (`100`–`599`) whose responses are
+skipped. `retries` (default `0`) retries a request that failed with a 5xx or a
+transient transport error, waiting `retry_delay` ms (default `1000`, doubling
+per attempt) in between; a `429` is retried regardless.
+
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached
 the scan stops, keeps whatever partial findings it gathered, and settles as
@@ -470,10 +513,12 @@ flag caps every submitted scan the same way `--rate-limit` does.
 
 `GET /scan` takes the same option names as query parameters, `url` for
 `target` included; the MCP aliases (`workers`, `headers`, `cookies`,
-`blind_callback_url`) are not read here. Unlike the JSON body, an unknown query
-parameter is ignored rather than rejected, so check the spelling. List options
-(`encoders`, `param`, `remote_payloads`, `remote_wordlists`) are
-comma-separated. `header` packs several headers into one value and is split
+`blind_callback_url`) are not read here. As in the JSON body, an unknown query
+parameter is a `400`; the JSONP callback parameter and jQuery's `_` cache-buster
+are the two exceptions. List options
+(`encoders`, `param`, `remote_payloads`, `remote_wordlists`, `ignore_param`,
+`ignore_return`) are comma-separated. `sxss_url` is the exception: a comma is
+legal inside a URL, so the query takes one URL whole (use `POST` for several). `header` packs several headers into one value and is split
 only at a comma that starts a new `Name:`, so a comma inside a value such as
 `Accept: text/html,application/xhtml+xml` survives. Booleans read `1`, `true`,
 `yes` or `on` (any case) as true and anything else as false. A number that is
@@ -488,15 +533,27 @@ a scan cancelled mid-run the POST goes out once the worker has drained, not at
 the moment of the `DELETE`:
 
 ```json
-{ "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [], "error_message": null }
+{
+  "scan_id": "9f2c…",
+  "status": "done",
+  "target": "https://target.app?q=test",
+  "url": "https://target.app?q=test",
+  "results": [],
+  "error_message": null,
+  "queued_at_ms": 1758700000000,
+  "started_at_ms": 1758700000120,
+  "finished_at_ms": 1758700008570,
+  "duration_ms": 8450
+}
 ```
 
 `status` is `done`, `error` or `cancelled`, the same value `GET /scan/{id}`
 reports. `error_message` is that endpoint's `error_message` too: `null` for a
 clean finish or a plain cancel, otherwise the reason (target unreachable, a
 `scan_timeout` expiry, lost session, worker panic). A `warnings` list is added
-when the job has one, exactly as `GET /scan/{id}` reports it. The target is
-under `url` here, not `target`. The POST goes through the
+when the job has one, exactly as `GET /scan/{id}` reports it. The four timing
+fields are that endpoint's too. `url` repeats `target` for subscribers written
+against the older body. The POST goes through the
 scan's own proxy and TLS settings, times out after 10 seconds, and is not
 retried.
 
@@ -518,9 +575,14 @@ retried.
 - `--max-retained-scans <n>`: cap on finished scans kept in memory (default
   `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
   so without this a flood of quick scans holds every result (response bodies
-  included, when `include_response` was set) until the one-hour retention TTL.
+  included, when `include_response` was set) until the retention TTL.
   Once the cap is hit the oldest finished scans are dropped; queued and running
   scans are never dropped.
+- `--retention-secs <secs>`: how long a finished scan stays readable (default
+  `3600`). Expired scans are swept at most once a minute, on the next request,
+  so this is not a precise deadline. `0` turns the TTL off, leaving
+  `--max-retained-scans` as the only bound; with both at `0` nothing is ever
+  dropped, and the server warns at startup.
 - `--allowed-hosts <names>`: extra hostnames accepted in the request `Host`
   header, on top of the bind host, `localhost`, and any IP literal. Needed when
   a reverse proxy forwards a public hostname; see
@@ -537,7 +599,8 @@ queued → cancelled
 
 Terminal states (`done`, `error`, `cancelled`) are sticky. A queued scan can be
 cancelled before it starts. Jobs live in memory only: a finished scan is kept
-for one hour (or until `--max-retained-scans` evicts it) and nothing survives a
+for one hour by default (`--retention-secs`), or until `--max-retained-scans`
+evicts it, and nothing survives a
 restart. On `SIGINT`/`SIGTERM` the server stops accepting connections, waits up
 to 10 seconds for HTTP responses already in flight, and exits. Scans still
 running are abandoned rather than waited for, and no completion webhook fires

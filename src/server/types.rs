@@ -14,7 +14,8 @@ pub struct ServerArgs {
     #[arg(short = 'H', long, default_value = "127.0.0.1")]
     pub host: String,
 
-    /// API key required in X-API-KEY header (or set via DALFOX_API_KEY). Leave empty to disable auth.
+    /// API key required in the X-API-KEY header, or as `Authorization: Bearer <key>`
+    /// (or set via DALFOX_API_KEY). Leave empty to disable auth.
     #[clap(help_heading = "SERVER")]
     #[arg(long = "api-key")]
     pub api_key: Option<String>,
@@ -69,6 +70,13 @@ pub struct ServerArgs {
     #[clap(help_heading = "SERVER")]
     #[arg(long = "max-retained-scans", default_value_t = 1000)]
     pub max_retained_scans: usize,
+
+    /// Seconds a finished (done/error/cancelled) scan stays readable before it
+    /// is dropped. Swept at most once a minute, so shorter values act as a
+    /// minute. 0 keeps finished scans until `--max-retained-scans` evicts them.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "retention-secs", default_value_t = crate::job::JOB_RETENTION_SECS as u32)]
+    pub retention_secs: u32,
 
     /// Maximum accepted request-body size (bytes) for POST /scan and /preflight.
     /// Replaces axum's implicit 2 MiB default with an explicit, documented bound.
@@ -143,6 +151,8 @@ pub(crate) struct AppState {
     pub(crate) allowed_hosts: Vec<String>,
     /// Max finished scans retained in the jobs map; 0 = unlimited.
     pub(crate) max_retained_scans: usize,
+    /// Seconds a finished scan is kept before the purge drops it; 0 = no TTL.
+    pub(crate) retention_secs: u32,
     /// Throttle state for the best-effort job-retention purge: the last time
     /// (ms since epoch) a sweep ran. The purge is O(n) over the whole job map
     /// and used to run on every request (including the high-frequency poll
@@ -317,6 +327,23 @@ pub(crate) struct ScanOptions {
     pub(crate) session_check: Option<String>,
     /// Probe this URL instead of the target when checking the session.
     pub(crate) session_check_url: Option<String>,
+    /// Stored-XSS mode: inject at the target, then look for the payload on
+    /// `sxss_url` and on the pages discovery ties to the injected form.
+    pub(crate) sxss: Option<bool>,
+    /// Absolute http(s) URLs to check for the stored payload. Needs `sxss`.
+    pub(crate) sxss_url: Option<Vec<String>>,
+    /// HTTP method for the stored-XSS check request (default GET).
+    pub(crate) sxss_method: Option<String>,
+    /// Re-checks of the stored-XSS URL for slow propagation (default 3, max 20).
+    pub(crate) sxss_retries: Option<u32>,
+    /// Parameter names to leave untested.
+    pub(crate) ignore_param: Option<Vec<String>>,
+    /// HTTP status codes whose responses are skipped (e.g. [302, 404]).
+    pub(crate) ignore_return: Option<Vec<u16>>,
+    /// Retries on 5xx and transient transport errors (default 0, max 5).
+    pub(crate) retries: Option<u32>,
+    /// Base backoff between retries, in ms (default 1000, max 10000).
+    pub(crate) retry_delay: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

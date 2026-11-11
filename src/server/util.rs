@@ -32,6 +32,14 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
         blind_oob_wait: opts.blind_oob_wait,
         session_check: Some(&mut opts.session_check),
         session_check_url: Some(&mut opts.session_check_url),
+        sxss: opts.sxss.unwrap_or(false),
+        sxss_url: opts.sxss_url.as_mut(),
+        sxss_method: opts.sxss_method.as_mut(),
+        sxss_retries: opts.sxss_retries,
+        ignore_param: opts.ignore_param.as_mut(),
+        ignore_return: opts.ignore_return.as_deref().unwrap_or_default(),
+        retries: opts.retries,
+        retry_delay: opts.retry_delay,
     }
     .validate()?;
     // `send_terminal_webhook` dials http(s) only and returns silently for
@@ -67,8 +75,11 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
 /// retention sweep doesn't run (and serialize all handlers on the jobs lock)
 /// on every request, including the high-frequency poll path.
 pub(crate) async fn purge_expired_jobs(state: &AppState) {
-    if crate::job::purge_due(&state.last_purge_ms) {
-        purge_jobs_map(&mut *state.jobs.lock().await, JOB_RETENTION_SECS);
+    if state.retention_secs > 0 && crate::job::purge_due(&state.last_purge_ms) {
+        purge_jobs_map(
+            &mut *state.jobs.lock().await,
+            i64::from(state.retention_secs),
+        );
     }
 }
 

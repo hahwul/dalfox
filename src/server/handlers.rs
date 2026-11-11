@@ -77,14 +77,24 @@ async fn queue_scan(r: &Reply<'_>, url: String, mut opts: ScanOptions) -> ApiRep
     // checked race-free against the live job count. 503 when at capacity.
     let callback_url = opts.callback_url.clone();
     let Some((id, lease)) = try_admit_and_queue(r.state, &url, callback_url).await else {
-        return r.err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            at_capacity_message(r.state),
-        );
+        return r.busy(at_capacity_message(r.state));
     };
     log(r.state, "JOB", &format!("queued id={} url={}", id, url));
 
-    let body = serde_json::json!({ "scan_id": id, "target": url });
+    // `limits` is what the scan actually runs with once the server-wide
+    // `--rate-limit` / `--scan-timeout` caps are folded in (0 = unlimited) —
+    // otherwise a capped request has no way to see that it was capped. The
+    // capped values are written back into the options the job is spawned
+    // with, so the reply and the scan read the same numbers.
+    let rate_limit = effective_rate_limit(opts.rate_limit, r.state.rate_limit);
+    let scan_timeout = effective_scan_timeout(opts.scan_timeout, r.state.scan_timeout);
+    opts.rate_limit = Some(rate_limit);
+    opts.scan_timeout = Some(scan_timeout);
+    let body = serde_json::json!({
+        "scan_id": id,
+        "target": url,
+        "limits": { "rate_limit": rate_limit, "scan_timeout": scan_timeout },
+    });
     spawn_scan_task(r.state.clone(), id, url, opts, lease);
     r.ok(body)
 }
@@ -257,17 +267,88 @@ pub(crate) async fn get_scan_handler(
     if let Err(msg) = check_scan_target(&url) {
         return r.err(StatusCode::BAD_REQUEST, msg);
     }
+    // A misspelled option used to be dropped and the scan run on defaults,
+    // which reads as a clean result for a scan the caller never asked for —
+    // the same hole `deny_unknown_fields` closes on the JSON body. `_` is the
+    // cache-buster jQuery appends to JSONP requests.
+    if let Some(unknown) = params.keys().find(|k| {
+        !SCAN_QUERY_KEYS.contains(&k.as_str())
+            && **k != state.callback_param_name
+            && k.as_str() != "_"
+    }) {
+        return r.err(
+            StatusCode::BAD_REQUEST,
+            format!("unknown query parameter '{}'", unknown),
+        );
+    }
     match scan_options_from_query(&params) {
         Ok(opts) => queue_scan(&r, url, opts).await,
         Err(msg) => r.err(StatusCode::BAD_REQUEST, msg),
     }
 }
 
+/// Every query key `GET /scan` reads: the target (and its `url` alias) plus
+/// each `ScanOptions` field under its REST spelling. Anything else is a 400.
+/// `get_scan_query_keys_cover_every_scan_option` (job tests) pins this to the
+/// struct, so a new option cannot be accepted on POST and refused here.
+pub(crate) const SCAN_QUERY_KEYS: &[&str] = &[
+    "target",
+    "url",
+    "worker",
+    "delay",
+    "timeout",
+    "rate_limit",
+    "scan_timeout",
+    "max_payloads_per_param",
+    "blind_oob_wait",
+    "waf_min_confidence",
+    "cookie",
+    "blind",
+    "header",
+    "method",
+    "data",
+    "user_agent",
+    "encoders",
+    "remote_payloads",
+    "remote_wordlists",
+    "include_request",
+    "include_response",
+    "callback_url",
+    "param",
+    "proxy",
+    "insecure",
+    "follow_redirects",
+    "skip_mining",
+    "skip_discovery",
+    "deep_scan",
+    "skip_ast_analysis",
+    "analyze_external_js",
+    "detect_outdated_libs",
+    "waf_bypass",
+    "skip_waf_probe",
+    "force_waf",
+    "waf_evasion",
+    "min_confidence",
+    "blind_oob",
+    "session_check",
+    "session_check_url",
+    "sxss",
+    "sxss_url",
+    "sxss_method",
+    "sxss_retries",
+    "ignore_param",
+    "ignore_return",
+    "retries",
+    "retry_delay",
+];
+
 /// `ScanOptions` from the `GET /scan` query. A present-but-unparseable number
 /// is an `Err` (a 400) naming the first bad key in the order below, not a silent
 /// fallback to the default (which is what `.parse().ok()` used to do). Absent
 /// keys stay `None` and take the JSON body's defaults.
-fn scan_options_from_query(params: &HashMap<String, String>) -> Result<ScanOptions, String> {
+pub(crate) fn scan_options_from_query(
+    params: &HashMap<String, String>,
+) -> Result<ScanOptions, String> {
     let s = |k: &str| params.get(k).cloned();
     let csv = |k: &str| params.get(k).map(|v| split_csv(v));
     // Lenient boolean parse (1/true/yes/on) shared with DELETE; see parse_bool_query.
@@ -318,6 +399,28 @@ fn scan_options_from_query(params: &HashMap<String, String>) -> Result<ScanOptio
         blind_oob: params.get("blind_oob").and_then(|v| blind_oob_query(v)),
         session_check: s("session_check"),
         session_check_url: s("session_check_url"),
+        sxss: flag("sxss"),
+        // One URL, taken whole: a comma is legal inside a URL, so this is not
+        // a comma-separated list. POST takes several.
+        sxss_url: s("sxss_url").map(|u| vec![u]),
+        sxss_method: s("sxss_method"),
+        sxss_retries: parse_num_query(params, "sxss_retries")?,
+        ignore_param: csv("ignore_param"),
+        ignore_return: params
+            .get("ignore_return")
+            .map(|raw| {
+                split_csv(raw)
+                    .iter()
+                    .map(|code| {
+                        code.parse::<u16>().map_err(|_| {
+                            format!("ignore_return must list HTTP status codes (got '{code}')")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?,
+        retries: parse_num_query(params, "retries")?,
+        retry_delay: parse_num_query(params, "retry_delay")?,
     })
 }
 
@@ -336,8 +439,21 @@ pub(crate) async fn health_handler(
         return r.deny(&denied, "/health");
     }
 
+    // Load is only for callers who could list the scans anyway: an
+    // unauthenticated probe learns that a server is up, not how busy it is.
+    let scans = if check_api_key(&state, &headers) {
+        let jobs = state.jobs.lock().await;
+        Some(serde_json::json!({
+            "active": jobs.values().filter(|j| j.occupies_capacity()).count(),
+            "max_concurrent": state.max_concurrent_scans,
+        }))
+    } else {
+        None
+    };
+
     r.ok(serde_json::json!({
             "status": "ok",
+            "scans": scans,
             "version": env!("CARGO_PKG_VERSION"),
             // Match `check_api_key`: an empty `Some("")` falls through to
             // the no-auth branch ("Leave empty to disable auth" per
@@ -559,10 +675,7 @@ pub(crate) async fn preflight_handler(
     let preflight_permit = match state.preflight_sem.clone().try_acquire_owned() {
         Ok(p) => p,
         Err(_) => {
-            return r.err(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "preflight capacity reached; retry shortly",
-            );
+            return r.busy("preflight capacity reached; retry shortly");
         }
     };
 
@@ -593,10 +706,13 @@ pub(crate) async fn preflight_handler(
                 let mut target = hydrate_preflight_target(&target_url, &opts, timeout_secs)
                     .map_err(PreflightError::BadUrl)?;
 
-                let scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
+                let mut scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
                     target: target_url.clone(),
                     param: vec![],
-                    method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
+                    method: opts
+                        .method
+                        .clone()
+                        .unwrap_or_else(|| crate::cmd::scan::DEFAULT_METHOD.to_string()),
                     data: opts.data.clone(),
                     headers: opts.header.clone().unwrap_or_default(),
                     cookies: opts
@@ -611,11 +727,17 @@ pub(crate) async fn preflight_handler(
                     follow_redirects: opts.follow_redirects.unwrap_or(false),
                     skip_mining: opts.skip_mining.unwrap_or(false),
                     skip_discovery: opts.skip_discovery.unwrap_or(false),
-                    encoders: opts
-                        .encoders
-                        .clone()
-                        .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]),
+                    encoders: opts.encoders.clone().unwrap_or_else(|| {
+                        crate::cmd::scan::DEFAULT_ENCODERS
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect()
+                    }),
                 });
+                // A stored-XSS write endpoint echoes nothing, so discovery only
+                // keeps its inputs in this mode — without it preflight answers
+                // "0 parameters" for a scan that will test them.
+                scan_args.sxss = opts.sxss.unwrap_or(false);
                 Ok(crate::job::runner::preflight(
                     &mut target,
                     &target_url,

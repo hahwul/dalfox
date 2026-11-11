@@ -355,6 +355,46 @@ pub(crate) struct ScanWithDalfoxParams {
     #[serde(default)]
     pub session_check_url: Option<String>,
 
+    /// Stored-XSS mode: inject at the target, then look for the payload on
+    /// sxss_url and on the pages discovery ties to the injected form.
+    /// Default: false
+    #[serde(default)]
+    pub sxss: bool,
+
+    /// Absolute http(s) URLs where the stored value is displayed (e.g. the
+    /// list or detail page). Requires sxss=true. Default: none
+    #[serde(default)]
+    pub sxss_url: Vec<String>,
+
+    /// HTTP method for the stored-XSS check request. Default: "GET"
+    #[serde(default = "default_sxss_method")]
+    pub sxss_method: String,
+
+    /// Re-checks of the stored-XSS URL for slow propagation (0-20). Default: 3
+    #[serde(default = "default_sxss_retries")]
+    #[schemars(range(max = 20))]
+    pub sxss_retries: u32,
+
+    /// Parameter names to leave untested (e.g. a CSRF token). Default: none
+    #[serde(default)]
+    pub ignore_param: Vec<String>,
+
+    /// HTTP status codes whose responses are skipped, e.g. [302, 404].
+    /// Default: none
+    #[serde(default)]
+    pub ignore_return: Vec<u16>,
+
+    /// Retries on HTTP 5xx and transient transport errors (0-5; 429 is
+    /// always retried). Default: 0
+    #[serde(default)]
+    #[schemars(range(max = 5))]
+    pub retries: u32,
+
+    /// Base backoff between retries in ms (0-10000). Default: 1000
+    #[serde(default = "default_retry_delay")]
+    #[schemars(range(max = 10000))]
+    pub retry_delay: u64,
+
     /// When true, block until the scan reaches a terminal status (done / error
     /// / cancelled) or `wait_timeout_sec` elapses, then return the same shape
     /// as `get_results_dalfox` (includes results when available). When false
@@ -382,6 +422,15 @@ pub(super) const MAX_WAIT_TIMEOUT_SECS: u64 = 86_400;
 
 pub(super) fn default_method() -> String {
     crate::cmd::scan::DEFAULT_METHOD.to_string()
+}
+pub(super) fn default_sxss_method() -> String {
+    crate::cmd::scan::DEFAULT_SXSS_METHOD.to_string()
+}
+pub(super) fn default_sxss_retries() -> u32 {
+    crate::cmd::scan::DEFAULT_SXSS_RETRIES
+}
+pub(super) fn default_retry_delay() -> u64 {
+    crate::cmd::scan::DEFAULT_RETRY_DELAY_MS
 }
 pub(super) fn default_waf_bypass() -> String {
     crate::cmd::scan::DEFAULT_WAF_BYPASS.to_string()

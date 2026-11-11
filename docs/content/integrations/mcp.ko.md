@@ -63,6 +63,9 @@ claude mcp add dalfox -- dalfox mcp
   "blind_oob_wait": 30,
   "session_check": "Sign out",
   "session_check_url": "https://app/me",
+  "sxss": true,
+  "sxss_url": ["https://app/comments"],
+  "ignore_param": ["csrf_token"],
   "deep_scan": false,
   "skip_ast_analysis": false,
   "analyze_external_js": false,
@@ -107,6 +110,14 @@ claude mcp add dalfox -- dalfox mcp
 대신 조회할 저렴한 인증 엔드포인트)은 쿠키가 없어도 세션 손실 탐지를 켭니다. 컴파일되지
 않는 정규식이나 `http(s)`가 아닌 조회 URL은 `invalid_params` 오류입니다.
 `get_results_dalfox` 아래의 끊어진 세션 설명을 보세요.
+
+`sxss`는 [저장형 XSS](../../guide/stored-xss/) 모드를 켭니다. 대상에 페이로드를 주입한 뒤
+`sxss_url`(저장된 값이 표시되는 절대 `http(s)` URL 목록)과, 탐색이 주입한 폼과 연결한
+페이지에서 그 페이로드를 찾습니다. `sxss_method`와 `sxss_retries`(`0`–`20`)로 조회 요청을
+조정합니다. `sxss: true` 없이 `sxss_url`만 보내면 `invalid_params` 오류입니다.
+`ignore_param`은 테스트하지 않을 파라미터 이름, `ignore_return`은 응답을 건너뛸 HTTP 상태
+코드 목록이며, `retries`(`0`–`5`)와 `retry_delay`(`0`–`10000`ms)는 5xx와 일시적 전송
+오류를 재시도합니다.
 
 `insecure`는 TLS 인증서 검증을 제어합니다(기본값 `true`, 스캐너 친화적).
 인증서 검증을 강제하고 자체 서명되었거나 만료된 인증서를 거부하려면 `false`로
@@ -166,6 +177,14 @@ WAF 임계값 아래로 유지할 때 쓰세요.
   "blind_oob_wait": 30,
   "session_check": null,
   "session_check_url": null,
+  "sxss": false,
+  "sxss_url": [],
+  "sxss_method": "GET",
+  "sxss_retries": 3,
+  "ignore_param": [],
+  "ignore_return": [],
+  "retries": 0,
+  "retry_delay": 1000,
   "workers": 50,
   "rate_limit": 0,
   "waf_bypass": "auto",

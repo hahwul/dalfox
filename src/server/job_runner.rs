@@ -430,13 +430,24 @@ pub(crate) async fn send_terminal_webhook(
     if !has_http_scheme(&cb_url) {
         return;
     }
+    // `target` is the name every other surface uses; `url` is the original
+    // spelling, kept for subscribers already reading it.
     let mut payload = serde_json::json!({
         "scan_id": job_id,
         "status": status_label,
+        "target": url,
         "url": url,
         "results": results,
         "error_message": error_message,
     });
+    // The same timing `GET /scan/{id}` reports, so a subscriber that never
+    // polls still learns how long the scan ran.
+    if let Some(job) = state.jobs.lock().await.get(job_id) {
+        payload["queued_at_ms"] = serde_json::json!(job.queued_at_ms);
+        payload["started_at_ms"] = serde_json::json!(job.started_at_ms);
+        payload["finished_at_ms"] = serde_json::json!(job.finished_at_ms);
+        payload["duration_ms"] = serde_json::json!(job.duration_ms());
+    }
     // Absent when empty, like `GET /scan/{id}`: a non-polling subscriber must
     // not read a `done` the job itself flags as not-clean as clean.
     if !warnings.is_empty() {
@@ -475,7 +486,10 @@ pub(crate) fn hydrate_preflight_target(
     timeout_secs: u64,
 ) -> Result<crate::target_parser::Target, String> {
     let mut t = parse_target(target_url).map_err(|e| format!("parse_target failed: {}", e))?;
-    t.method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
+    t.method = opts
+        .method
+        .clone()
+        .unwrap_or_else(|| crate::cmd::scan::DEFAULT_METHOD.to_string());
     t.timeout = timeout_secs;
     // Pacing and concurrency are read off the *target*, not off `ScanArgs`:
     // `analyze_parameters` sizes its semaphores from `target.workers` and every
@@ -515,5 +529,6 @@ pub(crate) fn hydrate_preflight_target(
         .unwrap_or_default();
     crate::job::lift_cookie_headers(&mut t.headers, &mut t.cookies);
     t.data = opts.data.clone();
+    t.ignore_return = opts.ignore_return.clone().unwrap_or_default();
     Ok(t)
 }

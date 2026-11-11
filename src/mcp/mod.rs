@@ -328,6 +328,14 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
             blind_oob_wait,
             mut session_check,
             mut session_check_url,
+            sxss,
+            mut sxss_url,
+            mut sxss_method,
+            sxss_retries,
+            mut ignore_param,
+            ignore_return,
+            retries,
+            retry_delay,
             wait,
             wait_timeout_sec,
         } = params;
@@ -372,6 +380,14 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
             blind_oob_wait,
             session_check: Some(&mut session_check),
             session_check_url: Some(&mut session_check_url),
+            sxss,
+            sxss_url: Some(&mut sxss_url),
+            sxss_method: Some(&mut sxss_method),
+            sxss_retries: Some(sxss_retries),
+            ignore_param: Some(&mut ignore_param),
+            ignore_return: &ignore_return,
+            retries: Some(retries),
+            retry_delay: Some(retry_delay),
         }
         .validate()
         .map_err(|e| ErrorData::invalid_params(e, None))?;
@@ -486,6 +502,14 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
                 session_check,
                 session_check_url,
                 min_confidence,
+                sxss,
+                sxss_url,
+                sxss_method,
+                sxss_retries,
+                ignore_param,
+                ignore_return,
+                retries,
+                retry_delay,
             }
             .into_scan_args(),
         );

@@ -216,6 +216,10 @@ pub const CLI_MAX_RATE_LIMIT: u32 = 100_000;
 /// Sanity cap for `--retries`. Retrying more than this turns a transient
 /// blip into a multi-minute hang per request.
 pub const CLI_MAX_RETRIES: u32 = 100;
+/// Default for `--sxss-retries` (and the REST / MCP `sxss_retries` option).
+pub const DEFAULT_SXSS_RETRIES: u32 = 3;
+/// Default for `--sxss-method` (and the REST / MCP `sxss_method` option).
+pub const DEFAULT_SXSS_METHOD: &str = "GET";
 /// Sanity cap for `--sxss-retries`. Much tighter than [`CLI_MAX_RETRIES`]
 /// because the stored-XSS re-check backoff is `500ms * attempt`, i.e. the total
 /// wait grows *quadratically*: 20 retries is ~1.6 minutes per check URL, while
@@ -814,13 +818,13 @@ pub struct ScanArgs {
     // wire as the literal extension verb `post` (`reqwest::Method` is
     // case-sensitive) and `--sxss-method "GET junk"` failed to parse and
     // silently degraded to GET.
-    #[arg(long, default_value = "GET", value_parser = parse_http_method_arg)]
+    #[arg(long, default_value = DEFAULT_SXSS_METHOD, value_parser = parse_http_method_arg)]
     pub sxss_method: String,
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Number of times to re-check the Stored XSS URL to handle slow
     /// session/content propagation. Each retry waits 500ms * attempt_index.
-    #[arg(long, default_value_t = 3)]
+    #[arg(long, default_value_t = DEFAULT_SXSS_RETRIES)]
     pub sxss_retries: u32,
 
     #[clap(help_heading = "XSS SCANNING")]
@@ -1007,8 +1011,8 @@ impl Default for ScanArgs {
             deep_scan: false,
             sxss: false,
             sxss_url: Vec::new(),
-            sxss_method: "GET".to_string(),
-            sxss_retries: 3,
+            sxss_method: DEFAULT_SXSS_METHOD.to_string(),
+            sxss_retries: DEFAULT_SXSS_RETRIES,
             skip_ast_analysis: false,
             analyze_external_js: false,
             hpp: false,

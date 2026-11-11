@@ -105,6 +105,11 @@ dalfox scan https://target.app/support/ticket \
 
 여전히 누군가가 페이지를 볼 때까지 기다려야 하며, 콜백이 그 시점을 알려 줍니다. `-b` 대신 `--blind-oob`를 쓰면 Dalfox가 interactsh 세션을 직접 폴링해 콜백을 `V` 탐지 결과로 보고합니다. 다만 `--blind-oob-wait`이 끝나기 전에 도착한 콜백만 해당하며, 몇 시간 뒤의 조회는 직접 운영하는 리스너에만 닿습니다. [Blind XSS](../scanning-modes/#blind-xss)를 참고하세요.
 
+## 서버와 MCP
+
+[REST 서버](../../integrations/server/)와 [MCP](../../integrations/mcp/) 스캔 도구도 같은
+모드를 요청 옵션으로 받습니다: `sxss`, `sxss_url`(목록), `sxss_method`, `sxss_retries`.
+
 ## 팁
 
 - **범위를 좁게 잡으세요.** 조회 URL에서 렌더링된다고 알고 있는 필드를 `-p`로 지정하면, Dalfox가 찾은 입력을 전부 테스트하지 않습니다.

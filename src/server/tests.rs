@@ -1,4 +1,5 @@
 use super::*;
+use crate::job::JOB_RETENTION_SECS;
 use axum::{
     Router, body,
     extract::{Path, Query, State},
@@ -35,6 +36,7 @@ fn make_state(
         allowed_hosts: vec![],
         // 0 = unlimited, so a test that stages jobs by hand keeps all of them.
         max_retained_scans: 0,
+        retention_secs: JOB_RETENTION_SECS as u32,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     }
@@ -267,6 +269,40 @@ fn test_check_api_key_variants() {
     let mut bad_headers = HeaderMap::new();
     bad_headers.insert("X-API-KEY", HeaderValue::from_static("wrong"));
     assert!(!check_api_key(&state_with_key, &bad_headers));
+}
+
+#[test]
+fn test_check_api_key_accepts_a_bearer_token() {
+    let state = make_state(Some("secret"), None, false, false, "callback");
+    let with = |name: &'static str, value: &'static str| {
+        let mut h = HeaderMap::new();
+        h.insert(name, HeaderValue::from_static(value));
+        h
+    };
+    assert!(check_api_key(
+        &state,
+        &with("Authorization", "Bearer secret")
+    ));
+    // The scheme is case-insensitive (RFC 9110).
+    assert!(check_api_key(
+        &state,
+        &with("Authorization", "bearer secret")
+    ));
+    assert!(!check_api_key(
+        &state,
+        &with("Authorization", "Bearer wrong")
+    ));
+    // Only the Bearer scheme carries the key; a bare or Basic value does not.
+    assert!(!check_api_key(&state, &with("Authorization", "secret")));
+    assert!(!check_api_key(
+        &state,
+        &with("Authorization", "Basic secret")
+    ));
+
+    // A wrong X-API-KEY is not rescued by a right Authorization.
+    let mut both = with("Authorization", "Bearer secret");
+    both.insert("X-API-KEY", HeaderValue::from_static("wrong"));
+    assert!(!check_api_key(&state, &both));
 }
 
 #[test]
@@ -811,6 +847,116 @@ async fn test_start_scan_handler_success_creates_queued_job() {
         job.queued_at_ms > 0,
         "queued_at_ms must be set on submission"
     );
+}
+
+#[tokio::test]
+async fn test_submit_reports_the_limits_the_scan_runs_with() {
+    // The server caps win over a request that asks for more, and the reply
+    // says so; a request under the cap keeps its own value.
+    let mut state = make_state(None, None, false, false, "cb");
+    state.rate_limit = Some(5);
+    state.scan_timeout = Some(30);
+    let resp = start_scan_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://127.0.0.1:1/".to_string(),
+            options: Some(ScanOptions {
+                rate_limit: Some(100),
+                scan_timeout: Some(10),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(
+        parsed["data"]["limits"],
+        serde_json::json!({ "rate_limit": 5, "scan_timeout": 10 })
+    );
+}
+
+#[tokio::test]
+async fn test_get_scan_rejects_an_unknown_query_parameter() {
+    let state = make_state(None, None, false, true, "cb");
+    let query = |extra: &[(&str, &str)]| {
+        let mut params = Map::new();
+        params.insert("target".to_string(), "http://127.0.0.1:1/".to_string());
+        for (k, v) in extra {
+            params.insert(k.to_string(), v.to_string());
+        }
+        params
+    };
+
+    // `workers` is the MCP spelling; the query form reads `worker`. It used to
+    // be dropped, and the scan ran with the default worker count.
+    let resp = get_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(query(&[("workers", "3")])),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = response_body_string(resp).await;
+    assert!(
+        body.contains("unknown query parameter 'workers'"),
+        "got {body}"
+    );
+    assert!(state.jobs.lock().await.is_empty(), "nothing may be queued");
+
+    // The JSONP callback and jQuery's `_` cache-buster are not options.
+    let resp = get_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(query(&[("cb", "f"), ("_", "1700000000")])),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_get_scan_reads_the_stored_xss_and_retry_options() {
+    let query = |pairs: &[(&str, &str)]| -> Map<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    let opts = scan_options_from_query(&query(&[
+        ("sxss", "1"),
+        // A comma is legal in a URL: the value is one URL, not a list.
+        ("sxss_url", "https://app/list?ids=1,2"),
+        ("sxss_method", "POST"),
+        ("sxss_retries", "5"),
+        ("ignore_param", "csrf, token"),
+        ("ignore_return", "302, 404"),
+        ("retries", "2"),
+        ("retry_delay", "250"),
+    ]))
+    .expect("valid query");
+    assert_eq!(opts.sxss, Some(true));
+    assert_eq!(
+        opts.sxss_url,
+        Some(vec!["https://app/list?ids=1,2".to_string()])
+    );
+    assert_eq!(opts.sxss_method.as_deref(), Some("POST"));
+    assert_eq!(opts.sxss_retries, Some(5));
+    assert_eq!(
+        opts.ignore_param,
+        Some(vec!["csrf".to_string(), "token".to_string()])
+    );
+    assert_eq!(opts.ignore_return, Some(vec![302, 404]));
+    assert_eq!(opts.retries, Some(2));
+    assert_eq!(opts.retry_delay, Some(250));
+
+    let err = scan_options_from_query(&query(&[("ignore_return", "302,nope")]))
+        .expect_err("a non-numeric status code");
+    assert!(err.contains("ignore_return"), "{err}");
 }
 
 #[tokio::test]
@@ -1360,6 +1506,96 @@ async fn test_run_scan_job_without_credentials_is_untouched_by_session_monitorin
         "an unauthenticated job has no session to lose: {error:?}"
     );
     assert!(error.is_none(), "{error:?}");
+}
+
+/// A stored-XSS target: `/save?msg=` keeps the value and answers with a fixed
+/// page that reflects nothing; `/view` renders the stored value unescaped.
+async fn start_stored_xss_target_server() -> SocketAddr {
+    let stored = Arc::new(std::sync::Mutex::new(String::new()));
+    let html = |body: String| {
+        (
+            StatusCode::OK,
+            [("content-type", "text/html; charset=utf-8")],
+            body,
+        )
+    };
+    let save_store = stored.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            any(move |Query(q): Query<Map<String, String>>| {
+                if let Some(msg) = q.get("msg") {
+                    *save_store.lock().unwrap() = msg.clone();
+                }
+                async move { html("<html><body>saved</body></html>".to_string()) }
+            }),
+        )
+        .route(
+            "/view",
+            any(move || {
+                let body = format!(
+                    "<html><body><div>{}</div></body></html>",
+                    stored.lock().unwrap()
+                );
+                async move { html(body) }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind stored-xss target listener");
+    let addr = listener.local_addr().expect("stored-xss target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
+/// Stored XSS through a REST job. The injection point reflects nothing, so the
+/// same scan without `sxss` is clean — which is all the API could report before
+/// the option existed on this surface.
+#[tokio::test]
+async fn test_run_scan_job_finds_stored_xss_only_in_sxss_mode() {
+    crate::ensure_crypto_provider();
+    let run = |sxss: bool| async move {
+        let addr = start_stored_xss_target_server().await;
+        let state = make_state(None, None, false, false, "callback");
+        let id = "sxss".to_string();
+        state
+            .jobs
+            .lock()
+            .await
+            .insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+        let mut opts = ScanOptions {
+            param: Some(vec!["msg".to_string()]),
+            skip_mining: Some(true),
+            skip_ast_analysis: Some(true),
+            ..ScanOptions::default()
+        };
+        if sxss {
+            opts.sxss = Some(true);
+            opts.sxss_url = Some(vec![format!("http://{addr}/view")]);
+        }
+        validate_scan_options(&mut opts).expect("valid options");
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            run_scan_job(
+                state.clone(),
+                id.clone(),
+                format!("http://{addr}/save?msg=hello"),
+                opts,
+            ),
+        )
+        .await
+        .expect("scan finishes in time");
+        let jobs = state.jobs.lock().await;
+        let job = jobs.get(&id).expect("job");
+        assert_eq!(job.status, JobStatus::Done, "{:?}", job.error_message);
+        job.results.as_ref().map_or(0, |r| r.len())
+    };
+
+    assert_eq!(run(false).await, 0, "the injection point reflects nothing");
+    assert!(run(true).await > 0, "sxss must find the payload on /view");
 }
 
 #[tokio::test]
@@ -2021,6 +2257,7 @@ async fn test_run_server_returns_on_invalid_bind_address() {
         allowed_hosts: None,
         max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
+        retention_secs: 3600,
         allowed_origins: None,
         jsonp: false,
         callback_param_name: "callback".to_string(),
@@ -2053,6 +2290,7 @@ async fn test_run_server_returns_on_bind_failure_after_state_build() {
         allowed_hosts: None,
         max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
+        retention_secs: 3600,
         allowed_origins: Some(
             "*,regex:^https://.*\\.example\\.com$,https://*.corp.local".to_string(),
         ),
@@ -2090,6 +2328,7 @@ async fn test_run_server_reports_an_unwritable_log_file() {
         allowed_hosts: None,
         max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
+        retention_secs: 3600,
         allowed_origins: None,
         jsonp: false,
         callback_param_name: "callback".to_string(),
@@ -3010,6 +3249,35 @@ async fn test_list_scans_handler_emits_timestamps() {
 }
 
 #[tokio::test]
+async fn test_purge_honors_the_configured_retention() {
+    // Finished 2 minutes ago: inside the default hour, outside a 60s TTL.
+    let staged = |retention_secs| async move {
+        let state = AppState {
+            retention_secs,
+            ..make_state(None, None, false, false, "cb")
+        };
+        let mut job = test_job(JobStatus::Done, None, "");
+        job.finished_at_ms = Some(crate::job::now_ms() - 120_000);
+        state.jobs.lock().await.insert("j".to_string(), job);
+        purge_expired_jobs(&state).await;
+        state.jobs.lock().await.contains_key("j")
+    };
+    assert!(staged(3600).await, "the default hour keeps it");
+    assert!(!staged(60).await, "--retention-secs 60 drops it");
+
+    // 0 = no TTL, however old the scan is.
+    let state = AppState {
+        retention_secs: 0,
+        ..make_state(None, None, false, false, "cb")
+    };
+    let mut old = test_job(JobStatus::Done, None, "");
+    old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+    state.jobs.lock().await.insert("old".to_string(), old);
+    purge_expired_jobs(&state).await;
+    assert!(state.jobs.lock().await.contains_key("old"));
+}
+
+#[tokio::test]
 async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     let state = make_state(None, None, false, false, "cb");
     {
@@ -3348,6 +3616,13 @@ async fn test_webhook_carries_the_error_message_for_error_and_timeout() {
     let payload = captured.lock().await.clone().expect("webhook fired");
     assert_eq!(payload["status"], "error");
     assert_eq!(payload["error_message"], "boom: target down");
+    // `target` like every other surface, `url` kept for existing subscribers,
+    // and the job's timing.
+    assert_eq!(payload["target"], "http://t/");
+    assert_eq!(payload["url"], "http://t/");
+    assert!(payload["queued_at_ms"].is_i64(), "{payload}");
+    assert!(payload["finished_at_ms"].is_i64(), "{payload}");
+    assert!(payload.get("duration_ms").is_some(), "{payload}");
 
     // Timeout path: a scan_timeout expiry settles as `cancelled`; without the
     // message it is indistinguishable from a DELETE.
@@ -3721,8 +3996,47 @@ async fn test_start_scan_handler_503_when_at_capacity() {
     .await
     .into_response();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        resp.headers().get("Retry-After").map(|v| v.as_bytes()),
+        Some(&b"5"[..]),
+        "a full server must say when to come back"
+    );
+    assert!(
+        resp.headers()
+            .get("Access-Control-Expose-Headers")
+            .is_none(),
+        "no CORS configured, so nothing to expose"
+    );
     let body = response_body_string(resp).await;
     assert!(body.contains("at capacity"), "got {body}");
+
+    // Behind CORS the header is unreadable to a web UI unless it is exposed.
+    let mut cors_state = make_state(None, Some(vec!["http://ui.local"]), false, false, "cb");
+    cors_state.max_concurrent_scans = 1;
+    cors_state.jobs.lock().await.insert(
+        "active-1".to_string(),
+        test_job(JobStatus::Running, None, "http://busy/"),
+    );
+    let mut headers = HeaderMap::new();
+    headers.insert("Origin", HeaderValue::from_static("http://ui.local"));
+    let resp = start_scan_handler(
+        State(cors_state),
+        headers,
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://example.com".to_string(),
+            options: None,
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        resp.headers()
+            .get("Access-Control-Expose-Headers")
+            .map(|v| v.as_bytes()),
+        Some(&b"Retry-After"[..])
+    );
     // No new job queued — still just the one we seeded.
     assert_eq!(state.jobs.lock().await.len(), 1);
 }
@@ -4683,6 +4997,40 @@ async fn test_preflight_honors_delay_and_worker_options() {
     );
 }
 
+/// A stored-XSS write endpoint echoes nothing, so ordinary discovery keeps none
+/// of its inputs. Preflight has to describe the scan the same options start:
+/// with `sxss` the inputs are tested, so they must be listed.
+#[tokio::test]
+async fn test_preflight_lists_stored_xss_inputs_in_sxss_mode() {
+    crate::ensure_crypto_provider();
+    let discovered = |sxss: Option<bool>| async move {
+        let addr = start_stored_xss_target_server().await;
+        let resp = preflight_handler(
+            State(make_state(None, None, false, false, "cb")),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Ok(Json(ScanRequest {
+                target: format!("http://{addr}/save?msg=hello"),
+                options: Some(ScanOptions {
+                    timeout: Some(5),
+                    skip_mining: Some(true),
+                    sxss,
+                    ..ScanOptions::default()
+                }),
+            })),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = response_body_string(resp).await;
+        serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"]["params_discovered"]
+            .as_u64()
+            .expect("params_discovered")
+    };
+    assert_eq!(discovered(None).await, 0, "nothing reflects on /save");
+    assert!(discovered(Some(true)).await > 0, "sxss scans `msg`");
+}
+
 /// `encoders: ["none"]` collapses the encoder fan-out factor to 1, so the
 /// estimate must come out strictly lower than the multi-encoder default. This
 /// is the one knob in the request that changes the arithmetic rather than the
@@ -4905,6 +5253,37 @@ async fn test_health_stays_open_without_an_api_key() {
         .await
         .into_response();
     assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_health_reports_load_only_to_an_authenticated_caller() {
+    let mut state = make_state(Some("secret"), None, false, false, "callback");
+    state.max_concurrent_scans = 4;
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert("a".to_string(), test_job(JobStatus::Running, None, ""));
+        jobs.insert("b".to_string(), test_job(JobStatus::Queued, None, ""));
+        jobs.insert("c".to_string(), test_job(JobStatus::Done, None, ""));
+    }
+    let health = |headers: HeaderMap| {
+        let state = state.clone();
+        async move {
+            let resp = health_handler(State(state), headers, Query(Map::new()))
+                .await
+                .into_response();
+            let body = response_body_string(resp).await;
+            serde_json::from_str::<serde_json::Value>(&body).expect("json")["data"]["scans"].clone()
+        }
+    };
+
+    assert!(health(HeaderMap::new()).await.is_null());
+
+    let mut authed = HeaderMap::new();
+    authed.insert("X-API-KEY", HeaderValue::from_static("secret"));
+    assert_eq!(
+        health(authed).await,
+        serde_json::json!({ "active": 2, "max_concurrent": 4 })
+    );
 }
 
 #[tokio::test]
@@ -5743,6 +6122,7 @@ async fn test_run_server_warns_about_misconfiguration_before_serving() {
             allowed_hosts: None,
             max_retained_scans: 1000,
             max_body_bytes: 1_048_576,
+            retention_secs: 3600,
             allowed_origins: Some("*,regex:https://(unclosed,regex:".to_string()),
             jsonp: false,
             callback_param_name: "callback".to_string(),

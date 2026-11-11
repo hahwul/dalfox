@@ -82,6 +82,18 @@ pub(crate) struct ScanRequestSpec {
     pub(crate) session_check_url: Option<String>,
     /// `low` / `high`, already validated; `None` keeps every finding.
     pub(crate) min_confidence: Option<String>,
+    /// Stored-XSS mode: inject at the target, look for the payload on
+    /// `sxss_url` (plus pages discovery found on its own).
+    pub(crate) sxss: bool,
+    /// Absolute http(s) URLs, already validated.
+    pub(crate) sxss_url: Vec<String>,
+    pub(crate) sxss_method: String,
+    pub(crate) sxss_retries: u32,
+    pub(crate) ignore_param: Vec<String>,
+    /// HTTP status codes (100-599) whose responses are skipped.
+    pub(crate) ignore_return: Vec<u16>,
+    pub(crate) retries: u32,
+    pub(crate) retry_delay: u64,
 }
 
 /// The `blind_oob` request field, shared by REST and MCP: `true` arms the
@@ -130,6 +142,14 @@ impl Default for ScanRequestSpec {
     /// here.
     fn default() -> Self {
         Self {
+            sxss: false,
+            sxss_url: Vec::new(),
+            sxss_method: crate::cmd::scan::DEFAULT_SXSS_METHOD.to_string(),
+            sxss_retries: crate::cmd::scan::DEFAULT_SXSS_RETRIES,
+            ignore_param: Vec::new(),
+            ignore_return: Vec::new(),
+            retries: crate::cmd::scan::DEFAULT_RETRIES,
+            retry_delay: crate::cmd::scan::DEFAULT_RETRY_DELAY_MS,
             target: String::new(),
             param: Vec::new(),
             data: None,
@@ -263,6 +283,15 @@ impl ScanRequestSpec {
             session_check: self.session_check,
             session_check_url: self.session_check_url,
 
+            sxss: self.sxss,
+            sxss_url: self.sxss_url,
+            sxss_method: self.sxss_method,
+            sxss_retries: self.sxss_retries,
+            ignore_param: self.ignore_param,
+            ignore_return: self.ignore_return,
+            retries: self.retries,
+            retry_delay: self.retry_delay,
+
             // Everything else stays at its CLI default — including
             // `on_session_loss`, whose `abort` only skips *other* targets of
             // the same host, which a one-target job does not have.
@@ -340,6 +369,14 @@ impl ScanRequestSpec {
             session_check: opts.session_check.clone(),
             session_check_url: opts.session_check_url.clone(),
             min_confidence: opts.min_confidence.clone(),
+            sxss: opts.sxss.unwrap_or(d.sxss),
+            sxss_url: opts.sxss_url.clone().unwrap_or(d.sxss_url),
+            sxss_method: opts.sxss_method.clone().unwrap_or(d.sxss_method),
+            sxss_retries: opts.sxss_retries.unwrap_or(d.sxss_retries),
+            ignore_param: opts.ignore_param.clone().unwrap_or(d.ignore_param),
+            ignore_return: opts.ignore_return.clone().unwrap_or(d.ignore_return),
+            retries: opts.retries.unwrap_or(d.retries),
+            retry_delay: opts.retry_delay.unwrap_or(d.retry_delay),
         }
     }
 }

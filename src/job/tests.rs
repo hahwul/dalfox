@@ -709,6 +709,14 @@ fn rest_and_mcp_requests_agree_on_scan_args() {
         session_check: mcp_params.session_check,
         session_check_url: mcp_params.session_check_url,
         min_confidence: mcp_params.min_confidence,
+        sxss: mcp_params.sxss,
+        sxss_url: mcp_params.sxss_url,
+        sxss_method: mcp_params.sxss_method,
+        sxss_retries: mcp_params.sxss_retries,
+        ignore_param: mcp_params.ignore_param,
+        ignore_return: mcp_params.ignore_return,
+        retries: mcp_params.retries,
+        retry_delay: mcp_params.retry_delay,
     }
     .into_scan_args();
 
@@ -765,6 +773,14 @@ fn rest_non_default_options_reach_scan_args() {
         min_confidence: Some("high".to_string()),
         include_request: Some(true),
         include_response: Some(true),
+        sxss: Some(true),
+        sxss_url: Some(vec!["https://app/list".to_string()]),
+        sxss_method: Some("POST".to_string()),
+        sxss_retries: Some(5),
+        ignore_param: Some(vec!["csrf".to_string()]),
+        ignore_return: Some(vec![302, 404]),
+        retries: Some(2),
+        retry_delay: Some(250),
         ..Default::default()
     };
 
@@ -818,6 +834,82 @@ fn rest_non_default_options_reach_scan_args() {
     assert_eq!(args.oob.blind_oob_wait, Some(12));
     assert_eq!(args.session_check.as_deref(), Some("Sign out"));
     assert_eq!(args.session_check_url.as_deref(), Some("https://app/me"));
+    assert!(args.sxss);
+    assert_eq!(args.sxss_url, vec!["https://app/list".to_string()]);
+    assert_eq!(args.sxss_method, "POST");
+    assert_eq!(args.sxss_retries, 5);
+    assert_eq!(args.ignore_param, vec!["csrf".to_string()]);
+    assert_eq!(args.ignore_return, vec![302, 404]);
+    assert_eq!(args.retries, 2);
+    assert_eq!(args.retry_delay, 250);
+}
+
+/// The same bounds the CLI enforces at startup, for the options REST and MCP
+/// now share with it.
+#[test]
+fn scan_option_checks_cover_the_stored_xss_and_retry_options() {
+    let check = |f: &dyn Fn(&mut ScanOptionChecks)| {
+        let mut c = ScanOptionChecks::<f32>::default();
+        f(&mut c);
+        c.validate()
+    };
+
+    // Trimmed, blanks dropped, method uppercased.
+    let mut urls = vec!["  https://app/list ".to_string(), " ".to_string()];
+    let mut method = "post".to_string();
+    ScanOptionChecks::<f32> {
+        sxss: true,
+        sxss_url: Some(&mut urls),
+        sxss_method: Some(&mut method),
+        ..Default::default()
+    }
+    .validate()
+    .expect("a valid stored-XSS request");
+    assert_eq!(urls, vec!["https://app/list".to_string()]);
+    assert_eq!(method, "POST");
+
+    // A check URL with the mode off would be dropped, and the scan reported
+    // as an ordinary clean one.
+    let mut urls = vec!["https://app/list".to_string()];
+    let err = ScanOptionChecks::<f32> {
+        sxss_url: Some(&mut urls),
+        ..Default::default()
+    }
+    .validate()
+    .expect_err("sxss_url without sxss");
+    assert!(err.contains("sxss: true"), "{err}");
+
+    let mut urls = vec!["/list".to_string()];
+    assert!(
+        ScanOptionChecks::<f32> {
+            sxss: true,
+            sxss_url: Some(&mut urls),
+            ..Default::default()
+        }
+        .validate()
+        .is_err(),
+        "a relative sxss_url can never be fetched"
+    );
+
+    assert!(check(&|c| c.sxss_retries = Some(20)).is_ok());
+    assert!(check(&|c| c.sxss_retries = Some(21)).is_err());
+    assert!(check(&|c| c.retries = Some(MAX_RETRIES)).is_ok());
+    assert!(check(&|c| c.retries = Some(MAX_RETRIES + 1)).is_err());
+    assert!(check(&|c| c.retry_delay = Some(MAX_RETRY_DELAY_MS)).is_ok());
+    assert!(check(&|c| c.retry_delay = Some(MAX_RETRY_DELAY_MS + 1)).is_err());
+
+    // The ignore filter matches names exactly, so they are trimmed here.
+    let mut names = vec![" csrf_token ".to_string(), " ".to_string()];
+    ScanOptionChecks::<f32> {
+        ignore_param: Some(&mut names),
+        ..Default::default()
+    }
+    .validate()
+    .unwrap();
+    assert_eq!(names, vec!["csrf_token".to_string()]);
+    assert!(check(&|c| c.ignore_return = &[302, 404]).is_ok());
+    assert!(check(&|c| c.ignore_return = &[99]).is_err());
+    assert!(check(&|c| c.ignore_return = &[4040]).is_err());
 }
 
 #[test]
@@ -1267,6 +1359,31 @@ fn rest_and_mcp_accept_the_same_scan_option_names() {
     }
 }
 
+/// `GET /scan` refuses a query key it does not read, so its key list has to
+/// track `ScanOptions`: an option added to the struct and not to the list
+/// would be accepted on POST and a 400 on GET.
+#[test]
+fn get_scan_query_keys_cover_every_scan_option() {
+    use std::collections::BTreeSet;
+
+    /// The MCP spellings the JSON body takes as serde aliases. The query form
+    /// reads only the REST names.
+    const BODY_ONLY_ALIASES: &[&str] = &["cookies", "workers", "headers", "blind_callback_url"];
+
+    let mut body = accepted_field_names::<crate::server::types::ScanRequest>();
+    body.extend(accepted_field_names::<crate::server::types::ScanOptions>());
+    body.remove("options");
+    for alias in BODY_ONLY_ALIASES {
+        assert!(body.remove(*alias), "`{alias}` is no longer a body alias");
+    }
+
+    let query: BTreeSet<String> = crate::server::SCAN_QUERY_KEYS
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(query, body);
+}
+
 /// Parity of *names* is only half of it: the REST-spelled values have to reach
 /// `ScanArgs`. The whole point is that an agent using `cookie`/`header`/
 /// `worker`/`blind` on the MCP tool gets an authenticated scan, not a
@@ -1434,6 +1551,17 @@ fn preflight_accepts_a_documented_subset_of_the_scan_options() {
         "skip_ast_analysis",
         "analyze_external_js",
         "detect_outdated_libs",
+        // The MCP preflight has no stored-XSS mode, a response filter and a
+        // retry policy apply to scan requests, and preflight reports the full
+        // discovered set rather than a filtered one.
+        "sxss",
+        "sxss_url",
+        "sxss_method",
+        "sxss_retries",
+        "ignore_return",
+        "retries",
+        "retry_delay",
+        "ignore_param",
         // Preflight is already blocking; it has nothing to wait on.
         "wait",
         "wait_timeout_sec",
