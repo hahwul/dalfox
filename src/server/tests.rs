@@ -3807,6 +3807,35 @@ async fn test_mark_job_error_drops_the_raw_findings() {
     assert!(live.lock().await.is_empty());
 }
 
+/// A scan still queued when the server stops never runs, but its subscriber
+/// must still hear why: the pre-start webhook carries the shutdown reason, not
+/// a bare `cancelled` that reads like a client's `DELETE`.
+#[tokio::test]
+async fn test_shutdown_tells_a_queued_scans_webhook_why() {
+    crate::ensure_crypto_provider();
+    let (hook, captured) = spawn_webhook_capture().await;
+    let state = make_state(None, None, false, false, "cb");
+    let mut job = test_job(JobStatus::Queued, None, "http://127.0.0.1:1/");
+    job.callback_url = Some(hook.clone());
+    state.jobs.lock().await.insert("queued".to_string(), job);
+
+    assert_eq!(begin_shutdown(&state).await, 1);
+    run_scan_job(
+        state.clone(),
+        "queued".to_string(),
+        "http://127.0.0.1:1/".to_string(),
+        ScanOptions {
+            callback_url: Some(hook),
+            ..ScanOptions::default()
+        },
+    )
+    .await;
+
+    let payload = captured.lock().await.clone().expect("webhook fired");
+    assert_eq!(payload["status"], "cancelled");
+    assert_eq!(payload["error_message"], shutdown_cancel_message());
+}
+
 /// The three ways the shutdown wait ends. `Interrupted` is the second Ctrl-C:
 /// the first signal consumed its handler, so without this branch an operator
 /// could not get out of the grace.
