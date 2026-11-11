@@ -381,23 +381,51 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
     // that died with the server. A second signal skips the wait: the first
     // one consumed its handler, so without this the operator's second Ctrl-C
     // would be swallowed for the whole grace.
-    tokio::select! {
-        drained = wait_for_workers(&state, Duration::from_secs(SHUTDOWN_SCAN_GRACE_SECS)) => {
-            if !drained {
-                log(
-                    &state,
-                    "SERVER",
-                    "scan drain grace elapsed — exiting with scans still winding down",
-                );
-            }
-        }
-        _ = wait_for_signal() => log(
+    let drain = drain_scans(
+        &state,
+        Duration::from_secs(SHUTDOWN_SCAN_GRACE_SECS),
+        wait_for_signal(),
+    )
+    .await;
+    match drain {
+        ScanDrain::Drained => {}
+        ScanDrain::GraceElapsed => log(
+            &state,
+            "SERVER",
+            "scan drain grace elapsed — exiting with scans still winding down",
+        ),
+        ScanDrain::Interrupted => log(
             &state,
             "SERVER",
             "second signal — exiting without waiting for scans",
         ),
     }
     Ok(())
+}
+
+/// How the wait for cancelled scans ended.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ScanDrain {
+    /// Every worker finished.
+    Drained,
+    /// `grace` ran out with a worker still running.
+    GraceElapsed,
+    /// `interrupt` resolved first (a second signal).
+    Interrupted,
+}
+
+/// Wait for the scan workers, for at most `grace`, unless `interrupt` resolves.
+pub(crate) async fn drain_scans(
+    state: &AppState,
+    grace: Duration,
+    interrupt: impl std::future::Future<Output = ()>,
+) -> ScanDrain {
+    tokio::select! {
+        drained = wait_for_workers(state, grace) => {
+            if drained { ScanDrain::Drained } else { ScanDrain::GraceElapsed }
+        }
+        _ = interrupt => ScanDrain::Interrupted,
+    }
 }
 
 /// Resolve on SIGINT or SIGTERM (Ctrl-C elsewhere).

@@ -3807,6 +3807,38 @@ async fn test_mark_job_error_drops_the_raw_findings() {
     assert!(live.lock().await.is_empty());
 }
 
+/// The three ways the shutdown wait ends. `Interrupted` is the second Ctrl-C:
+/// the first signal consumed its handler, so without this branch an operator
+/// could not get out of the grace.
+#[tokio::test]
+async fn test_drain_scans_ends_on_drain_grace_or_second_signal() {
+    let state = make_state(None, None, false, false, "cb");
+    let never = std::future::pending::<()>;
+    assert_eq!(
+        drain_scans(&state, Duration::from_secs(5), never()).await,
+        ScanDrain::Drained,
+        "no worker, nothing to wait for"
+    );
+
+    let mut job = test_job(JobStatus::Cancelled, None, "");
+    let _lease = job.issue_worker_lease();
+    state.jobs.lock().await.insert("stuck".to_string(), job);
+    assert_eq!(
+        drain_scans(&state, Duration::from_millis(150), never()).await,
+        ScanDrain::GraceElapsed
+    );
+
+    let started = std::time::Instant::now();
+    assert_eq!(
+        drain_scans(&state, Duration::from_secs(30), async {}).await,
+        ScanDrain::Interrupted
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "a second signal must not wait out the grace"
+    );
+}
+
 #[tokio::test]
 async fn test_wait_for_workers_gives_up_after_the_grace() {
     let state = make_state(None, None, false, false, "cb");

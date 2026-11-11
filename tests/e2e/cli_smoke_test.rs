@@ -1082,3 +1082,46 @@ fn test_mcp_startup_failure_exits_nonzero() {
         "a failed MCP start must not exit 0; stderr:\n{stderr}"
     );
 }
+
+/// `dalfox server` must exit 0 on SIGTERM. The signal path — handler install,
+/// the cancel sweep, the bounded scan drain — only runs in a real process.
+#[cfg(unix)]
+#[test]
+fn test_server_exits_cleanly_on_sigterm() {
+    use std::io::{BufRead, BufReader};
+
+    // A free port: bind to 0, read it back, release it.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind probe listener")
+        .local_addr()
+        .expect("probe addr")
+        .port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["server", "--port", &port.to_string()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn dalfox server");
+
+    // "listening on" is the server's own "it came up" line.
+    let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
+    let came_up = lines
+        .by_ref()
+        .map_while(Result::ok)
+        .any(|line| line.contains("listening on"));
+    assert!(came_up, "the server never announced its listener");
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .expect("run kill");
+    assert!(killed.success());
+
+    let rest: Vec<String> = lines.map_while(Result::ok).collect();
+    let status = child.wait().expect("wait for the server");
+    assert_eq!(status.code(), Some(0), "a clean shutdown exits 0: {rest:?}");
+    assert!(
+        rest.iter().any(|l| l.contains("shutdown signal received")),
+        "the shutdown must be logged: {rest:?}"
+    );
+}
