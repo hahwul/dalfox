@@ -36,7 +36,7 @@ Runs an async HTTP API (axum) that exposes the same scanning engine.
 - `POST /preflight` — discovery only
 - `GET /health` — liveness; with the API key also `scans: {active, max_concurrent}` (room before a `503`)
 
-Jobs are in-memory only. On `SIGINT`/`SIGTERM` the server cancels active scans and waits up to 15s for them, so each still fires its webhook (`status: "cancelled"`, partial results, `error_message` starting `server shutting down`). Same `queued / running / done / error / cancelled` lifecycle as MCP.
+Jobs are in-memory only. On `SIGINT`/`SIGTERM` the server refuses new scans (`503`), cancels active ones and waits up to 30s for them, so each still fires its webhook (`status: "cancelled"`, partial results, `error_message` starting `SERVER_SHUTDOWN:`). A second signal exits at once. Same `queued / running / done / error / cancelled` lifecycle as MCP.
 
 ### `options` keys (POST body / GET query)
 
@@ -61,7 +61,7 @@ Blind OOB and session-loss detection reach parity with the CLI here: the `option
 
 `POST`/`GET /scan` require an `http(s)` `target` (`url` is a legacy alias; other schemes → `400`, like `/preflight`). Unknown keys in the body, in `options`, or in the `GET /scan` query → `400`. The submit reply is `{scan_id, target, limits: {rate_limit, scan_timeout}}`, where `limits` is what the scan runs with after the server-wide caps (`0` = unlimited). An unreachable target ends as `error` (message contains `CONNECTION_FAILED`), not `done` with zero findings. `GET /scan` numeric query params (`worker`/`delay`/`timeout`/`rate_limit`/`scan_timeout`/`max_payloads_per_param`) that are present but unparseable → `400` rather than silently using the default. `progress.params_tested` advances live during the scan.
 
-Body errors: over `--max-body-bytes` → `413`, no JSON `Content-Type` → `415`, malformed JSON or schema errors → `400`. `POST /preflight` is bounded by `--scan-timeout` (`504` on expiry). `DELETE /scan/{id}?purge=1` is `409` while a cancelled scan's worker is still draining. The completion webhook body carries `target` (`url` repeats it for older subscribers), the job timing (`queued_at_ms`, `started_at_ms`, `finished_at_ms`, `duration_ms`), `error_message` (null unless the scan errored, timed out or lost its session) and, when non-empty, the same `warnings` list.
+Body errors: over `--max-body-bytes` → `413`, no JSON `Content-Type` → `415`, malformed JSON or schema errors → `400`. `POST /preflight` is bounded by `--scan-timeout` (`504` on expiry). `DELETE /scan/{id}?purge=1` is `409` while a cancelled scan's worker is still draining. The completion webhook body carries `target` (`url` repeats it for older subscribers), the job timing (`queued_at_ms`, `started_at_ms`, `finished_at_ms`, `duration_ms`), `error_message` (null unless the scan errored, timed out, lost its session or was cancelled by a server shutdown) and, when non-empty, the same `warnings` list.
 
 **Webhook/SSRF**: `callback_url` (and the scan target itself) are dialed server-side with no host filtering — loopback/link-local/private hosts are reachable. Set `--api-key` and restrict egress on untrusted binds. `--jsonp` exposes the API cross-origin (bypasses the CORS allow-list); enable deliberately.
 

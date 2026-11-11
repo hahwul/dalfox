@@ -892,6 +892,18 @@ pub(crate) struct ResultView {
     pub min_confidence: Option<String>,
 }
 
+impl ResultView {
+    /// The view a job's own `ScanArgs` asks for — the one source both the
+    /// mid-scan read and the settled results render from.
+    pub(crate) fn of(args: &crate::cmd::scan::ScanArgs) -> Self {
+        Self {
+            include_request: args.include_request,
+            include_response: args.include_response,
+            min_confidence: args.min_confidence.clone(),
+        }
+    }
+}
+
 /// The `progress` object of a scan status response (REST `/scan/{id}`, MCP
 /// `get_results_dalfox`).
 #[derive(Debug, Clone, Serialize)]

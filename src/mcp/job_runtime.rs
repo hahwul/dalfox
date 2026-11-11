@@ -55,5 +55,11 @@ pub(super) fn mark_job_error_sync(
         .get_mut(job_id)
     {
         job.fail(msg);
+        // No results are stored on this path, so drop the raw findings rather
+        // than keep them on the job record. The scan future is gone by now, so
+        // the lock is free; a missed `try_lock` only delays the drop.
+        if let Ok(mut live) = job.progress.live_results.try_lock() {
+            live.clear();
+        }
     }
 }

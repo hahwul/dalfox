@@ -137,8 +137,19 @@ pub(crate) async fn mark_job_error(
     client: Option<reqwest::Client>,
 ) {
     let reason = msg.clone();
-    let transitioned = (state.jobs.lock().await.get_mut(job_id))
-        .and_then(|job| job.fail(msg).then(|| job.callback_url.clone()));
+    let (transitioned, live) = match state.jobs.lock().await.get_mut(job_id) {
+        Some(job) => (
+            job.fail(msg).then(|| job.callback_url.clone()),
+            Some(job.progress.live_results.clone()),
+        ),
+        None => (None, None),
+    };
+    // Every error exit comes through here, a worker panic included, and none
+    // of them stores results: without this the raw findings (request and
+    // response bodies) stay on the job record until retention drops it.
+    if let Some(live) = live {
+        live.lock().await.clear();
+    }
     if let Some(callback_url) = transitioned {
         send_terminal_webhook(
             state,
@@ -179,6 +190,32 @@ enum StartDecision {
 }
 
 pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, opts: ScanOptions) {
+    // Built once behind an `Arc` so the scan future and `run_scanning` share it
+    // by refcount bump instead of deep-cloning this ~70-field struct (mirrors
+    // the MCP path, which already uses `Arc<ScanArgs>`).
+    //
+    // The mapping from request to `ScanArgs` lives in `job::spec` so this path
+    // and MCP's cannot drift; only the two server-wide ceilings and the WAF
+    // name normalization are applied here, because they need `state`.
+    let args = Arc::new(
+        ScanRequestSpec::from_rest_options(
+            url.clone(),
+            &opts,
+            // Capped by the server-wide `--scan-timeout` when set. Enforced
+            // below by wrapping the scan future.
+            effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
+            // Capped by the server-wide `--rate-limit` when set.
+            effective_rate_limit(opts.rate_limit, state.rate_limit),
+            // Normalize to the canonical (lowercased) WAF name like the CLI/MCP
+            // do; `validate_scan_options` already rejected unknown names before
+            // queuing, so the fallback is defensive only.
+            opts.force_waf.as_deref().map(|s| {
+                crate::cmd::scan::parse_force_waf_arg(s).unwrap_or_else(|_| s.to_string())
+            }),
+        )
+        .into_scan_args(),
+    );
+
     // Grab progress counters and cancellation flag
     let decision = {
         let mut jobs = state.jobs.lock().await;
@@ -187,11 +224,7 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
                 Some((progress, cancel_flag)) => {
                     // What `GET /scan/{id}?partial=1` renders findings with
                     // while the scan is still running.
-                    job.result_view = crate::job::ResultView {
-                        include_request: opts.include_request.unwrap_or(false),
-                        include_response: opts.include_response.unwrap_or(false),
-                        min_confidence: opts.min_confidence.clone(),
-                    };
+                    job.result_view = crate::job::ResultView::of(&args);
                     StartDecision::Run {
                         progress,
                         cancel_flag,
@@ -256,32 +289,6 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
         }
         StartDecision::Missing => return,
     };
-
-    // Built once behind an `Arc` so the scan future and `run_scanning` share it
-    // by refcount bump instead of deep-cloning this ~70-field struct (mirrors
-    // the MCP path, which already uses `Arc<ScanArgs>`).
-    //
-    // The mapping from request to `ScanArgs` lives in `job::spec` so this path
-    // and MCP's cannot drift; only the two server-wide ceilings and the WAF
-    // name normalization are applied here, because they need `state`.
-    let args = Arc::new(
-        ScanRequestSpec::from_rest_options(
-            url.clone(),
-            &opts,
-            // Capped by the server-wide `--scan-timeout` when set. Enforced
-            // below by wrapping the scan future.
-            effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
-            // Capped by the server-wide `--rate-limit` when set.
-            effective_rate_limit(opts.rate_limit, state.rate_limit),
-            // Normalize to the canonical (lowercased) WAF name like the CLI/MCP
-            // do; `validate_scan_options` already rejected unknown names before
-            // queuing, so the fallback is defensive only.
-            opts.force_waf.as_deref().map(|s| {
-                crate::cmd::scan::parse_force_waf_arg(s).unwrap_or_else(|_| s.to_string())
-            }),
-        )
-        .into_scan_args(),
-    );
 
     let mut target = match crate::job::runner::hydrate_target(&url, &args) {
         Ok(t) => t,

@@ -38,6 +38,7 @@ fn make_state(
         max_retained_scans: 0,
         retention_secs: JOB_RETENTION_SECS as u32,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+        shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     }
 }
@@ -3639,12 +3640,8 @@ async fn test_shutdown_cancels_running_scans_and_fires_their_webhooks() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    assert_eq!(cancel_active_scans(&state).await, 1);
-    assert_eq!(
-        cancel_active_scans(&state).await,
-        0,
-        "nothing left to cancel"
-    );
+    assert_eq!(begin_shutdown(&state).await, 1);
+    assert_eq!(begin_shutdown(&state).await, 0, "nothing left to cancel");
     assert!(
         wait_for_workers(&state, Duration::from_secs(30)).await,
         "the cancelled worker must wind down"
@@ -3654,12 +3651,32 @@ async fn test_shutdown_cancels_running_scans_and_fires_their_webhooks() {
     let job = &jobs[&id];
     assert_eq!(job.status, JobStatus::Cancelled);
     assert!(job.results.is_some(), "partial results are stored");
-    assert_eq!(job.error_message.as_deref(), Some(SHUTDOWN_CANCEL_MESSAGE));
+    let reason = shutdown_cancel_message();
+    assert!(reason.starts_with(crate::cmd::error_codes::SERVER_SHUTDOWN));
+    assert_eq!(job.error_message.as_deref(), Some(reason.as_str()));
     drop(jobs);
 
     let payload = captured.lock().await.clone().expect("webhook fired");
     assert_eq!(payload["status"], "cancelled");
-    assert_eq!(payload["error_message"], SHUTDOWN_CANCEL_MESSAGE);
+    assert_eq!(payload["error_message"], reason);
+
+    // Nothing is admitted once shutdown has begun: it would run with no one
+    // left to cancel it or wait for it.
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://127.0.0.1:1/".to_string(),
+            options: None,
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = response_body_string(resp).await;
+    assert!(body.contains("shutting down"), "{body}");
+    assert_eq!(state.jobs.lock().await.len(), 1);
 }
 
 /// `?partial=1` on a running scan returns the findings so far, rendered with
@@ -3668,7 +3685,8 @@ async fn test_shutdown_cancels_running_scans_and_fires_their_webhooks() {
 #[tokio::test]
 async fn test_get_result_returns_findings_so_far_only_when_asked() {
     let state = make_state(None, None, false, false, "cb");
-    let job = test_job(JobStatus::Running, None, "http://t/");
+    let mut job = test_job(JobStatus::Running, None, "http://t/");
+    job.started_at_ms = Some(crate::job::now_ms());
     let mut finding =
         crate::scanning::result::Result::builder(crate::scanning::result::FindingType::Reflected)
             .inject_type("inHTML")
@@ -3729,6 +3747,30 @@ async fn test_get_result_returns_findings_so_far_only_when_asked() {
     let with_request = get(true).await;
     assert_eq!(with_request["results"][0]["request"], "GET /?q=x HTTP/1.1");
 
+    // A scan that failed before scanning never had findings: `?partial=1`
+    // must not dress its absent results up as an empty provisional list, even
+    // while its worker is still busy delivering the webhook.
+    let lease = {
+        let mut jobs = state.jobs.lock().await;
+        let job = jobs.get_mut("run").unwrap();
+        job.status = JobStatus::Error;
+        job.issue_worker_lease()
+    };
+    let failed = get(true).await;
+    assert!(failed.get("partial").is_none(), "{failed}");
+    assert!(failed.get("results").is_none(), "{failed}");
+    drop(lease);
+
+    // Nor has a queued one started.
+    {
+        let mut jobs = state.jobs.lock().await;
+        let job = jobs.get_mut("run").unwrap();
+        job.status = JobStatus::Queued;
+        job.started_at_ms = None;
+    }
+    let queued = get(true).await;
+    assert!(queued.get("partial").is_none(), "{queued}");
+
     // Once settled, `?partial=1` is just the settled list.
     {
         let mut jobs = state.jobs.lock().await;
@@ -3739,6 +3781,30 @@ async fn test_get_result_returns_findings_so_far_only_when_asked() {
     let settled = get(true).await;
     assert!(settled.get("partial").is_none(), "{settled}");
     assert_eq!(settled["results"], serde_json::json!([]));
+}
+
+/// No error exit stores results, so the raw findings a partial read used must
+/// go with it — they carry request and response bodies, and would otherwise
+/// sit on the job record until retention drops it.
+#[tokio::test]
+async fn test_mark_job_error_drops_the_raw_findings() {
+    let state = make_state(None, None, false, false, "cb");
+    let job = test_job(JobStatus::Running, None, "http://t/");
+    let live = job.progress.live_results.clone();
+    live.lock().await.push(
+        crate::scanning::result::Result::builder(crate::scanning::result::FindingType::Reflected)
+            .build(),
+    );
+    state.jobs.lock().await.insert("boom".to_string(), job);
+    mark_job_error(
+        &state,
+        "boom",
+        "http://t/",
+        "worker panicked".to_string(),
+        None,
+    )
+    .await;
+    assert!(live.lock().await.is_empty());
 }
 
 #[tokio::test]

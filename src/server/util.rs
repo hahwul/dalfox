@@ -142,8 +142,18 @@ pub(crate) async fn try_admit_and_queue(
     url: &str,
     callback_url: Option<String>,
 ) -> Option<(String, WorkerLease)> {
+    let mut jobs = state.jobs.lock().await;
+    // Checked under the jobs lock, which `begin_shutdown` takes after raising
+    // the flag: a scan is either admitted before the cancel sweep sees it, or
+    // refused — never queued behind the sweep to run with no one waiting.
+    if state
+        .shutting_down
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return None;
+    }
     crate::job::admit_job(
-        &mut *state.jobs.lock().await,
+        &mut jobs,
         url,
         callback_url,
         state.max_concurrent_scans,

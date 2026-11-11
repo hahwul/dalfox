@@ -159,6 +159,8 @@ pub(crate) struct AppState {
     /// path), serializing handlers on the jobs lock; gating it keeps the sweep
     /// to at most once per minute. Mirrors the MCP server's throttle.
     pub(crate) last_purge_ms: Arc<std::sync::atomic::AtomicI64>,
+    /// Raised when a shutdown signal arrives; no scan is admitted after it.
+    pub(crate) shutting_down: Arc<std::sync::atomic::AtomicBool>,
     /// Bounds concurrent `/preflight` work. Each preflight pins a blocking-pool
     /// thread for the full request timeout against an attacker-controlled
     /// target, so without a cap a burst can exhaust the blocking pool and stall

@@ -84,16 +84,19 @@ pub(crate) fn hydrate_target(url: &str, args: &ScanArgs) -> Result<Target, Strin
 /// Raw findings as a caller sees them: confidence filter, then the AST fold,
 /// then sanitizing. One function so a mid-scan read and the settled results
 /// cannot disagree about what a finding looks like.
+///
+/// By reference, so it can run under the accumulator's lock without copying
+/// the request/response bodies a caller did not ask for.
 pub(crate) fn sanitize_results(
-    raw: Vec<ScanResult>,
+    raw: &[ScanResult],
     view: &super::ResultView,
 ) -> Vec<SanitizedResult> {
-    let kept: Vec<ScanResult> = raw
-        .into_iter()
+    let kept: Vec<&ScanResult> = raw
+        .iter()
         .filter(|r| !r.below_min_confidence(view.min_confidence.as_deref()))
         .collect();
     crate::cmd::scan::dedupe_ast_results(kept)
-        .iter()
+        .into_iter()
         .map(|r| r.to_sanitized(view.include_request, view.include_response))
         .collect()
 }
@@ -146,7 +149,7 @@ impl ScanRun {
         // strongest *surviving* claim rather than a low-graded winner the
         // filter then drops along with the duplicate it beat.
         let kept = sanitize_results(
-            self.results.lock().await.clone(),
+            &self.results.lock().await,
             &super::ResultView {
                 include_request,
                 include_response,

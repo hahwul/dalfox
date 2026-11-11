@@ -74,18 +74,22 @@ pub(crate) fn ast_dedup_parts(result: &Result) -> Option<(&str, &str, &str)> {
 
 // AST findings can be produced in multiple scan stages (preflight/probe/reflection loop).
 // Keep one strongest result per equivalent AST fingerprint to reduce duplicate noise.
-pub(crate) fn dedupe_ast_results(results: Vec<Result>) -> Vec<Result> {
-    let mut out: Vec<Result> = Vec::with_capacity(results.len());
+//
+// Generic over owned and borrowed findings: a job's mid-scan read folds the
+// live list by reference, under its lock, without cloning request/response
+// bodies it is about to drop.
+pub(crate) fn dedupe_ast_results<T: std::borrow::Borrow<Result>>(results: Vec<T>) -> Vec<T> {
+    let mut out: Vec<T> = Vec::with_capacity(results.len());
     let mut ast_index_by_key: HashMap<String, usize> = HashMap::new();
 
     for result in results {
-        let Some(key) = ast_dedup_key(&result) else {
+        let Some(key) = ast_dedup_key(result.borrow()) else {
             out.push(result);
             continue;
         };
 
         if let Some(existing_idx) = ast_index_by_key.get(&key).copied() {
-            if result_priority(&result) > result_priority(&out[existing_idx]) {
+            if result_priority(result.borrow()) > result_priority(out[existing_idx].borrow()) {
                 out[existing_idx] = result;
             }
         } else {
