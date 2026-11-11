@@ -410,7 +410,7 @@ def rust_type_to_json(rust : String) : String
     "string"
   when "bool"
     "boolean"
-  when "Vec<String>"
+  when /\AVec<.+>\z/
     "array"
   when "f32", "f64"
     "number"
