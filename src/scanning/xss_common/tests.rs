@@ -575,3 +575,23 @@ fn test_apply_custom_alert_substitution_all_patterns() {
         ]
     );
 }
+
+#[test]
+fn test_adaptive_tab_variants_replace_every_space() {
+    // `generate_adaptive_payloads` builds its own tab variants when angles are
+    // blocked; they must not keep a fragment's inner space either.
+    let payloads = generate_adaptive_payloads(
+        &InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
+        &['<', '>'],
+        &[],
+        true,
+    );
+    let tab = payloads
+        .iter()
+        .find(|p| p.starts_with("\"\toncontentvisibilityautostatechange="))
+        .expect("adaptive tab variant of the content-visibility fragment");
+    assert!(
+        !tab.contains(' '),
+        "adaptive tab variant kept a space: {tab:?}"
+    );
+}
