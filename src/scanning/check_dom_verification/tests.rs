@@ -2569,3 +2569,100 @@ fn test_payload_has_handler_sink_text_is_linear_in_handler_count() {
         "\" onmouseover=x onfocus=alert(1) \""
     ));
 }
+
+// ── content-visibility handler needs its own `style` to fire ───────────────
+
+/// The payload's `style=content-visibility:auto` is dropped when the reflected
+/// tag already carries a `style` (the parser keeps the first). The handler
+/// then never fires and must not verify.
+#[test]
+fn content_visibility_handler_without_its_style_is_not_evidence() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!(
+        "\" oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto id={id} \""
+    );
+    let body =
+        format!("<html><body><div style=\"color:red\" title=\"{payload}\"></div></body></html>");
+    assert_eq!(classify_dom_evidence(&payload, &body), None, "{body}");
+}
+
+/// FN guard: on a tag with no `style` of its own, the payload's style applies
+/// and the handler fires, so the same reflection still verifies.
+#[test]
+fn content_visibility_handler_with_its_style_is_evidence() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!(
+        "\" oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto id={id} \""
+    );
+    let body = format!("<html><body><div title=\"{payload}\"></div></body></html>");
+    assert!(
+        classify_dom_evidence(&payload, &body).is_some(),
+        "the armed handler must stay evidence: {body}"
+    );
+}
+
+/// A custom payload whose marker element carries a style-less
+/// content-visibility handler still *needs* that handler to survive: the gate
+/// judges the response, not what the payload is. A server that strips the
+/// handler must not verify the bare element.
+#[test]
+fn content_visibility_payload_still_requires_its_handler_to_survive() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!("<div id={id} oncontentvisibilityautostatechange=alert(1)>");
+    let body = format!("<html><body><div id={id}></div></body></html>");
+    assert_eq!(classify_dom_evidence(&payload, &body), None);
+}
+
+/// #1183 still applies to the armed handler: on a hidden input (no rendered
+/// box) it never fires, style or not.
+#[test]
+fn content_visibility_handler_on_hidden_input_is_not_evidence() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!(
+        "\" oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto id={id} x=\""
+    );
+    let body = format!("<html><body><input type=\"hidden\" value=\"{payload}\"></body></html>");
+    assert_eq!(classify_dom_evidence(&payload, &body), None, "{body}");
+}
+
+/// The XHTML path gates the same way: a filter that removed the payload's
+/// `style` leaves a handler that cannot fire.
+#[test]
+fn content_visibility_handler_without_style_is_not_xhtml_evidence() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!(
+        "<div oncontentvisibilityautostatechange=\"alert(1)\" style=\"content-visibility:auto\" id=\"{id}\"/>"
+    );
+    let stripped = format!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><div oncontentvisibilityautostatechange=\"alert(1)\" id=\"{id}\"/></body></html>"
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &stripped, "application/xhtml+xml"),
+        None
+    );
+    let armed =
+        format!("<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}</body></html>");
+    assert!(
+        classify_dom_evidence_for_response(&payload, &armed, "application/xhtml+xml").is_some(),
+        "FN guard: the armed handler is XHTML evidence"
+    );
+}
+
+#[test]
+fn style_arms_content_visibility_reads_the_applied_declaration() {
+    for (style, armed) in [
+        ("content-visibility:auto", true),
+        ("CONTENT-VISIBILITY : AUTO ;", true),
+        ("color:red; content-visibility: auto", true),
+        ("--x-content-visibility:auto", false),
+        ("content-visibility:auto;content-visibility:visible", false),
+        (
+            "content-visibility:auto !important;content-visibility:visible",
+            true,
+        ),
+        ("content-visibility:hidden", false),
+        ("", false),
+    ] {
+        assert_eq!(style_arms_content_visibility(style), armed, "{style:?}");
+    }
+}

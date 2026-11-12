@@ -157,18 +157,57 @@ fn value_carries_js_sink(value: &str) -> bool {
         || sink(&decode_html_entities(&value.to_ascii_lowercase()))
 }
 
+/// `oncontentvisibilityautostatechange` fires only on an element whose style
+/// is `content-visibility: auto`. Payloads ship that `style`, but the reflected
+/// tag may already have one (the HTML parser keeps the first duplicate) or a
+/// filter may strip it, leaving a handler that never runs. `style` is the
+/// element's own attribute value; every other `on*` handler is judged as
+/// before.
+fn handler_attr_can_fire(attr_name: &str, style: Option<&str>) -> bool {
+    !attr_name.eq_ignore_ascii_case("oncontentvisibilityautostatechange")
+        || style.is_some_and(style_arms_content_visibility)
+}
+
+/// Whether the declaration that applies for `content-visibility` in an inline
+/// `style` is `auto`: the last one wins, and a `!important` one beats any
+/// normal one.
+fn style_arms_content_visibility(style: &str) -> bool {
+    let (mut normal, mut important) = (None, None);
+    for (property, value) in style.split(';').filter_map(|decl| decl.split_once(':')) {
+        if !property.trim().eq_ignore_ascii_case("content-visibility") {
+            continue;
+        }
+        let value: String = value
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        match value.strip_suffix("!important") {
+            Some(v) => important = Some(v.to_string()),
+            None => normal = Some(value),
+        }
+    }
+    important.or(normal).is_some_and(|v| v == "auto")
+}
+
 /// Whether `node`'s own attributes/body carry a surviving JS sink: an `on*`
 /// event-handler attribute whose value is a sink call, or a `<script>` element
 /// whose text body is a sink call. This is the "active ingredient" a
 /// handler/script-body marker template attaches *directly to the marker
 /// element*; if it did not survive the server's reflection, the marker class
 /// alone is not proof of execution (issue #1118).
-fn element_carries_surviving_sink(node: scraper::ElementRef) -> bool {
+///
+/// `armed` additionally requires the handler to be able to fire as reflected
+/// (see [`handler_attr_can_fire`]). Only response-side "did it survive" checks
+/// ask for it; the payload-side classifier and the hidden-input guard want
+/// any handler, firing or not.
+fn element_carries_surviving_sink(node: scraper::ElementRef, armed: bool) -> bool {
     let v = node.value();
     for (name, val) in v.attrs() {
         if name.len() >= 3
             && name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
             && value_carries_js_sink(val)
+            && (!armed || handler_attr_can_fire(name, v.attr("style")))
         {
             return true;
         }
@@ -240,7 +279,7 @@ fn payload_marker_element_carries_sink(payload: &str) -> bool {
                 || element_class_has(node, "dalfox")
                 || element_id_is(node, id_marker)
                 || element_id_is(node, "dalfox");
-            is_marker && element_carries_surviving_sink(node)
+            is_marker && element_carries_surviving_sink(node, false)
         });
         if hit {
             return true;
@@ -346,7 +385,7 @@ fn marker_element_carries_surviving_sink(payload: &str, document: &scraper::Html
     let sel = super::selectors::universal();
     document
         .select(sel)
-        .any(|node| is_marker_element(node, &flags) && element_carries_surviving_sink(node))
+        .any(|node| is_marker_element(node, &flags) && element_carries_surviving_sink(node, true))
 }
 
 /// Whether the payload's marker rides *only* on `<input type="hidden">`
@@ -378,7 +417,7 @@ fn marker_only_on_non_firing_hidden_inputs(payload: &str, document: &scraper::Ht
             // A marker on a rendered/interactive element can execute — keep it.
             return false;
         }
-        if element_carries_surviving_sink(node) {
+        if element_carries_surviving_sink(node, false) {
             saw_handler_on_hidden = true;
         }
     }
@@ -623,7 +662,10 @@ fn has_html_structural_evidence_in_doc(payload: &str, document: &scraper::Html) 
 
         // (a) Event-handler attribute introduced by the payload.
         for (attr_name, attr_value) in value.attrs() {
-            if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
+            if attr_name.len() < 3
+                || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
+                || !handler_attr_can_fire(attr_name, value.attr("style"))
+            {
                 continue;
             }
             let trimmed = attr_value.trim();
@@ -944,11 +986,13 @@ fn xml_script_type_is_javascript(node: roxmltree::Node<'_, '_>) -> bool {
     script_type.is_empty() || crate::scanning::ast_integration::is_js_mime_essence(&script_type)
 }
 
-fn xml_node_carries_sink(node: roxmltree::Node<'_, '_>) -> bool {
-    if node
-        .attributes()
-        .any(|attr| attr.name().starts_with("on") && value_carries_js_sink(attr.value()))
-    {
+/// `armed`: as for [`element_carries_surviving_sink`].
+fn xml_node_carries_sink(node: roxmltree::Node<'_, '_>, armed: bool) -> bool {
+    if node.attributes().any(|attr| {
+        attr.name().starts_with("on")
+            && value_carries_js_sink(attr.value())
+            && (!armed || handler_attr_can_fire(attr.name(), node.attribute("style")))
+    }) {
         return true;
     }
     node.tag_name().name() == "script"
@@ -969,6 +1013,7 @@ fn xml_node_has_payload_structural_sink(
         name.starts_with("on")
             && name.len() > 2
             && name[2..].bytes().all(|b| b.is_ascii_alphabetic())
+            && handler_attr_can_fire(name, node.attribute("style"))
             && value_carries_js_sink(attr.value().trim())
             && (payload.contains(attr.value().trim())
                 || decoded_payload.contains(attr.value().trim()))
@@ -1013,11 +1058,12 @@ fn classify_dom_evidence_in_xml(
             });
         let needs_sink = payload_marker_element_carries_sink(payload)
             || payload_is_bare_attribute_handler_injection(payload);
-        let marker_has_sink = nodes.iter().any(|node| xml_node_carries_sink(*node));
+        let marker_has_sink = nodes.iter().any(|node| xml_node_carries_sink(*node, false));
+        let marker_has_firing_sink = nodes.iter().any(|node| xml_node_carries_sink(*node, true));
         let hidden_only_with_sink = !nodes.is_empty()
             && nodes.iter().all(|node| xml_node_is_hidden_input(*node))
             && marker_has_sink;
-        if class_ok && id_ok && !hidden_only_with_sink && (!needs_sink || marker_has_sink) {
+        if class_ok && id_ok && !hidden_only_with_sink && (!needs_sink || marker_has_firing_sink) {
             return Some(DomEvidenceKind::Marker);
         }
     }
@@ -1065,6 +1111,7 @@ fn classify_dom_evidence_in_xml(
         && elements.any(|node| {
             node.attributes().any(|attr| {
                 attr.name().starts_with("on")
+                    && handler_attr_can_fire(attr.name(), node.attribute("style"))
                     && crate::scanning::js_context_verify::handler_payload_hits_sink(
                         attr.value(),
                         payload,
@@ -1128,7 +1175,10 @@ fn has_inline_handler_breakout_evidence_in_doc(payload: &str, document: &scraper
         }
         let value = node.value();
         for (attr_name, attr_value) in value.attrs() {
-            if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
+            if attr_name.len() < 3
+                || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
+                || !handler_attr_can_fire(attr_name, value.attr("style"))
+            {
                 continue;
             }
             // The sink must be the payload's own call, outside every string

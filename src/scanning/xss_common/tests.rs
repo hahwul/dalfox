@@ -73,27 +73,37 @@ fn test_generate_dynamic_payloads_attribute_none_has_autotriggers() {
 }
 
 #[test]
-fn test_autofiring_event_consts_share_the_modern_handler() {
-    // Guard against the four former copies of the handler list drifting again:
-    // both shared consts must carry the content-visibility handler, and the
-    // name-slot variant must drop the bare `onmouseover` (which cannot fire in
-    // the attribute-name position).
+fn test_name_slot_arm_derives_from_autofiring_events() {
+    // The attribute-name-slot arm filters `AUTOFIRING_EVENTS` instead of a
+    // hand-kept copy: a handler added there reaches it, minus `onmouseover`.
+    let id = crate::scanning::markers::id_marker();
+    let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(None));
     assert!(
-        super::AUTOFIRING_EVENTS
+        payloads
             .iter()
-            .any(|e| e.contains("oncontentvisibilityautostatechange")),
-        "AUTOFIRING_EVENTS lost the modern handler"
+            .any(|p| p.starts_with("oncontentvisibilityautostatechange=")),
+        "name-slot arm lost the content-visibility handler"
     );
     assert!(
-        super::AUTOFIRING_EVENTS_NAME_SLOT
+        !payloads.contains(&format!("onmouseover=alert(1) id={id}")),
+        "name-slot arm must not carry the marker-bearing bare onmouseover"
+    );
+}
+
+#[test]
+fn test_tab_variants_replace_every_space() {
+    // The tab variant exists for filters that strip spaces; a multi-word
+    // fragment (`onfocus=… autofocus`, `… style=content-visibility:auto`) must
+    // not keep an inner space, or its arming attribute is lost on exactly
+    // that filter.
+    for delim in [DelimiterType::DoubleQuote, DelimiterType::SingleQuote] {
+        let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(Some(delim)));
+        let tab = payloads
             .iter()
-            .any(|e| e.contains("oncontentvisibilityautostatechange")),
-        "AUTOFIRING_EVENTS_NAME_SLOT lost the modern handler"
-    );
-    assert!(
-        !super::AUTOFIRING_EVENTS_NAME_SLOT.contains(&"onmouseover=alert(1)"),
-        "name-slot set must not carry bare onmouseover"
-    );
+            .find(|p| p.contains("\toncontentvisibilityautostatechange=alert(1)"))
+            .expect("tab variant of the content-visibility fragment");
+        assert!(!tab.contains(' '), "tab variant kept a space: {tab:?}");
+    }
 }
 
 #[test]
@@ -563,5 +573,25 @@ fn test_apply_custom_alert_substitution_all_patterns() {
             "(0,alert)(test())".to_string(),
             "alert?.(test())".to_string(),
         ]
+    );
+}
+
+#[test]
+fn test_adaptive_tab_variants_replace_every_space() {
+    // `generate_adaptive_payloads` builds its own tab variants when angles are
+    // blocked; they must not keep a fragment's inner space either.
+    let payloads = generate_adaptive_payloads(
+        &InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
+        &['<', '>'],
+        &[],
+        true,
+    );
+    let tab = payloads
+        .iter()
+        .find(|p| p.starts_with("\"\toncontentvisibilityautostatechange="))
+        .expect("adaptive tab variant of the content-visibility fragment");
+    assert!(
+        !tab.contains(' '),
+        "adaptive tab variant kept a space: {tab:?}"
     );
 }
