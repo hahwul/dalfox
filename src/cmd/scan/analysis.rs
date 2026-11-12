@@ -282,6 +282,26 @@ pub(crate) async fn preflight_and_analyze_target(
         session_baselines_clone,
         session_lost_clone,
     } = ctx;
+    // `--inject-marker` with no marker in an injectable value: nothing to test.
+    // Checked before preflight so the target costs no request, and recorded as a
+    // skip so it reads as `skipped`/exit 2 instead of a `clean` pass.
+    if let Some(ref marker) = args_clone.inject_marker
+        && inject_marker_params(&target, marker).is_empty()
+    {
+        if !args_clone.silence {
+            crate::ceprintln!(
+                "{} {} (--inject-marker {} is not in any query, body, header or cookie value)",
+                log_prefix("33", "SKIPPED"),
+                crate::utils::term::sanitize_display(target.url.as_str()),
+                crate::utils::term::sanitize_display(marker)
+            );
+        }
+        skipped_targets_clone.lock().await.insert(
+            target.state_key(),
+            crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND,
+        );
+        return None;
+    }
     // Concurrency across targets is bounded by the caller, which holds a
     // `--max-concurrent-targets` permit for the lifetime of this task.
     let PreflightCapture {

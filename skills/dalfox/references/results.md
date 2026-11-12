@@ -267,6 +267,8 @@ See `src/cmd/mod.rs` for the canonical list. Common ones:
 - `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`
 - `CONTENT_TYPE_MISMATCH`
 - `TRUNCATED_PER_HOST_CAP`
+- `INJECT_MARKER_NOT_FOUND` — `--inject-marker` is in none of the target's
+  query, body, header or cookie values, so nothing was sent (`skipped`)
 - `SESSION_LOST` — the authenticated session died (or was already dead) while
   scanning this target
 - `INTERNAL_ERROR` — a dalfox task handling this target panicked, so the target
