@@ -2599,6 +2599,12 @@ async fn analyze_parameters_fetches_the_base_page_once() {
         .route(
             "/dom",
             counted("<html><body><input name=foo></body></html>"),
+        )
+        // Form discovery submits `c`, which could change this very page (a
+        // stored comment), so the copy it fetched is not reused afterwards.
+        .route(
+            "/form",
+            counted("<html><body><form><input name=c></form></body></html>"),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -2627,15 +2633,21 @@ async fn analyze_parameters_fetches_the_base_page_once() {
     assert_eq!(run("/plain").await, 2);
     // + DOM mining's two fresh baseline samples (was 5).
     assert_eq!(run("/dom").await, 4);
+    // Probes sent after the base fetch clear the copy: same as before (was 5).
+    assert_eq!(run("/form").await, 5);
     server.abort();
 }
 
 /// A failed base fetch is not stored, so a later stage can still try.
 #[tokio::test]
 async fn failed_base_fetch_is_not_shared() {
-    let target = parse_target("http://127.0.0.1:1/").unwrap();
+    // A port that was just bound and released: refused at once on every OS.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .expect("bind");
+    let target = parse_target(&format!("http://{closed}/")).unwrap();
     BASE_RESPONSE
-        .scope(Arc::new(tokio::sync::OnceCell::new()), async {
+        .scope(SharedBase::default(), async {
             assert!(base_response(&target).await.is_none());
             assert!(cached_base_response().is_none());
         })

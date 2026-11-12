@@ -87,11 +87,13 @@ pub async fn probe_dictionary_params(
     };
     // Form discovery runs just before this and usually fetched the base page
     // already: seed the baseline with it instead of paying for an identical
-    // first sample. Nothing cached (POST target, --skip-discovery) keeps the
-    // miner's own paced sample, sent only if calibration is reached. The
+    // first sample. The copy is dropped once form discovery sends a probe, so
+    // it is only reused when nothing could have changed the page since.
+    // Nothing cached (POST target, --skip-discovery, a page with forms) keeps
+    // the miner's own paced sample, sent only if calibration is reached. The
     // second, stability sample is always sent.
     let seed = crate::parameter_analysis::cached_base_response()
-        .filter(|base| !(500..600).contains(&base.status))
+        .filter(|base| !base.is_server_error())
         .map(|base| {
             QueryBaseline::from_response(base.status, &base.body, base.location.as_deref())
         });

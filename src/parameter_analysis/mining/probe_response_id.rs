@@ -40,13 +40,13 @@ pub async fn probe_response_id_params(
     // Without a usable shared copy, fetch it here and keep the old shortcut —
     // that response is a free first baseline sample for the bucket engine.
     let (base, fresh) = match crate::parameter_analysis::cached_base_response() {
-        Some(base) if !(500..600).contains(&base.status) => (base, false),
+        Some(base) if !base.is_server_error() => (base, false),
         _ => match crate::parameter_analysis::fetch_base_response(target).await {
             Some(base) => (base, true),
             None => return,
         },
     };
-    if (500..600).contains(&base.status) {
+    if base.is_server_error() {
         return;
     }
     let status = base.status;
