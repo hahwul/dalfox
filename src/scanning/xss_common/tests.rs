@@ -91,9 +91,7 @@ fn test_autofiring_event_consts_share_the_modern_handler() {
         "AUTOFIRING_EVENTS_NAME_SLOT lost the modern handler"
     );
     assert!(
-        !super::AUTOFIRING_EVENTS_NAME_SLOT
-            .iter()
-            .any(|e| *e == "onmouseover=alert(1)"),
+        !super::AUTOFIRING_EVENTS_NAME_SLOT.contains(&"onmouseover=alert(1)"),
         "name-slot set must not carry bare onmouseover"
     );
 }
