@@ -34,9 +34,9 @@ pub mod error_codes {
     // Scan filtering
     pub(crate) const CONTENT_TYPE_MISMATCH: &str = "CONTENT_TYPE_MISMATCH";
     pub(crate) const TRUNCATED_PER_HOST_CAP: &str = "TRUNCATED_PER_HOST_CAP";
-    /// `--inject-marker` was set, but the marker appears in none of this
-    /// target's query, body, header or cookie values, so there was nothing to
-    /// inject into. Carried on `target_summary` entries with
+    /// `--inject-marker` was set, but the marker is in no supported position
+    /// of this target (a query, form or multipart body, top-level JSON string,
+    /// header or cookie value), so there was nothing to inject into. Carried on `target_summary` entries with
     /// `status: "skipped"`; the target is never requested. Without it the run
     /// read as `"clean"` (exit 0) after testing nothing.
     pub(crate) const INJECT_MARKER_NOT_FOUND: &str = "INJECT_MARKER_NOT_FOUND";

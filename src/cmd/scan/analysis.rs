@@ -104,13 +104,14 @@ pub(crate) async fn apply_per_host_cap(
     }
 }
 
-/// `--inject-marker` targets whose marker is in none of their query, body,
-/// header or cookie values have nothing to inject into. Drop them before any
-/// request — and before [`apply_per_host_cap`], so they cannot take the slots
-/// of targets that do carry the marker — and record
-/// `INJECT_MARKER_NOT_FOUND`, so the run reads `skipped` (exit 2 when nothing
-/// was scanned) instead of `clean`. One warning line for the whole run.
-pub(crate) async fn drop_targets_without_inject_marker(
+/// `--inject-marker` targets whose marker is in no supported position (a query,
+/// form or multipart body, top-level JSON string, header or cookie value) have
+/// nothing to inject into. Drop them before any request — and before
+/// [`apply_per_host_cap`], so they cannot take the slots of targets that do
+/// carry the marker — and record `INJECT_MARKER_NOT_FOUND`, so the run reads
+/// `skipped` (exit 2 when nothing was scanned) instead of `clean`. One warning
+/// line for the whole run.
+async fn drop_targets_without_inject_marker(
     args: &ScanArgs,
     host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
     skipped_targets: &Mutex<HashMap<String, &'static str>>,
@@ -118,30 +119,40 @@ pub(crate) async fn drop_targets_without_inject_marker(
     let Some(marker) = args.inject_marker.as_deref() else {
         return;
     };
-    let mut dropped = 0usize;
-    let mut guard = skipped_targets.lock().await;
+    let mut dropped: Vec<String> = Vec::new();
     for group in host_groups.values_mut() {
         group.retain(|target| {
-            if inject_marker_params(target, marker).is_empty() {
-                guard.insert(
-                    target.state_key(),
-                    crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND,
-                );
-                dropped += 1;
-                false
-            } else {
-                true
+            let keep = !inject_marker_params(target, marker).is_empty();
+            if !keep {
+                dropped.push(target.state_key());
             }
+            keep
         });
     }
-    drop(guard);
-    if dropped > 0 && !args.silence {
+    if dropped.is_empty() {
+        return;
+    }
+    if !args.silence {
         crate::ceprintln!(
-            "{} {} target(s) skipped: --inject-marker {} is not in any query, body, header or cookie value",
+            "{} {} target(s) skipped: --inject-marker {} is not in a supported position (query, form or multipart body, top-level JSON string, header or cookie value)",
             log_prefix("33", "WARN"),
-            dropped,
+            dropped.len(),
             crate::utils::term::sanitize_display(marker)
         );
+    }
+    // `state_key` leaves out headers and cookies, so a scanned twin that
+    // carries the marker in a header can share the key of a dropped one. The
+    // skip record is per key: never let it relabel a target that is scanned.
+    let kept: std::collections::HashSet<String> = host_groups
+        .values()
+        .flatten()
+        .map(Target::state_key)
+        .collect();
+    let mut guard = skipped_targets.lock().await;
+    for key in dropped {
+        if !kept.contains(&key) {
+            guard.insert(key, crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND);
+        }
     }
 }
 
@@ -978,6 +989,37 @@ async fn run_initial_ast_pass(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn marker_less_twin_does_not_relabel_the_scanned_target() {
+        // Same URL, method and body (so the same `state_key`), the marker only
+        // in one twin's header: the scanned twin must not read `skipped`.
+        let mut marked = crate::target_parser::parse_target("http://h/?q=1").unwrap();
+        marked.headers.push(("X-A".to_string(), "FUZZ".to_string()));
+        let bare = crate::target_parser::parse_target("http://h/?q=1").unwrap();
+        let lone = crate::target_parser::parse_target("http://h/other?q=1").unwrap();
+        assert_eq!(marked.state_key(), bare.state_key());
+        let mut groups = std::collections::BTreeMap::new();
+        groups.insert("h".to_string(), vec![bare, marked, lone.clone()]);
+        let args = ScanArgs {
+            inject_marker: Some("FUZZ".to_string()),
+            silence: true,
+            ..Default::default()
+        };
+        let skipped = Mutex::new(HashMap::new());
+        drop_targets_without_inject_marker(&args, &mut groups, &skipped).await;
+
+        assert_eq!(groups["h"].len(), 1, "only the marked twin survives");
+        let skipped = skipped.into_inner();
+        assert_eq!(
+            skipped.get(&lone.state_key()).copied(),
+            Some(crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND)
+        );
+        assert!(
+            !skipped.contains_key(&groups["h"][0].state_key()),
+            "the scanned twin's key must stay unskipped: {skipped:?}"
+        );
+    }
 
     #[test]
     fn inject_marker_names_the_multipart_part() {
