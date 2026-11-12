@@ -85,18 +85,15 @@ pub async fn probe_dictionary_params(
         pb,
         client,
     };
-    // Inside `analyze_parameters` the base page is already shared (form
-    // discovery fetched it): seed the baseline with it instead of paying for
-    // an identical first sample. The second, stability sample is still sent.
-    let seed = if crate::parameter_analysis::base_response_is_shared() {
-        crate::parameter_analysis::base_response(target)
-            .await
-            .filter(|base| !(500..600).contains(&base.status))
-            .map(|base| {
-                QueryBaseline::from_response(base.status, &base.body, base.location.as_deref())
-            })
-    } else {
-        None
-    };
+    // Form discovery runs just before this and usually fetched the base page
+    // already: seed the baseline with it instead of paying for an identical
+    // first sample. Nothing cached (POST target, --skip-discovery) keeps the
+    // miner's own paced sample, sent only if calibration is reached. The
+    // second, stability sample is always sent.
+    let seed = crate::parameter_analysis::cached_base_response()
+        .filter(|base| !(500..600).contains(&base.status))
+        .map(|base| {
+            QueryBaseline::from_response(base.status, &base.body, base.location.as_deref())
+        });
     probe_query_candidates(&query_ctx, params, preexisting, "dictionary", seed).await;
 }

@@ -32,11 +32,16 @@ pub(crate) async fn check_form_discovery_with(
     let test_value = crate::scanning::markers::bracketed_marker();
 
     // Fetch the page via GET to find forms. With no body (checked above) and a
-    // GET target, that is exactly the shared base request.
-    let html = if target.parse_method() == reqwest::Method::GET {
-        crate::parameter_analysis::base_response(target)
-            .await
-            .map(|base| base.body.clone())
+    // GET target, that is exactly the base request, so it is shared with the
+    // miners that follow.
+    let shared;
+    let fetched;
+    let html: &str = if target.parse_method() == reqwest::Method::GET {
+        let Some(base) = crate::parameter_analysis::base_response(target).await else {
+            return;
+        };
+        shared = base;
+        &shared.body
     } else {
         let request = crate::utils::build_request(
             &client,
@@ -45,10 +50,11 @@ pub(crate) async fn check_form_discovery_with(
             target.url.clone(),
             None,
         );
-        crate::parameter_analysis::fetch_text(request).await
-    };
-    let Some(html) = html else {
-        return;
+        let Some(text) = crate::parameter_analysis::fetch_text(request).await else {
+            return;
+        };
+        fetched = text;
+        &fetched
     };
 
     /// Most fields probed per discovered form. See the truncation site below:
@@ -78,7 +84,7 @@ pub(crate) async fn check_form_discovery_with(
     // Parse forms in a tight scope so `scraper::Html` (which is !Send) never
     // escapes. Collect into `Vec<FormInfo>` before touching any await.
     let forms: Vec<FormInfo> = {
-        let document = crate::utils::html::parse_document_bounded(&html);
+        let document = crate::utils::html::parse_document_bounded(html);
         let form_sel = selectors::form();
         let input_sel = selectors::input_textarea_select();
 
@@ -410,7 +416,7 @@ pub(crate) async fn check_form_discovery_with(
                 .expect("inline JSON regex is valid")
         });
         let mut seen_key_sets: HashSet<Vec<String>> = HashSet::new();
-        for caps in inline_re.captures_iter(&html) {
+        for caps in inline_re.captures_iter(html) {
             if seen_key_sets.len() >= MAX_DISTINCT_FORMS {
                 break;
             }
@@ -500,7 +506,7 @@ pub(crate) async fn check_form_discovery_with(
     {
         let re = json_stringify_regex();
         let mut seen_key_sets: HashSet<Vec<String>> = HashSet::new();
-        for caps in re.captures_iter(&html) {
+        for caps in re.captures_iter(html) {
             if seen_key_sets.len() >= MAX_DISTINCT_FORMS {
                 break;
             }

@@ -34,12 +34,17 @@ pub async fn probe_response_id_params(
     let client = target.build_client_or_default();
     let preexisting = snapshot_param_slots(&reflection_params).await;
 
-    // The base HTML (shared with form discovery and the dictionary miner when
-    // in `analyze_parameters`). Besides yielding candidate names, it is a free
-    // baseline sample for the bucket engine, so DOM mining does not pay for a
-    // second clean request before it starts.
-    let Some(base) = crate::parameter_analysis::base_response(target).await else {
-        return;
+    // The base HTML. The copy form discovery shared is fine for candidate
+    // names, but it predates the dictionary miner's whole bucket run, so it is
+    // not used as this miner's baseline sample: calibration takes fresh ones.
+    // Without a usable shared copy, fetch it here and keep the old shortcut —
+    // that response is a free first baseline sample for the bucket engine.
+    let (base, fresh) = match crate::parameter_analysis::cached_base_response() {
+        Some(base) if !(500..600).contains(&base.status) => (base, false),
+        _ => match crate::parameter_analysis::fetch_base_response(target).await {
+            Some(base) => (base, true),
+            None => return,
+        },
     };
     if (500..600).contains(&base.status) {
         return;
@@ -65,7 +70,7 @@ pub async fn probe_response_id_params(
         );
     }
 
-    let baseline = QueryBaseline::from_response(status, text, location.as_deref());
+    let baseline = fresh.then(|| QueryBaseline::from_response(status, text, location.as_deref()));
     let query_ctx = QueryMiningContext {
         target,
         args,
@@ -74,12 +79,5 @@ pub async fn probe_response_id_params(
         pb,
         client,
     };
-    probe_query_candidates(
-        &query_ctx,
-        params_to_check,
-        preexisting,
-        "DOM",
-        Some(baseline),
-    )
-    .await;
+    probe_query_candidates(&query_ctx, params_to_check, preexisting, "DOM", baseline).await;
 }

@@ -1894,12 +1894,14 @@ tokio::task_local! {
     /// Form discovery, DOM mining and the dictionary miner's first baseline
     /// sample each sent this identical request, three times per target.
     /// [`analyze_parameters`] scopes one cell around discovery + mining so it
-    /// is sent once. Unset (direct calls, tests): each stage fetches for
-    /// itself, as before. `None` in the cell = the fetch failed.
-    static BASE_RESPONSE: Arc<tokio::sync::OnceCell<Option<Arc<BaseResponse>>>>;
+    /// is sent once. Only a successful fetch is stored, so a transient failure
+    /// leaves the next stage free to try again. Unset (direct calls, tests):
+    /// each stage fetches for itself, as before.
+    static BASE_RESPONSE: Arc<tokio::sync::OnceCell<Arc<BaseResponse>>>;
 }
 
-async fn fetch_base_response(target: &Target) -> Option<Arc<BaseResponse>> {
+/// Send the target's untouched request once, outside any sharing.
+pub(crate) async fn fetch_base_response(target: &Target) -> Option<Arc<BaseResponse>> {
     let client = target.build_client_or_default();
     let request = crate::utils::build_request(
         &client,
@@ -1924,23 +1926,29 @@ async fn fetch_base_response(target: &Target) -> Option<Arc<BaseResponse>> {
     }))
 }
 
-/// The target's base response: the shared copy inside [`analyze_parameters`],
-/// a fresh request anywhere else.
+/// The target's base response: the shared copy inside [`analyze_parameters`]
+/// (fetched and stored on first use), a fresh request anywhere else.
 pub(crate) async fn base_response(target: &Target) -> Option<Arc<BaseResponse>> {
-    match BASE_RESPONSE.try_with(Arc::clone) {
-        Ok(cell) => cell
-            .get_or_init(|| fetch_base_response(target))
-            .await
-            .clone(),
-        Err(_) => fetch_base_response(target).await,
+    let Ok(cell) = BASE_RESPONSE.try_with(Arc::clone) else {
+        return fetch_base_response(target).await;
+    };
+    if let Some(base) = cell.get() {
+        return Some(base.clone());
     }
+    let base = fetch_base_response(target).await?;
+    // The stages run one after another, so nothing else can have filled it.
+    let _ = cell.set(base.clone());
+    Some(base)
 }
 
-/// Whether a shared base response is in scope. A stage that used to send its
-/// own sample through a different path (the dictionary miner's paced baseline)
-/// switches to [`base_response`] only then, so direct callers keep their path.
-pub(crate) fn base_response_is_shared() -> bool {
-    BASE_RESPONSE.try_with(|_| ()).is_ok()
+/// The shared base response if an earlier stage already fetched it. Never
+/// sends a request: a stage with its own (paced) path for this request keeps
+/// that path when there is nothing to reuse.
+pub(crate) fn cached_base_response() -> Option<Arc<BaseResponse>> {
+    BASE_RESPONSE
+        .try_with(|cell| cell.get().cloned())
+        .ok()
+        .flatten()
 }
 
 /// Spawn one discovery/mining reflection probe. Under a `semaphore` permit it
