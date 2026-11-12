@@ -60,6 +60,42 @@ fn test_generate_dynamic_payloads_attribute_none_has_autotriggers() {
             .any(|p| p.contains("ontoggle") && p.contains("popover")),
         "expected an `ontoggle=… popover` payload (auto-fires on popover open)"
     );
+    // Modern auto-firing handler (shared `AUTOFIRING_EVENTS*` consts): fires on
+    // the initial layout pass of off-screen content, no interaction needed.
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.contains("oncontentvisibilityautostatechange")
+                && p.contains("content-visibility:auto")),
+        "expected the content-visibility auto-firing handler (shipped with its \
+         arming `style=content-visibility:auto`)"
+    );
+}
+
+#[test]
+fn test_autofiring_event_consts_share_the_modern_handler() {
+    // Guard against the four former copies of the handler list drifting again:
+    // both shared consts must carry the content-visibility handler, and the
+    // name-slot variant must drop the bare `onmouseover` (which cannot fire in
+    // the attribute-name position).
+    assert!(
+        super::AUTOFIRING_EVENTS
+            .iter()
+            .any(|e| e.contains("oncontentvisibilityautostatechange")),
+        "AUTOFIRING_EVENTS lost the modern handler"
+    );
+    assert!(
+        super::AUTOFIRING_EVENTS_NAME_SLOT
+            .iter()
+            .any(|e| e.contains("oncontentvisibilityautostatechange")),
+        "AUTOFIRING_EVENTS_NAME_SLOT lost the modern handler"
+    );
+    assert!(
+        !super::AUTOFIRING_EVENTS_NAME_SLOT
+            .iter()
+            .any(|e| *e == "onmouseover=alert(1)"),
+        "name-slot set must not carry bare onmouseover"
+    );
 }
 
 #[test]
