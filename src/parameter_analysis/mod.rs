@@ -1939,12 +1939,9 @@ pub(crate) async fn fetch_base_response(target: &Target) -> Option<Arc<BaseRespo
     }))
 }
 
-/// The target's base response: the shared copy inside [`analyze_parameters`]
-/// (fetched and stored on first use), a fresh request anywhere else.
+/// Fetch the target's base response and, inside [`analyze_parameters`], store
+/// it for the stages that follow (they read it with [`cached_base_response`]).
 pub(crate) async fn base_response(target: &Target) -> Option<Arc<BaseResponse>> {
-    if let Some(base) = cached_base_response() {
-        return Some(base);
-    }
     let base = fetch_base_response(target).await?;
     let _ = BASE_RESPONSE.try_with(|slot| {
         if let Ok(mut slot) = slot.lock() {

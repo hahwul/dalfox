@@ -1830,3 +1830,48 @@ fn dedupe_reflection_params_is_linear_in_duplicates() {
         start.elapsed()
     );
 }
+
+/// A non-GET target without a body (`-X PUT`) still has its forms read: form
+/// discovery fetches the page with GET, which is not the target's own request,
+/// so it does not go through the shared base page.
+#[tokio::test]
+async fn test_check_form_discovery_reads_the_page_with_get_for_a_put_target() {
+    let probes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = probes.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("local addr");
+    let app = Router::new().fallback(any(move |method: axum::http::Method, uri: Uri| {
+        let counter = counter.clone();
+        async move {
+            if method == axum::http::Method::GET && uri.path() == "/" && uri.query().is_none() {
+                return "<html><body><form action=\"/s\"><input name=\"a\"></form></body></html>"
+                    .to_string();
+            }
+            // Only probes of the form's own field count.
+            if uri.path() == "/s" {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            "no reflection here".to_string()
+        }
+    }));
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/")).unwrap();
+    target.method = "PUT".to_string();
+    target.delay = 0;
+    check_form_discovery(
+        &target,
+        Arc::new(Mutex::new(Vec::<Param>::new())),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+    assert!(
+        probes.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the form on the GET page must be found and probed"
+    );
+}
