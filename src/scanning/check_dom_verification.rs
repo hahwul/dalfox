@@ -157,6 +157,23 @@ fn value_carries_js_sink(value: &str) -> bool {
         || sink(&decode_html_entities(&value.to_ascii_lowercase()))
 }
 
+/// `oncontentvisibilityautostatechange` fires only on an element whose style
+/// is `content-visibility: auto`. Payloads ship that `style`, but when the
+/// reflected tag already has one, the HTML parser keeps the first and drops
+/// ours, leaving a handler that never runs. Every other `on*` handler is
+/// judged as before.
+fn handler_attr_can_fire(element: &scraper::node::Element, attr_name: &str) -> bool {
+    if !attr_name.eq_ignore_ascii_case("oncontentvisibilityautostatechange") {
+        return true;
+    }
+    element.attr("style").is_some_and(|style| {
+        let compact: String = style.chars().filter(|c| !c.is_whitespace()).collect();
+        compact
+            .to_ascii_lowercase()
+            .contains("content-visibility:auto")
+    })
+}
+
 /// Whether `node`'s own attributes/body carry a surviving JS sink: an `on*`
 /// event-handler attribute whose value is a sink call, or a `<script>` element
 /// whose text body is a sink call. This is the "active ingredient" a
@@ -169,6 +186,7 @@ fn element_carries_surviving_sink(node: scraper::ElementRef) -> bool {
         if name.len() >= 3
             && name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
             && value_carries_js_sink(val)
+            && handler_attr_can_fire(v, name)
         {
             return true;
         }
@@ -623,7 +641,10 @@ fn has_html_structural_evidence_in_doc(payload: &str, document: &scraper::Html) 
 
         // (a) Event-handler attribute introduced by the payload.
         for (attr_name, attr_value) in value.attrs() {
-            if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
+            if attr_name.len() < 3
+                || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
+                || !handler_attr_can_fire(value, attr_name)
+            {
                 continue;
             }
             let trimmed = attr_value.trim();
@@ -1128,7 +1149,10 @@ fn has_inline_handler_breakout_evidence_in_doc(payload: &str, document: &scraper
         }
         let value = node.value();
         for (attr_name, attr_value) in value.attrs() {
-            if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
+            if attr_name.len() < 3
+                || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
+                || !handler_attr_can_fire(value, attr_name)
+            {
                 continue;
             }
             // The sink must be the payload's own call, outside every string

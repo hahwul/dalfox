@@ -2569,3 +2569,34 @@ fn test_payload_has_handler_sink_text_is_linear_in_handler_count() {
         "\" onmouseover=x onfocus=alert(1) \""
     ));
 }
+
+// ── content-visibility handler needs its own `style` to fire ───────────────
+
+/// The payload's `style=content-visibility:auto` is dropped when the reflected
+/// tag already carries a `style` (the parser keeps the first). The handler
+/// then never fires and must not verify.
+#[test]
+fn content_visibility_handler_without_its_style_is_not_evidence() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!(
+        "\" oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto id={id} \""
+    );
+    let body =
+        format!("<html><body><div style=\"color:red\" title=\"{payload}\"></div></body></html>");
+    assert_eq!(classify_dom_evidence(&payload, &body), None, "{body}");
+}
+
+/// FN guard: on a tag with no `style` of its own, the payload's style applies
+/// and the handler fires, so the same reflection still verifies.
+#[test]
+fn content_visibility_handler_with_its_style_is_evidence() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!(
+        "\" oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto id={id} \""
+    );
+    let body = format!("<html><body><div title=\"{payload}\"></div></body></html>");
+    assert!(
+        classify_dom_evidence(&payload, &body).is_some(),
+        "the armed handler must stay evidence: {body}"
+    );
+}

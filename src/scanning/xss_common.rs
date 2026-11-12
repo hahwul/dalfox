@@ -13,9 +13,8 @@ use std::sync::{Mutex, OnceLock};
 /// [`generate_dynamic_payloads_uncached`] and by [`generate_adaptive_payloads`]
 /// so a new auto-firing handler lands in all of them at once — these lists had
 /// four near-identical copies that drift (see the module history). The
-/// attribute-name-slot arm uses [`AUTOFIRING_EVENTS_NAME_SLOT`] instead, which
-/// drops `onmouseover` (a bare `onmouseover` never fires on a static element in
-/// that position).
+/// attribute-name-slot arm skips `onmouseover` (a bare `onmouseover` never
+/// fires on a static element in that position).
 pub(crate) const AUTOFIRING_EVENTS: &[&str] = &[
     "onfocus=alert(1) autofocus",
     "onmouseover=alert(1)",
@@ -29,19 +28,6 @@ pub(crate) const AUTOFIRING_EVENTS: &[&str] = &[
     // off-screen content, no interaction needed, in Chrome/Firefox/Safari. The
     // `style=content-visibility:auto` is what arms it, so it ships as one
     // fragment. New-technique coverage; see the research notes in `skills/`.
-    "oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto",
-];
-
-/// [`AUTOFIRING_EVENTS`] without `onmouseover`, for the attribute-name-slot
-/// (unquoted / delimiter-unknown) arm where a bare pointer handler cannot fire.
-pub(crate) const AUTOFIRING_EVENTS_NAME_SLOT: &[&str] = &[
-    "onfocus=alert(1) autofocus",
-    "onfocus=alert(1) autofocus tabindex=0",
-    "ontoggle=alert(1) popover",
-    "onbeforeinput=alert(1) contenteditable",
-    "onsecuritypolicyviolation=alert(1)",
-    "onformdata=alert(1)",
-    "onslotchange=alert(1)",
     "oncontentvisibilityautostatechange=alert(1) style=content-visibility:auto",
 ];
 
@@ -125,8 +111,12 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
                         payloads.push(format!("' {} id={} '", ev_entity, id_marker));
 
                         // Tab separator variant (bypasses space filtering)
-                        payloads.push(format!("'\t{}\tid={}\t'", ev, id_marker));
-                        payloads.push(format!("'\t{}\tid={}\t'", ev_entity, id_marker));
+                        payloads.push(format!("'\t{}\tid={}\t'", ev.replace(' ', "\t"), id_marker));
+                        payloads.push(format!(
+                            "'\t{}\tid={}\t'",
+                            ev_entity.replace(' ', "\t"),
+                            id_marker
+                        ));
                     }
                     for payload in attr_payloads.iter() {
                         payloads.push(format!("' {} a='", payload));
@@ -161,8 +151,16 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
                         payloads.push(format!("\" {} id={} \"", ev_entity, id_marker));
 
                         // Tab separator variant (bypasses space filtering)
-                        payloads.push(format!("\"\t{}\tid={}\t\"", ev, id_marker));
-                        payloads.push(format!("\"\t{}\tid={}\t\"", ev_entity, id_marker));
+                        payloads.push(format!(
+                            "\"\t{}\tid={}\t\"",
+                            ev.replace(' ', "\t"),
+                            id_marker
+                        ));
+                        payloads.push(format!(
+                            "\"\t{}\tid={}\t\"",
+                            ev_entity.replace(' ', "\t"),
+                            id_marker
+                        ));
                     }
                     for payload in attr_payloads.iter() {
                         payloads.push(format!("\" {} \"", payload));
@@ -190,7 +188,10 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
                     // Listed BEFORE attr_payloads so the first marker-
                     // carrying payload is also DOM-verifiable.
                     let id_marker = crate::scanning::markers::id_marker();
-                    for ev in AUTOFIRING_EVENTS_NAME_SLOT {
+                    for ev in AUTOFIRING_EVENTS
+                        .iter()
+                        .filter(|ev| !ev.starts_with("onmouseover="))
+                    {
                         payloads.push(format!("{} id={}", ev, id_marker));
                         let ev_entity = ev.replace("=", "&#61;");
                         payloads.push(format!("{} id={}", ev_entity, id_marker));
@@ -377,8 +378,13 @@ pub(crate) fn generate_adaptive_payloads(
             for ev in AUTOFIRING_EVENTS {
                 filtered_payloads.push(format!("{} {} id={} {}", open_q, ev, id_marker, close_q));
                 // Tab separator variant for space-filtered contexts
-                filtered_payloads
-                    .push(format!("{}\t{}\tid={}\t{}", open_q, ev, id_marker, close_q));
+                filtered_payloads.push(format!(
+                    "{}\t{}\tid={}\t{}",
+                    open_q,
+                    ev.replace(' ', "\t"),
+                    id_marker,
+                    close_q
+                ));
             }
         }
     }
