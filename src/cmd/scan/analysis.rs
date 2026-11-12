@@ -104,6 +104,47 @@ pub(crate) async fn apply_per_host_cap(
     }
 }
 
+/// `--inject-marker` targets whose marker is in none of their query, body,
+/// header or cookie values have nothing to inject into. Drop them before any
+/// request — and before [`apply_per_host_cap`], so they cannot take the slots
+/// of targets that do carry the marker — and record
+/// `INJECT_MARKER_NOT_FOUND`, so the run reads `skipped` (exit 2 when nothing
+/// was scanned) instead of `clean`. One warning line for the whole run.
+pub(crate) async fn drop_targets_without_inject_marker(
+    args: &ScanArgs,
+    host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
+    skipped_targets: &Mutex<HashMap<String, &'static str>>,
+) {
+    let Some(marker) = args.inject_marker.as_deref() else {
+        return;
+    };
+    let mut dropped = 0usize;
+    let mut guard = skipped_targets.lock().await;
+    for group in host_groups.values_mut() {
+        group.retain(|target| {
+            if inject_marker_params(target, marker).is_empty() {
+                guard.insert(
+                    target.state_key(),
+                    crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND,
+                );
+                dropped += 1;
+                false
+            } else {
+                true
+            }
+        });
+    }
+    drop(guard);
+    if dropped > 0 && !args.silence {
+        crate::ceprintln!(
+            "{} {} target(s) skipped: --inject-marker {} is not in any query, body, header or cookie value",
+            log_prefix("33", "WARN"),
+            dropped,
+            crate::utils::term::sanitize_display(marker)
+        );
+    }
+}
+
 pub(crate) async fn run_preflight_and_analysis(
     args: &ScanArgs,
     host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
@@ -112,6 +153,7 @@ pub(crate) async fn run_preflight_and_analysis(
 ) {
     let skipped_targets = state.skipped_targets.clone();
 
+    drop_targets_without_inject_marker(args, host_groups, &skipped_targets).await;
     apply_per_host_cap(args, host_groups, &skipped_targets).await;
 
     // One bound for the whole stage, shared by every host group — the same
@@ -282,26 +324,6 @@ pub(crate) async fn preflight_and_analyze_target(
         session_baselines_clone,
         session_lost_clone,
     } = ctx;
-    // `--inject-marker` with no marker in an injectable value: nothing to test.
-    // Checked before preflight so the target costs no request, and recorded as a
-    // skip so it reads as `skipped`/exit 2 instead of a `clean` pass.
-    if let Some(ref marker) = args_clone.inject_marker
-        && inject_marker_params(&target, marker).is_empty()
-    {
-        if !args_clone.silence {
-            crate::ceprintln!(
-                "{} {} (--inject-marker {} is not in any query, body, header or cookie value)",
-                log_prefix("33", "SKIPPED"),
-                crate::utils::term::sanitize_display(target.url.as_str()),
-                crate::utils::term::sanitize_display(marker)
-            );
-        }
-        skipped_targets_clone.lock().await.insert(
-            target.state_key(),
-            crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND,
-        );
-        return None;
-    }
     // Concurrency across targets is bounded by the caller, which holds a
     // `--max-concurrent-targets` permit for the lifetime of this task.
     let PreflightCapture {

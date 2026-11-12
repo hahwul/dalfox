@@ -4610,19 +4610,42 @@ async fn inject_marker_not_found_skips_the_target_without_a_request() {
         "{row}"
     );
 
-    // Control: the same target with the marker in place is requested.
+    // A marker-less target must not take a `--max-targets-per-host` slot:
+    // with a cap of 1 and the marker-less URL first, the marked one is still
+    // the one that gets scanned (it used to be truncated behind it).
     let args = ScanArgs {
-        targets: vec![format!("http://{addr}/?q=FUZZ")],
+        targets: vec![
+            format!("http://{addr}/?q=hello"),
+            format!("http://{addr}/?q=FUZZ"),
+        ],
         inject_marker: Some("FUZZ".to_string()),
+        max_targets_per_host: 1,
         skip_xss_scanning: true,
         output: Some(path.clone()),
         ..default_scan_args()
     };
     let _ = super::run_scan(&args).await;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
     let _ = std::fs::remove_file(&path);
     server.abort();
+    let rows = report["meta"]["target_summary"]
+        .as_array()
+        .expect("target_summary");
+    let row_for = |needle: &str| {
+        rows.iter()
+            .find(|r| r["target"].as_str().is_some_and(|t| t.ends_with(needle)))
+            .unwrap_or_else(|| panic!("no row for {needle}: {rows:?}"))
+    };
+    assert_eq!(
+        row_for("q=hello")["error_code"],
+        crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND
+    );
+    let marked = row_for("q=FUZZ");
+    assert_ne!(marked["status"], "skipped", "{marked}");
     assert!(
         hits.load(std::sync::atomic::Ordering::Relaxed) > 0,
-        "a target carrying the marker must still be scanned"
+        "the marked target must have been requested"
     );
 }
