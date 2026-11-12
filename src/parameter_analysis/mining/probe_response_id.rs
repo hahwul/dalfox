@@ -34,35 +34,23 @@ pub async fn probe_response_id_params(
     let client = target.build_client_or_default();
     let preexisting = snapshot_param_slots(&reflection_params).await;
 
-    // Fetch the HTML once. Besides yielding candidate names, this response is
-    // a free baseline sample for the bucket engine, so DOM mining does not
-    // pay for a second clean request before it starts.
-    let base_request = crate::utils::build_request(
-        &client,
-        target,
-        target.parse_method(),
-        target.url.clone(),
-        target.data.clone(),
-    );
-
-    crate::record_outbound_request().await;
-    let response = match crate::utils::http::send_counted(base_request).await {
-        Ok(response) if !response.status().is_server_error() => response,
-        _ => return,
-    };
-    let status = response.status().as_u16();
-    let location = response
-        .headers()
-        .get("location")
-        .and_then(|value| value.to_str().ok())
-        .map(ToString::to_string);
-    let Ok(text) = crate::utils::http::read_body_counted(response).await else {
+    // The base HTML (shared with form discovery and the dictionary miner when
+    // in `analyze_parameters`). Besides yielding candidate names, it is a free
+    // baseline sample for the bucket engine, so DOM mining does not pay for a
+    // second clean request before it starts.
+    let Some(base) = crate::parameter_analysis::base_response(target).await else {
         return;
     };
+    if (500..600).contains(&base.status) {
+        return;
+    }
+    let status = base.status;
+    let location = base.location.clone();
+    let text = base.body.as_str();
 
     // Scope the scraper::Html (which is !Send) strictly to this block so the
     // owned candidate list is all that crosses the subsequent async engine.
-    let params_to_check = dom_candidate_names(&text);
+    let params_to_check = dom_candidate_names(text);
 
     // Cap the DOM candidate set so a hostile/huge response body cannot fan
     // out into one task/request per attribute. Bucketing then bounds the live
@@ -77,7 +65,7 @@ pub async fn probe_response_id_params(
         );
     }
 
-    let baseline = QueryBaseline::from_response(status, &text, location.as_deref());
+    let baseline = QueryBaseline::from_response(status, text, location.as_deref());
     let query_ctx = QueryMiningContext {
         target,
         args,

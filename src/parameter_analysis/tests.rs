@@ -2560,3 +2560,61 @@ fn sxss_filename_slot_respects_ignore_param_on_base_field() {
         params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
 }
+
+/// Form discovery, DOM mining and the dictionary miner's first baseline sample
+/// each used to send the target's untouched request: five per target here
+/// (those three plus the two miners' stability samples). Inside
+/// `analyze_parameters` the base page is fetched once and shared; only the
+/// stability samples repeat it.
+#[tokio::test]
+async fn analyze_parameters_fetches_the_base_page_once() {
+    use axum::{
+        Router,
+        http::{HeaderMap, Uri},
+        response::Html,
+        routing::get,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let untouched = Arc::new(AtomicUsize::new(0));
+    let count = untouched.clone();
+    let app = Router::new().route(
+        "/",
+        get(move |uri: Uri, headers: HeaderMap| {
+            let count = count.clone();
+            async move {
+                let probe_header = headers
+                    .values()
+                    .any(|v| v.to_str().is_ok_and(|s| s.contains("dlx")));
+                if uri.query().is_none() && !probe_header {
+                    count.fetch_add(1, Ordering::Relaxed);
+                }
+                // `foo` is a DOM-mining candidate, so that miner calibrates too.
+                Html("<html><body><input name=foo></body></html>")
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let mut target = parse_target(&format!("http://{addr}/")).unwrap();
+    target.workers = 1;
+    let args = ScanArgs {
+        targets: vec![format!("http://{addr}/")],
+        skip_mining: false,
+        skip_mining_dict: false,
+        skip_mining_dom: false,
+        skip_discovery: false,
+        ..default_scan_args()
+    };
+    analyze_parameters(&mut target, &args, None).await;
+    server.abort();
+
+    // Shared base page + the dictionary and DOM miners' stability samples.
+    assert_eq!(untouched.load(Ordering::Relaxed), 3);
+}

@@ -1414,17 +1414,23 @@ pub async fn analyze_parameters(
     let semaphore = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
         target.workers,
     )));
-    check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
+    // One base-page fetch for every stage below that needs it (see
+    // `BASE_RESPONSE`).
+    BASE_RESPONSE
+        .scope(Arc::new(tokio::sync::OnceCell::new()), async {
+            check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
 
-    // === Stage 2: Mining — discover additional parameters from HTML/JS/dict ===
-    mine_parameters(
-        target,
-        args,
-        reflection_params.clone(),
-        semaphore.clone(),
-        pb.clone(),
-    )
-    .await;
+            // === Stage 2: Mining — discover additional parameters from HTML/JS/dict ===
+            mine_parameters(
+                target,
+                args,
+                reflection_params.clone(),
+                semaphore.clone(),
+                pb.clone(),
+            )
+            .await;
+        })
+        .await;
     // Mining can push the same `(name, location)` slot again — most
     // commonly when DOM mining surfaces a param name that the query /
     // form / header discovery already registered. Run the collapse
@@ -1873,6 +1879,68 @@ pub(crate) async fn fetch_text(request: reqwest::RequestBuilder) -> Option<Strin
     crate::record_outbound_request().await;
     let resp = crate::utils::http::send_counted(request).await.ok()?;
     crate::utils::http::read_body_counted(resp).await.ok()
+}
+
+/// The target's untouched response — its own method, URL and body — with the
+/// status and `Location` the analysis stages read.
+#[derive(Debug)]
+pub(crate) struct BaseResponse {
+    pub(crate) status: u16,
+    pub(crate) location: Option<String>,
+    pub(crate) body: String,
+}
+
+tokio::task_local! {
+    /// Form discovery, DOM mining and the dictionary miner's first baseline
+    /// sample each sent this identical request, three times per target.
+    /// [`analyze_parameters`] scopes one cell around discovery + mining so it
+    /// is sent once. Unset (direct calls, tests): each stage fetches for
+    /// itself, as before. `None` in the cell = the fetch failed.
+    static BASE_RESPONSE: Arc<tokio::sync::OnceCell<Option<Arc<BaseResponse>>>>;
+}
+
+async fn fetch_base_response(target: &Target) -> Option<Arc<BaseResponse>> {
+    let client = target.build_client_or_default();
+    let request = crate::utils::build_request(
+        &client,
+        target,
+        target.parse_method(),
+        target.url.clone(),
+        target.data.clone(),
+    );
+    crate::record_outbound_request().await;
+    let response = crate::utils::http::send_counted(request).await.ok()?;
+    let status = response.status().as_u16();
+    let location = response
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .map(ToString::to_string);
+    let body = crate::utils::http::read_body_counted(response).await.ok()?;
+    Some(Arc::new(BaseResponse {
+        status,
+        location,
+        body,
+    }))
+}
+
+/// The target's base response: the shared copy inside [`analyze_parameters`],
+/// a fresh request anywhere else.
+pub(crate) async fn base_response(target: &Target) -> Option<Arc<BaseResponse>> {
+    match BASE_RESPONSE.try_with(Arc::clone) {
+        Ok(cell) => cell
+            .get_or_init(|| fetch_base_response(target))
+            .await
+            .clone(),
+        Err(_) => fetch_base_response(target).await,
+    }
+}
+
+/// Whether a shared base response is in scope. A stage that used to send its
+/// own sample through a different path (the dictionary miner's paced baseline)
+/// switches to [`base_response`] only then, so direct callers keep their path.
+pub(crate) fn base_response_is_shared() -> bool {
+    BASE_RESPONSE.try_with(|_| ()).is_ok()
 }
 
 /// Spawn one discovery/mining reflection probe. Under a `semaphore` permit it

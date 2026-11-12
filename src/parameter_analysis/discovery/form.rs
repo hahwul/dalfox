@@ -31,10 +31,23 @@ pub(crate) async fn check_form_discovery_with(
     let client = target.build_client_or_default();
     let test_value = crate::scanning::markers::bracketed_marker();
 
-    // Fetch the page via GET to find forms
-    let method = reqwest::Method::GET;
-    let request = crate::utils::build_request(&client, target, method, target.url.clone(), None);
-    let Some(html) = crate::parameter_analysis::fetch_text(request).await else {
+    // Fetch the page via GET to find forms. With no body (checked above) and a
+    // GET target, that is exactly the shared base request.
+    let html = if target.parse_method() == reqwest::Method::GET {
+        crate::parameter_analysis::base_response(target)
+            .await
+            .map(|base| base.body.clone())
+    } else {
+        let request = crate::utils::build_request(
+            &client,
+            target,
+            reqwest::Method::GET,
+            target.url.clone(),
+            None,
+        );
+        crate::parameter_analysis::fetch_text(request).await
+    };
+    let Some(html) = html else {
         return;
     };
 
