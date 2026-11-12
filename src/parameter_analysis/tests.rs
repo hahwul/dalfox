@@ -2560,3 +2560,96 @@ fn sxss_filename_slot_respects_ignore_param_on_base_field() {
         params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
 }
+
+/// Form discovery, DOM mining and the dictionary miner's first baseline sample
+/// each used to send the target's untouched request. Inside
+/// `analyze_parameters` the base page is fetched once and shared; the miners'
+/// stability samples still repeat it, and DOM mining takes fresh baseline
+/// samples when it has candidates (the shared copy predates the dictionary
+/// run).
+#[tokio::test]
+async fn analyze_parameters_fetches_the_base_page_once() {
+    use axum::{
+        Router,
+        http::{HeaderMap, Uri},
+        response::Html,
+        routing::get,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let untouched = Arc::new(AtomicUsize::new(0));
+    let counted = |body: &'static str| {
+        let count = untouched.clone();
+        get(move |uri: Uri, headers: HeaderMap| {
+            let count = count.clone();
+            async move {
+                let probe_header = headers
+                    .values()
+                    .any(|v| v.to_str().is_ok_and(|s| s.contains("dlx")));
+                if uri.query().is_none() && !probe_header {
+                    count.fetch_add(1, Ordering::Relaxed);
+                }
+                Html(body)
+            }
+        })
+    };
+    let app = Router::new()
+        .route("/plain", counted("<html><body>static</body></html>"))
+        // `foo` is a DOM-mining candidate, so that miner calibrates too.
+        .route(
+            "/dom",
+            counted("<html><body><input name=foo></body></html>"),
+        )
+        // Form discovery submits `c`, which could change this very page (a
+        // stored comment), so the copy it fetched is not reused afterwards.
+        .route(
+            "/form",
+            counted("<html><body><form><input name=c></form></body></html>"),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let run = async |path: &str| {
+        untouched.store(0, Ordering::Relaxed);
+        let mut target = parse_target(&format!("http://{addr}{path}")).unwrap();
+        target.workers = 1;
+        let args = ScanArgs {
+            targets: vec![format!("http://{addr}{path}")],
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            skip_discovery: false,
+            ..default_scan_args()
+        };
+        analyze_parameters(&mut target, &args, None).await;
+        untouched.load(Ordering::Relaxed)
+    };
+    // Shared base page + the dictionary miner's stability sample (was 4).
+    assert_eq!(run("/plain").await, 2);
+    // + DOM mining's two fresh baseline samples (was 5).
+    assert_eq!(run("/dom").await, 4);
+    // Probes sent after the base fetch clear the copy: same as before (was 5).
+    assert_eq!(run("/form").await, 5);
+    server.abort();
+}
+
+/// A failed base fetch is not stored, so a later stage can still try.
+#[tokio::test]
+async fn failed_base_fetch_is_not_shared() {
+    // A port that was just bound and released: refused at once on every OS.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .expect("bind");
+    let target = parse_target(&format!("http://{closed}/")).unwrap();
+    BASE_RESPONSE
+        .scope(SharedBase::default(), async {
+            assert!(base_response(&target).await.is_none());
+            assert!(cached_base_response().is_none());
+        })
+        .await;
+}

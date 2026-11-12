@@ -34,35 +34,28 @@ pub async fn probe_response_id_params(
     let client = target.build_client_or_default();
     let preexisting = snapshot_param_slots(&reflection_params).await;
 
-    // Fetch the HTML once. Besides yielding candidate names, this response is
-    // a free baseline sample for the bucket engine, so DOM mining does not
-    // pay for a second clean request before it starts.
-    let base_request = crate::utils::build_request(
-        &client,
-        target,
-        target.parse_method(),
-        target.url.clone(),
-        target.data.clone(),
-    );
-
-    crate::record_outbound_request().await;
-    let response = match crate::utils::http::send_counted(base_request).await {
-        Ok(response) if !response.status().is_server_error() => response,
-        _ => return,
+    // The base HTML. The copy form discovery shared is fine for candidate
+    // names, but it predates the dictionary miner's whole bucket run, so it is
+    // not used as this miner's baseline sample: calibration takes fresh ones.
+    // Without a usable shared copy, fetch it here and keep the old shortcut —
+    // that response is a free first baseline sample for the bucket engine.
+    let (base, fresh) = match crate::parameter_analysis::cached_base_response() {
+        Some(base) if !base.is_server_error() => (base, false),
+        _ => match crate::parameter_analysis::fetch_base_response(target).await {
+            Some(base) => (base, true),
+            None => return,
+        },
     };
-    let status = response.status().as_u16();
-    let location = response
-        .headers()
-        .get("location")
-        .and_then(|value| value.to_str().ok())
-        .map(ToString::to_string);
-    let Ok(text) = crate::utils::http::read_body_counted(response).await else {
+    if base.is_server_error() {
         return;
-    };
+    }
+    let status = base.status;
+    let location = base.location.clone();
+    let text = base.body.as_str();
 
     // Scope the scraper::Html (which is !Send) strictly to this block so the
     // owned candidate list is all that crosses the subsequent async engine.
-    let params_to_check = dom_candidate_names(&text);
+    let params_to_check = dom_candidate_names(text);
 
     // Cap the DOM candidate set so a hostile/huge response body cannot fan
     // out into one task/request per attribute. Bucketing then bounds the live
@@ -77,7 +70,7 @@ pub async fn probe_response_id_params(
         );
     }
 
-    let baseline = QueryBaseline::from_response(status, &text, location.as_deref());
+    let baseline = fresh.then(|| QueryBaseline::from_response(status, text, location.as_deref()));
     let query_ctx = QueryMiningContext {
         target,
         args,
@@ -86,12 +79,5 @@ pub async fn probe_response_id_params(
         pb,
         client,
     };
-    probe_query_candidates(
-        &query_ctx,
-        params_to_check,
-        preexisting,
-        "DOM",
-        Some(baseline),
-    )
-    .await;
+    probe_query_candidates(&query_ctx, params_to_check, preexisting, "DOM", baseline).await;
 }

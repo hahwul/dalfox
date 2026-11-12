@@ -1414,17 +1414,23 @@ pub async fn analyze_parameters(
     let semaphore = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
         target.workers,
     )));
-    check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
+    // One base-page fetch for every stage below that needs it (see
+    // `BASE_RESPONSE`).
+    BASE_RESPONSE
+        .scope(SharedBase::default(), async {
+            check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
 
-    // === Stage 2: Mining — discover additional parameters from HTML/JS/dict ===
-    mine_parameters(
-        target,
-        args,
-        reflection_params.clone(),
-        semaphore.clone(),
-        pb.clone(),
-    )
-    .await;
+            // === Stage 2: Mining — discover additional parameters from HTML/JS/dict ===
+            mine_parameters(
+                target,
+                args,
+                reflection_params.clone(),
+                semaphore.clone(),
+                pb.clone(),
+            )
+            .await;
+        })
+        .await;
     // Mining can push the same `(name, location)` slot again — most
     // commonly when DOM mining surfaces a param name that the query /
     // form / header discovery already registered. Run the collapse
@@ -1870,9 +1876,98 @@ pub(crate) async fn extend_with_joined(
 
 /// Send one counted request and read its body; `None` on a send or read error.
 pub(crate) async fn fetch_text(request: reqwest::RequestBuilder) -> Option<String> {
+    // A probe sent after the shared base page was fetched (form discovery
+    // submits its fields) may change what that page returns — a stored
+    // comment, a flash message — so the cached copy is no longer a baseline.
+    forget_base_response();
     crate::record_outbound_request().await;
     let resp = crate::utils::http::send_counted(request).await.ok()?;
     crate::utils::http::read_body_counted(resp).await.ok()
+}
+
+/// The target's untouched response — its own method, URL and body — with the
+/// status and `Location` the analysis stages read.
+#[derive(Debug)]
+pub(crate) struct BaseResponse {
+    pub(crate) status: u16,
+    pub(crate) location: Option<String>,
+    pub(crate) body: String,
+}
+
+impl BaseResponse {
+    pub(crate) fn is_server_error(&self) -> bool {
+        (500..600).contains(&self.status)
+    }
+}
+
+type SharedBase = Arc<std::sync::Mutex<Option<Arc<BaseResponse>>>>;
+
+tokio::task_local! {
+    /// Form discovery, DOM mining and the dictionary miner's first baseline
+    /// sample each sent this identical request, three times per target.
+    /// [`analyze_parameters`] scopes one slot around discovery + mining so it
+    /// is sent once. Only a successful fetch is stored, so a transient failure
+    /// leaves the next stage free to try again, and any later discovery probe
+    /// clears it (see [`fetch_text`]). Unset (direct calls, tests): each stage
+    /// fetches for itself, as before.
+    static BASE_RESPONSE: SharedBase;
+}
+
+/// Send the target's untouched request once, outside any sharing.
+pub(crate) async fn fetch_base_response(target: &Target) -> Option<Arc<BaseResponse>> {
+    let client = target.build_client_or_default();
+    let request = crate::utils::build_request(
+        &client,
+        target,
+        target.parse_method(),
+        target.url.clone(),
+        target.data.clone(),
+    );
+    crate::record_outbound_request().await;
+    let response = crate::utils::http::send_counted(request).await.ok()?;
+    let status = response.status().as_u16();
+    let location = response
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .map(ToString::to_string);
+    let body = crate::utils::http::read_body_counted(response).await.ok()?;
+    Some(Arc::new(BaseResponse {
+        status,
+        location,
+        body,
+    }))
+}
+
+/// Fetch the target's base response and, inside [`analyze_parameters`], store
+/// it for the stages that follow (they read it with [`cached_base_response`]).
+pub(crate) async fn base_response(target: &Target) -> Option<Arc<BaseResponse>> {
+    let base = fetch_base_response(target).await?;
+    let _ = BASE_RESPONSE.try_with(|slot| {
+        if let Ok(mut slot) = slot.lock() {
+            *slot = Some(base.clone());
+        }
+    });
+    Some(base)
+}
+
+/// The shared base response if an earlier stage already fetched it and no
+/// probe has been sent since. Never sends a request: a stage with its own
+/// (paced) path for this request keeps that path when there is nothing to
+/// reuse.
+pub(crate) fn cached_base_response() -> Option<Arc<BaseResponse>> {
+    BASE_RESPONSE
+        .try_with(|slot| slot.lock().ok().and_then(|slot| slot.clone()))
+        .ok()
+        .flatten()
+}
+
+fn forget_base_response() {
+    let _ = BASE_RESPONSE.try_with(|slot| {
+        if let Ok(mut slot) = slot.lock() {
+            *slot = None;
+        }
+    });
 }
 
 /// Spawn one discovery/mining reflection probe. Under a `semaphore` permit it
