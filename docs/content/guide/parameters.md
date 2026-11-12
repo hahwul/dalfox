@@ -136,7 +136,7 @@ dalfox scan https://target.app/api \
   -d '{"filter":"FUZZ"}'
 ```
 
-With a marker set, discovery, mining, and active probing are skipped. Every query value, form-body value, multipart field (when the body is raw multipart, as in an imported raw HTTP request), top-level JSON string value, header value, and cookie value that contains `FUZZ` becomes a parameter, and each payload replaces that whole value. A marker anywhere else (a path segment, a nested JSON field) is not picked up.
+With a marker set, discovery, mining, and active probing are skipped. Every query value, form-body value, multipart field (when the body is raw multipart, as in an imported raw HTTP request), top-level JSON string value, header value, and cookie value that contains `FUZZ` becomes a parameter, and each payload replaces that whole value. A marker anywhere else (a path segment, a nested JSON field) is not picked up. A target where the marker lands in none of those positions is not requested at all: it is reported `skipped` with `INJECT_MARKER_NOT_FOUND`, and the run exits `2` if no target was scanned.
 
 You can also target a query parameter or a header directly:
 

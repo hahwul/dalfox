@@ -55,7 +55,7 @@ Use these in order of preference:
 - `--custom-payload file.txt` — appends to the built-in set
 - `--only-custom-payload --custom-payload file.txt` — uses that file as the local base set across reflection and DOM checks; adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still expand those custom payloads, and explicitly requested `--remote-payloads` remain active.
 - `--custom-blind-xss-payload file.txt` — blind XSS templates; each line must contain `{callback}` (lines without it are skipped)
-- `--inject-marker 'FUZZ'` — lets you write `https://target/?q=FUZZ` and have payloads replace the literal `FUZZ` token (great for complex JSON bodies or non-standard locations)
+- `--inject-marker 'FUZZ'` — lets you write `https://target/?q=FUZZ` and have payloads replace the whole value that carries `FUZZ` (query, form/multipart body, top-level JSON string, header or cookie value — not a path segment or nested JSON field). A target with no such value is skipped with `INJECT_MARKER_NOT_FOUND` instead of reading as clean
 
 `--custom-alert-value 'document.domain'` rewrites `alert(1)` → `alert(document.domain)` in the context-matched reflection payloads (clearer PoC; DOM-verification and fallback payloads keep `alert(1)`). Add `--custom-alert-type str` only for a literal: it wraps the value in single quotes (`alert('dalfox')`), so with `document.domain` you would get the string, not the domain.
 

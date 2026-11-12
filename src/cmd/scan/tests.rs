@@ -4562,3 +4562,90 @@ fn stream_printer_skips_findings_min_confidence_drops() {
     assert!(super::output::admit_streamed(&low, None, &mut seen));
     assert!(!super::output::admit_streamed(&low, Some("low"), &mut seen));
 }
+
+/// `--inject-marker` whose marker sits in no query, body, header or cookie
+/// value used to run nothing and report the target `clean` (exit 0). It must be
+/// `skipped` with `INJECT_MARKER_NOT_FOUND`, exit 2, and never touch the
+/// server; a target that does carry the marker is still scanned.
+#[tokio::test]
+async fn inject_marker_not_found_skips_the_target_without_a_request() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let app = Router::new().route(
+        "/",
+        get(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                "ok"
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let path = temp_out_path(&format!("inject_marker_missing_{}", std::process::id()));
+    let args = ScanArgs {
+        targets: vec![format!("http://{addr}/?q=hello")],
+        inject_marker: Some("FUZZ".to_string()),
+        output: Some(path.clone()),
+        ..default_scan_args()
+    };
+    let outcome = super::run_scan(&args).await;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(outcome, ScanOutcome::Error, "nothing was tested");
+    assert_eq!(hits.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let row = &report["meta"]["target_summary"][0];
+    assert_eq!(row["status"], "skipped", "{row}");
+    assert_eq!(
+        row["error_code"],
+        crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND,
+        "{row}"
+    );
+
+    // A marker-less target must not take a `--max-targets-per-host` slot:
+    // with a cap of 1 and the marker-less URL first, the marked one is still
+    // the one that gets scanned (it used to be truncated behind it).
+    let args = ScanArgs {
+        targets: vec![
+            format!("http://{addr}/?q=hello"),
+            format!("http://{addr}/?q=FUZZ"),
+        ],
+        inject_marker: Some("FUZZ".to_string()),
+        max_targets_per_host: 1,
+        skip_xss_scanning: true,
+        output: Some(path.clone()),
+        ..default_scan_args()
+    };
+    let _ = super::run_scan(&args).await;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    let _ = std::fs::remove_file(&path);
+    server.abort();
+    let rows = report["meta"]["target_summary"]
+        .as_array()
+        .expect("target_summary");
+    let row_for = |needle: &str| {
+        rows.iter()
+            .find(|r| r["target"].as_str().is_some_and(|t| t.ends_with(needle)))
+            .unwrap_or_else(|| panic!("no row for {needle}: {rows:?}"))
+    };
+    assert_eq!(
+        row_for("q=hello")["error_code"],
+        crate::cmd::error_codes::INJECT_MARKER_NOT_FOUND
+    );
+    let marked = row_for("q=FUZZ");
+    assert_ne!(marked["status"], "skipped", "{marked}");
+    assert!(
+        hits.load(std::sync::atomic::Ordering::Relaxed) > 0,
+        "the marked target must have been requested"
+    );
+}
