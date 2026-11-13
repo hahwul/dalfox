@@ -488,6 +488,8 @@ fn comma_callees_use_the_callee_summary() {
         "function g(){return 'x'} document.body.innerHTML=(0,g)();",
         "function g(s){document.body.textContent=s} (0,g)(location.hash);",
         "var r={Z:function(s){document.body.innerHTML='x'}}; (0,r.Z)(location.hash);",
+        // `this` is not `o` in a comma call, so `this.x` is not the tainted field.
+        "var o={x:location.hash,get:function(){return this.x}}; document.body.innerHTML=(0,o.get)();",
         // `g` is evaluated and discarded; `h` is the callee.
         "function g(s){document.body.innerHTML=s} function h(s){} (g,h)(location.hash);",
     ]);
