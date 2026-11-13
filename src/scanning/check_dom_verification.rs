@@ -706,10 +706,7 @@ fn body_looks_html_renderable(text: &str) -> bool {
     }
     let first = trimmed.as_bytes()[0];
     // JSON object / array — would be rendered as text by browsers, not HTML.
-    if first == b'{' || first == b'[' {
-        return false;
-    }
-    true
+    !matches!(first, b'{' | b'[')
 }
 
 /// Which evidence path proved the payload exploitable. Returned by
