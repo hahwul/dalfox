@@ -74,7 +74,7 @@ Every format except `plain` auto-silences the banner.
 | `--skip-reflection-cookie` | Skip the blanket sweep over supplied cookies. Cookies named explicitly with `-p name:cookie` are still probed |
 | `--skip-reflection-path` | Skip path-segment reflection checks |
 | `--skip-mining` | Skip DOM mining + dictionary mining (biggest single win for speed) |
-| `--skip-mining-dom` | Skip only DOM-based mining |
+| `--skip-mining-dom` | Skip only DOM-based mining (`<input>` names + script/bundle query keys) |
 | `--skip-mining-dict` | Skip only wordlist/dictionary mining |
 | `-W, --mining-dict-word` | Path to custom wordlist for dictionary mining |
 | `--remote-wordlists` | `burp,assetnote` (comma-separated) |

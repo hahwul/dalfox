@@ -142,7 +142,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--remote-wordlists` |  | 원격 소스(쉼표로 구분): `burp`, `assetnote` |
 | `--skip-mining` | false | 모든 마이닝을 건너뜁니다 |
 | `--skip-mining-dict` | false | 사전 마이닝을 건너뜁니다 |
-| `--skip-mining-dom` | false | HTML `id`/`name` 속성에서 파라미터 이름을 수집하지 않습니다. DOM-XSS 탐지는 꺼지지 않으니, 그쪽은 `--skip-ast-analysis`를 쓰세요 |
+| `--skip-mining-dom` | false | `<input>`의 `id`/`name` 속성과, 페이지 스크립트(`--analyze-external-js`를 켜면 번들도)가 참조하는 쿼리 키에서 파라미터 이름을 수집하지 않습니다. DOM-XSS 탐지는 꺼지지 않으니, 그쪽은 `--skip-ast-analysis`를 쓰세요 |
 
 ### 네트워크
 

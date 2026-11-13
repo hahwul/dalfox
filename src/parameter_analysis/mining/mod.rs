@@ -54,7 +54,7 @@ mod probe_xml;
 // and the parent's `pub use mining::*` re-exports them crate-wide.
 pub(crate) use context_detect::*;
 // The external-JS pass reads names out of each bundle it fetches.
-pub(crate) use probe_response_id::js_param_candidates;
+pub(crate) use probe_response_id::{MAX_STORED_BUNDLE_NAMES, js_param_candidates};
 
 // Intra-module helpers reached by `mine_parameters` and the test module.
 use collapse::*;

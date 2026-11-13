@@ -143,7 +143,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--remote-wordlists` |  | Remote sources, comma-separated: `burp`, `assetnote` |
 | `--skip-mining` | false | Skip all mining |
 | `--skip-mining-dict` | false | Skip dictionary mining |
-| `--skip-mining-dom` | false | Skip mining parameter names from HTML `id`/`name` attributes. This does not turn off DOM-XSS detection; use `--skip-ast-analysis` for that |
+| `--skip-mining-dom` | false | Skip mining parameter names from `<input>` `id`/`name` attributes and from the query keys page scripts (and, with `--analyze-external-js`, bundles) reference. This does not turn off DOM-XSS detection; use `--skip-ast-analysis` for that |
 
 ### Network
 

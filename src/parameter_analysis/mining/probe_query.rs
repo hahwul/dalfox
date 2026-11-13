@@ -155,7 +155,20 @@ pub(super) async fn probe_query_candidates(
     // Measure eligibility before deduplication. If the wordlist is large but
     // all of its names were already found by Stage 1, the arbitrary-name
     // sentinel still provides the only evidence needed to create `any`.
-    let sentinel_eligible = raw_candidates.len() > SENTINEL_PROBE_COUNT * 5;
+    //
+    // A Query `any` from an earlier stage is evidence too: on a page that
+    // echoes every name, a short DOM list (inputs, script query keys) is too
+    // small for the sentinel or the EWMA collapse, so each name would become
+    // its own fully scanned param. Re-probing costs at most
+    // `SENTINEL_PROBE_COUNT` requests and still tells a real param literally
+    // named `any` apart (the sentinel then fails and mining runs as usual).
+    let query_any_present = ctx
+        .reflection_params
+        .lock()
+        .await
+        .iter()
+        .any(|p| p.location == Location::Query && p.name == "any");
+    let sentinel_eligible = raw_candidates.len() > SENTINEL_PROBE_COUNT * 5 || query_any_present;
     let client_for_sentinel = ctx.client.clone();
     let mut arbitrary_names_disproved = false;
     if sentinel_eligible {

@@ -353,6 +353,9 @@ pub(crate) async fn fetch_and_analyze_external_js(
         };
         if want_names {
             for name in crate::parameter_analysis::mining::js_param_candidates(&body) {
+                if param_names.len() >= crate::parameter_analysis::mining::MAX_STORED_BUNDLE_NAMES {
+                    break;
+                }
                 if seen_names.insert(name.clone()) {
                     param_names.push(name);
                 }

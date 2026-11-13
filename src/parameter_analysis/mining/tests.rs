@@ -1754,8 +1754,22 @@ async fn reflect_everything_handler(Query(params): Query<HashMap<String, String>
     Html(format!("{form}<div>{echoed}</div>"))
 }
 
+/// Echoes every value like `/echo-all`, but offers only three candidate
+/// names, all from an inline script: too few for the sentinel or the EWMA
+/// collapse on their own.
+async fn reflect_everything_few_names_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> Html<String> {
+    let echoed: String = params.values().cloned().collect::<Vec<_>>().join(" ");
+    Html(format!(
+        "<script>fetch('/api?alpha=1&beta=2&gamma=3')</script><div>{echoed}</div>"
+    ))
+}
+
 async fn start_reflect_everything_server() -> SocketAddr {
-    let app = Router::new().route("/echo-all", get(reflect_everything_handler));
+    let app = Router::new()
+        .route("/echo-all", get(reflect_everything_handler))
+        .route("/echo-few", get(reflect_everything_few_names_handler));
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("bind listener");
@@ -2281,4 +2295,39 @@ async fn dictionary_remote_wordlist_fetch_goes_through_proxy() {
             .any(|u| u.contains("dalfox-dict-proxy-test.invalid")),
         "remote wordlist fetch must honor --proxy, proxy saw {seen:?}"
     );
+}
+
+/// An earlier stage already folded the Query slot into `any` on a page that
+/// echoes every name. A short DOM list must fold into it too, not become one
+/// fully scanned param per script query key.
+#[tokio::test]
+async fn test_dom_mining_short_list_folds_into_an_existing_any() {
+    let addr = start_reflect_everything_server().await;
+    let target = parse_target(&format!("http://{}:{}/echo-few", addr.ip(), addr.port()))
+        .expect("parse target");
+    let args = default_scan_args();
+    let names = |params: &[Param]| -> Vec<String> {
+        params
+            .iter()
+            .filter(|p| p.location == Location::Query)
+            .map(|p| p.name.clone())
+            .collect()
+    };
+
+    // Control: with no `any` yet, the three names are mined one by one.
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+    probe_response_id_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    let mut got = names(&reflection_params.lock().await);
+    got.sort();
+    assert_eq!(got, vec!["alpha", "beta", "gamma"]);
+
+    let reflection_params = Arc::new(Mutex::new(vec![make_any_param(
+        Location::Query,
+        Some("<div>x</div>"),
+        None,
+    )]));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+    probe_response_id_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    assert_eq!(names(&reflection_params.lock().await), vec!["any"]);
 }

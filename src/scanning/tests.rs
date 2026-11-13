@@ -6272,3 +6272,30 @@ async fn test_run_scanning_escaped_echo_sends_no_wire_repeats() {
         "an escaped echo never verifies"
     );
 }
+
+/// A bundle can spell far more distinct query keys than mining uses; the
+/// pass keeps at most `MAX_STORED_BUNDLE_NAMES` on the target.
+#[tokio::test]
+async fn test_fetch_ext_js_caps_stored_bundle_names() {
+    let body: &'static str = Box::leak(
+        (0..1000)
+            .map(|i| format!("fetch('/x?k{i}=1');"))
+            .collect::<String>()
+            .into_boxed_str(),
+    );
+    let addr = start_ext_js_server(body).await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let args = crate::cmd::scan::ScanArgs {
+        skip_mining: false,
+        skip_mining_dom: false,
+        ..ext_js_scan_args(true)
+    };
+    let (_, names) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert_eq!(
+        names.len(),
+        crate::parameter_analysis::mining::MAX_STORED_BUNDLE_NAMES
+    );
+    assert_eq!(names[0], "k0", "kept in document order");
+}

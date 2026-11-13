@@ -14,10 +14,14 @@ const JS_PARAM_NAME: &str = r"[A-Za-z_][A-Za-z0-9_.\-\[\]]{0,63}";
 /// a median of 11 distinct names per site, p90 53, max 280. This holds what
 /// `--analyze-external-js` adds to mining to one canary bucket.
 pub(super) const MAX_BUNDLE_MINING_PARAMS: usize = 64;
+/// How many distinct bundle names the external-JS pass keeps on the target.
+/// Room for the 64 that reach mining after the page's own names are removed,
+/// without holding every name a hostile multi-megabyte bundle can spell.
+pub(crate) const MAX_STORED_BUNDLE_NAMES: usize = MAX_BUNDLE_MINING_PARAMS * 4;
 
 /// `?name=` / `&name=`. The caller keeps a match only when the byte after it
 /// is not another `=` (`a&&b==c`, checked without consuming it, so `?a=&b=`
-/// keeps `b`) and when [`in_url_string`] places the `?`/`&` inside a string.
+/// keeps `b`) and when [`UrlStringScan`] places the `?`/`&` inside a string.
 fn js_query_key_regex() -> &'static regex::Regex {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -44,21 +48,52 @@ fn is_url_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"_-./:%~=&?#@".contains(&b)
 }
 
-/// Whether the `?`/`&` at `at` sits inside a string literal: walking back over
-/// URL bytes reaches a quote, or the `}` closing a template `${…}`. Minified
-/// code is full of ternary assignments (`c?t=1:2`, `(e?n.x=…`) that the
-/// query-key regex also matches. Walking back from those reaches code
-/// instead, and a string comparison in front of one (`"x"==e?t=`) is caught
-/// by its `==`.
-fn in_url_string(js: &[u8], at: usize) -> bool {
-    let floor = at.saturating_sub(256);
-    let mut start = at;
-    while start > floor && is_url_byte(js[start - 1]) {
-        start -= 1;
+/// Whether the `?`/`&` at a match sits inside a string literal: walking back
+/// over URL bytes (at most 256) reaches a quote, or the `}` closing a template
+/// `${…}`. Minified code is full of ternary assignments (`c?t=1:2`,
+/// `(e?n.x=…`) that the query-key regex also matches. Walking back from those
+/// reaches code instead, and a string comparison in front of one (`"x"==e?t=`)
+/// is caught by its `==`.
+///
+/// Matches arrive in increasing order, so the URL run and the last `==` are
+/// carried forward instead of re-walked: one pass over the script, even when
+/// it is a megabyte of `&a=&a=…`.
+struct UrlStringScan<'a> {
+    js: &'a [u8],
+    /// Every byte before this has been scanned.
+    scanned_to: usize,
+    /// Start of the URL-byte run that ends at `scanned_to`.
+    run_start: usize,
+    /// Index of the first `=` of the latest `==` before `scanned_to`.
+    last_eq: Option<usize>,
+}
+
+impl<'a> UrlStringScan<'a> {
+    fn new(js: &'a [u8]) -> Self {
+        Self {
+            js,
+            scanned_to: 0,
+            run_start: 0,
+            last_eq: None,
+        }
     }
-    start > 0
-        && matches!(js[start - 1], b'"' | b'\'' | b'`' | b'}')
-        && !js[start..at].windows(2).any(|w| w == b"==")
+
+    fn in_url_string(&mut self, at: usize) -> bool {
+        let at = at.min(self.js.len());
+        for i in self.scanned_to..at {
+            if !is_url_byte(self.js[i]) {
+                self.run_start = i + 1;
+            } else if i > 0 && self.js[i] == b'=' && self.js[i - 1] == b'=' {
+                self.last_eq = Some(i - 1);
+            }
+        }
+        self.scanned_to = self.scanned_to.max(at);
+        let start = self.run_start;
+        start > 0
+            && start >= at.saturating_sub(256)
+            && matches!(self.js[start - 1], b'"' | b'\'' | b'`' | b'}')
+            && !self.last_eq.is_some_and(|e| e >= start && e + 1 < at)
+    }
 }
 
 /// Query-parameter names a page's own JavaScript references: URL query keys,
@@ -72,9 +107,10 @@ fn in_url_string(js: &[u8], at: usize) -> bool {
 /// crate runs in linear time, so hostile page JS cannot stall it.
 pub(crate) fn js_param_candidates(js: &str) -> Vec<String> {
     let bytes = js.as_bytes();
-    let query_keys = js_query_key_regex().captures_iter(js).filter(|caps| {
+    let mut scan = UrlStringScan::new(bytes);
+    let query_keys = js_query_key_regex().captures_iter(js).filter(move |caps| {
         caps.get(0)
-            .is_some_and(|m| bytes.get(m.end()) != Some(&b'=') && in_url_string(bytes, m.start()))
+            .is_some_and(|m| bytes.get(m.end()) != Some(&b'=') && scan.in_url_string(m.start()))
     });
     let getters = js_param_getter_regex().captures_iter(js);
     query_keys
