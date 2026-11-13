@@ -472,3 +472,23 @@ fn same_names_in_other_scopes() {
         ["location.hash -> href"]
     );
 }
+
+// Babel / TypeScript / esbuild / webpack call every imported function as
+// `(0, f)(x)`. It is the same call as `f(x)`, so it gets the same summary.
+#[test]
+fn comma_callees_use_the_callee_summary() {
+    assert_reported(&[
+        "function g(){return location.hash} var el=document.body; el.innerHTML=(0,g)();",
+        "function g(s){document.body.innerHTML=s} (0,g)(location.hash);",
+        "var r={Z:function(s){document.body.innerHTML=s}}; (0,r.Z)(location.hash);",
+        "function g(s){document.body.innerHTML=s} ((0,g))(location.hash);",
+        "function g(s){document.body.innerHTML=s} (1,2,g)(location.hash);",
+    ]);
+    assert_clean(&[
+        "function g(){return 'x'} document.body.innerHTML=(0,g)();",
+        "function g(s){document.body.textContent=s} (0,g)(location.hash);",
+        "var r={Z:function(s){document.body.innerHTML='x'}}; (0,r.Z)(location.hash);",
+        // `g` is evaluated and discarded; `h` is the callee.
+        "function g(s){document.body.innerHTML=s} function h(s){} (g,h)(location.hash);",
+    ]);
+}
