@@ -44,6 +44,7 @@ only_poc = []
 # baseline = "baseline.json"
 baseline_mode = "filter"
 min_confidence = "low"
+fail_on = "any"
 no_color = false
 
 # TARGETS
@@ -164,6 +165,7 @@ debug = false
 | `baseline` | string |  | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다([베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)). CLI 전용이며 `dalfox server`/MCP는 무시합니다 |
 | `baseline_mode` | string | `"filter"` | `filter`는 알려진 건을 제거, `annotate`는 유지한 채 `new` 표시 |
 | `min_confidence` | string | `"low"` | `high`는 `low` 등급 탐지 결과를 출력과 종료 코드보다 먼저 제거 (`I`는 유지) |
+| `fail_on` | string | `"any"` | `high`는 `high` 등급 결과가 있을 때만 `1`로 종료, 결과는 모두 보고 |
 | `no_color` | bool | `false` | ANSI 색상 비활성화 |
 
 ### 대상

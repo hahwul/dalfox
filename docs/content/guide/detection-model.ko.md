@@ -128,7 +128,7 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
 
 `json`, `jsonl`, `toml`, `markdown`, `sarif`는 `confidence`를
 `confidence_reason`과 함께 담고, `plain`은 등급만 `Confidence:` 줄로
-보여 줍니다. 등급에 반응하는 동작은 세 가지입니다.
+보여 줍니다. 등급에 반응하는 동작은 네 가지입니다.
 
 - `--min-confidence high`는 `low` 탐지 결과(모든 `R`, 그리고 Dalfox가
   확신할 수 없는 AST 흐름)를 가장 먼저 걸러 냅니다. 모든 형식의 출력,
@@ -143,6 +143,10 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
 - AST 중복 제거는 type과 severity가 같을 때 등급으로 순위를 가립니다(`high` 우선).
 - 종료 코드도 위 필터를 따릅니다. `low` 탐지 결과만 있던 실행은
   `--min-confidence high`에서 `0`으로 끝납니다.
+- `--fail-on high`는 종료 코드만 거릅니다. 결과는 모두 리포트에 남고,
+  `high` 등급 결과가 있을 때만 `1`로 끝납니다. `I`는 실행을 실패시키지
+  않습니다. 옵션을 주면 `meta.fail_on`이 `{level, matched}`를 보고합니다.
+  설정 파일에서는 `fail_on`이며, REST API와 MCP에는 종료 코드가 없어 CLI 전용입니다.
 
 `--only-poc`와 `--limit-result-type`은 여전히 `type`으로 고르고, SARIF
 `level`도 여전히 severity를 따릅니다(등급은 `properties`에 있습니다).
@@ -219,7 +223,7 @@ AST 패스, 오래된 라이브러리, OOB 콜백에서 나온 결과는 최종 
 기본값 `--on-session-loss abort`에서 세션이 끊긴 경우, 스캔 워커가 크래시한 경우,
 심각한 전송 손실이 여기에 해당합니다. `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도
 `V`와 똑같이 `1`을 냅니다. Dalfox가 악용 가능하다고 판단한 것에만 CI를 실패시키려면
-`--only-poc v`를, `high` 등급 주장에만 실패시키려면 `--min-confidence high`를 쓰세요.
+`--only-poc v`를, 나머지는 보고하면서 `high` 등급 주장에만 실패시키려면 `--fail-on high`를 쓰세요.
 전체 규칙은 [종료 코드](../output/#종료-코드)에 있습니다.
 
 ## 목적별 플래그 선택
@@ -233,3 +237,4 @@ AST 패스, 오래된 라이브러리, OOB 콜백에서 나온 결과는 최종 
 | 대량의 AST 탐지 결과 트리아지 | `-f json`으로 받아 `confidence`로 정렬한 뒤 `confidence_reason` 읽기 |
 | 악용 가능 판단에만 CI 실패시키기 | `--only-poc v` (그렇지 않으면 어떤 티어든 `1`) |
 | Dalfox가 확신할 수 없는 결과 제외 | `--min-confidence high` (`I`는 유지) |
+| `high` 주장에만 CI 실패, 나머지는 리포트에 유지 | `--fail-on high` |

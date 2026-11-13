@@ -4437,16 +4437,27 @@ async fn render_with_min_confidence(
     tag: &str,
 ) -> (String, ScanOutcome) {
     let mut args = default_scan_args();
-    args.format = "json".to_string();
     args.min_confidence = min.map(String::from);
-    let path = temp_out_path(tag);
-    args.output = Some(path.clone());
-    let urls = vec!["https://example.com".to_string()];
-    let state = make_scan_state(findings);
     let requests = crate::cmd::scan::output::RequestTally {
         sent: 42,
         failed: 0,
     };
+    render_and_exit(args, findings, requests, tag).await
+}
+
+/// JSON report + exit code for `findings` under `args`, the two steps
+/// `run_scan` ends with.
+async fn render_and_exit(
+    mut args: ScanArgs,
+    findings: Vec<ScanResult>,
+    requests: crate::cmd::scan::output::RequestTally,
+    tag: &str,
+) -> (String, ScanOutcome) {
+    args.format = "json".to_string();
+    let path = temp_out_path(tag);
+    args.output = Some(path.clone());
+    let urls = vec!["https://example.com".to_string()];
+    let state = make_scan_state(findings);
     let (results, write_failed) = render_results(
         &args,
         &state,
@@ -4733,4 +4744,102 @@ async fn inject_marker_not_found_skips_the_target_without_a_request() {
         hits.load(std::sync::atomic::Ordering::Relaxed) > 0,
         "the marked target must have been requested"
     );
+}
+
+/// `--fail-on high` changes only the exit code: every finding is still in the
+/// report; only a `high`-graded one exits 1. `I` and `R` never do, and a run
+/// with nothing gating that was also cut short is still an error, not clean.
+#[tokio::test]
+async fn fail_on_high_gates_only_the_exit_code() {
+    use crate::scanning::result::Confidence;
+    let url = "https://example.com";
+    let mut low = reflected_result(url, "q", "<x>");
+    low.confidence = Some(Confidence::Low);
+    let mut high = reflected_result(url, "id", "<y>");
+    high.result_type = FindingType::Verified;
+    high.confidence = Some(Confidence::High);
+    let mut info = reflected_result(url, "lib", "");
+    info.result_type = FindingType::Informational;
+    for r in [&mut low, &mut high, &mut info] {
+        r.origin_target = Some(url.to_string());
+        r.message_id = 606;
+    }
+    let ok = crate::cmd::scan::output::RequestTally {
+        sent: 42,
+        failed: 0,
+    };
+    let fail_on = |level: Option<&str>| ScanArgs {
+        fail_on: level.map(String::from),
+        ..default_scan_args()
+    };
+
+    // R + I only: reported, counted, but exit 0 under `high`.
+    let (out, exit) = render_and_exit(
+        fail_on(Some("high")),
+        vec![low.clone(), info.clone()],
+        ok,
+        "failon_high_ri",
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 2);
+    assert_eq!(v["meta"]["target_summary"][0]["status"], "findings");
+    assert_eq!(
+        v["meta"]["fail_on"],
+        serde_json::json!({"level": "high", "matched": 0})
+    );
+    assert_eq!(exit, ScanOutcome::Clean);
+
+    // Adding a `high` V fails the run.
+    let (out, exit) = render_and_exit(
+        fail_on(Some("high")),
+        vec![low.clone(), high, info.clone()],
+        ok,
+        "failon_high_v",
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["fail_on"]["matched"], 1);
+    assert_eq!(exit, ScanOutcome::Findings);
+
+    // `I` alone is not an XSS claim.
+    let (_, exit) = render_and_exit(
+        fail_on(Some("high")),
+        vec![info.clone()],
+        ok,
+        "failon_high_i",
+    )
+    .await;
+    assert_eq!(exit, ScanOutcome::Clean);
+
+    // `any` (and unset) fail on everything; the report differs only by meta.
+    let (default_out, default_exit) =
+        render_and_exit(fail_on(None), vec![info.clone()], ok, "failon_unset").await;
+    let (any_out, any_exit) =
+        render_and_exit(fail_on(Some("any")), vec![info], ok, "failon_any").await;
+    assert_eq!(default_exit, ScanOutcome::Findings);
+    assert_eq!(any_exit, ScanOutcome::Findings);
+    let mut any_v: serde_json::Value = serde_json::from_str(&any_out).expect("json");
+    assert_eq!(
+        any_v["meta"]["fail_on"],
+        serde_json::json!({"level": "any", "matched": 1})
+    );
+    any_v["meta"].as_object_mut().unwrap().remove("fail_on");
+    assert_eq!(
+        serde_json::to_string_pretty(&any_v).unwrap() + "\n",
+        default_out
+    );
+
+    // Error branches see "no gating finding": an R-only run that lost most
+    // of its requests exits 2 under `high`, where the default exits 1.
+    let lossy = crate::cmd::scan::output::RequestTally {
+        sent: 170,
+        failed: 148,
+    };
+    let (_, exit) =
+        render_and_exit(fail_on(None), vec![low.clone()], lossy, "failon_lossy_any").await;
+    assert_eq!(exit, ScanOutcome::Findings);
+    let (_, exit) =
+        render_and_exit(fail_on(Some("high")), vec![low], lossy, "failon_lossy_high").await;
+    assert_eq!(exit, ScanOutcome::Error);
 }

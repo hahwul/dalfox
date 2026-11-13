@@ -118,6 +118,10 @@ pub const BASELINE_MODE_VALUES: &[&str] = &[BASELINE_MODE_FILTER, BASELINE_MODE_
 /// finding already meets, so it filters nothing.
 pub(crate) const MIN_CONFIDENCE_HIGH: &str = "high";
 pub const MIN_CONFIDENCE_VALUES: &[&str] = &["low", MIN_CONFIDENCE_HIGH];
+/// `--fail-on high`: exit 1 only when a reported finding is graded `high`.
+/// `any` (the default) fails on every reported finding.
+pub(crate) const FAIL_ON_HIGH: &str = "high";
+pub const FAIL_ON_VALUES: &[&str] = &["any", FAIL_ON_HIGH];
 pub const ENCODER_VALUES: &[&str] = &[
     "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
 ];
@@ -469,6 +473,18 @@ pub struct ScanArgs {
     // `None` so an explicit `--min-confidence low` beats a config-file `high`.
     #[arg(long, value_name = "LEVEL", value_parser = clap::builder::PossibleValuesParser::new(MIN_CONFIDENCE_VALUES.iter().copied()))]
     pub min_confidence: Option<String>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Which findings make the run exit 1: any, or only high-confidence ones
+    /// (default: any)
+    ///
+    /// Changes only the exit code: every finding is still reported. Under high,
+    /// informational findings never fail the run. Applied after --only-poc,
+    /// --baseline and --min-confidence.
+    //
+    // `None` so an explicit `--fail-on any` beats a config-file `high`.
+    #[arg(long, value_name = "LEVEL", value_parser = clap::builder::PossibleValuesParser::new(FAIL_ON_VALUES.iter().copied()))]
+    pub fail_on: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
     /// Parameter to test, as name or name:type (repeatable). Types: query, body,
@@ -931,6 +947,7 @@ impl Default for ScanArgs {
             baseline: None,
             baseline_mode_arg: None,
             min_confidence: None,
+            fail_on: None,
             param: vec![],
             data: None,
             headers: vec![],
@@ -1120,6 +1137,14 @@ impl ScanArgs {
     /// [`crate::scanning::result::Result::below_min_confidence`].
     pub(crate) fn below_min_confidence(&self, r: &crate::scanning::result::Result) -> bool {
         r.below_min_confidence(self.min_confidence.as_deref())
+    }
+
+    /// Whether `r` makes the run exit 1 under `--fail-on`. `any` (or unset):
+    /// every reported finding. `high`: only one graded `high`, so an `I`, an
+    /// `R` or a `low` AST flow is reported without failing the run.
+    pub(crate) fn fails_run(&self, r: &crate::scanning::result::Result) -> bool {
+        self.fail_on.as_deref() != Some(FAIL_ON_HIGH)
+            || r.confidence == Some(crate::scanning::result::Confidence::High)
     }
 
     /// Whether `url` passes `--include-url` / `--exclude-url`, for URLs the

@@ -151,6 +151,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 같은 스캔 수준 메타�
 - `baseline`: `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고.
 - `resumed`: `--state-file`을 쓴 경우에만 포함됩니다. `state_file`(경로)과 `targets_skipped_completed`(이전 실행에서 끝나 건너뛴 대상 수)를 담습니다.
 - `min_confidence`: `--min-confidence`를 준 경우에만 포함됩니다. [필터링](#필터링) 참고.
+- `fail_on`: `--fail-on`을 준 경우에만 포함됩니다. `{"level", "matched"}`이며, `matched`는 종료 코드를 결정한 보고 결과 개수입니다. [종료 코드](#종료-코드) 참고.
 - `incomplete`: 실행이 완전히 테스트되지 않았을 때 `true`입니다. 스캔 도중 대상의 인증 세션이 끊어졌거나([세션 모니터링](../scanning-modes/#세션-모니터링) 참고), 전체 요청의 10% 이상(최소 3건)이 응답을 받지 못했거나, Ctrl-C / `--limit` / `--scan-timeout`으로 모든 대상이 끝나기 전에 실행이 멈춘 경우입니다. `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보면 됩니다. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*.
 
 세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)와 `"error_code": "SESSION_LOST"`로 보고되고, 감지된 신호는 `"error_message"`에 담깁니다. `"clean"`으로 표시되는 일은 없습니다. Ctrl-C, `--limit`, `--scan-timeout`으로 도중에 끊긴(또는 실행이 그 전에 멈춰 도달하지 못한) 대상도 탐지 결과가 없으면 `"incomplete"`로 표시됩니다. `--scan-timeout`으로 끊긴 대상에는 탐지 결과가 있어도 `"error_code": "SCAN_TIMEOUT"`이 붙으므로, 배치 실행에서 어떤 대상을 다시 돌려야 하는지 알 수 있습니다. 나머지 경우에는 `error_code`가 없습니다.
@@ -415,7 +416,7 @@ dalfox scan scope.txt --only-poc v -f json -o .dalfox/baseline.json
 | `1` | 정상 완료, 티어와 무관하게 탐지 결과 하나 이상 |
 | `2` | 입력/설정/런타임 오류, 또는 `-o` 파일을 쓰지 못한 경우. 탐지 결과가 없을 때는 다음도 해당: 모든 대상을 건너뜀(접속 불가, 맞지 않는 콘텐츠 타입 등. `--dry-run`과 `--only-discovery`도 마찬가지이며, 이때 JSON/JSONL에 건너뛴 대상과 `error_code`가 들어갑니다), 대상의 스캔 워커가 중단됨(`INTERNAL_ERROR`), 요청의 10% 이상(최소 3건)이 응답을 받지 못함, 기본값 `--on-session-loss abort`에서 스캔 도중 세션이 끊어짐. 이런 경우에도 탐지 결과가 있었다면 `1`로 끝납니다 |
 
-`1`은 모든 티어를 포함합니다. `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 종료 코드가 정해지기 전에 필터가 적용됩니다. `--min-confidence high`도 등급 기준으로 똑같이 동작해, `low` 탐지 결과만 있던 실행은 `0`으로 끝납니다. (`jq`로 `severity == "High"`를 거는 방식도 지금은 거의 같은 집합을 얻습니다. severity가 티어를 따라가기 때문입니다. `V`는 `High`, `A`는 `Medium`, `R`은 `Info`입니다. 예외는 `I` 라이브러리 결과로, 권고(advisory)의 severity를 그대로 가지므로 `High`일 수 있습니다. [탐지 모델](../detection-model/) 참고.)
+`1`은 모든 티어를 포함합니다. `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 종료 코드가 정해지기 전에 필터가 적용됩니다. `--min-confidence high`도 등급 기준으로 똑같이 동작해, `low` 탐지 결과만 있던 실행은 `0`으로 끝나고, 그 결과는 리포트에서도 빠집니다. 결과는 리포트에 남기고 종료 코드만 거르려면 `--fail-on high`를 쓰세요. 보고된 결과 중 `high` 등급이 있을 때만 `1`로 끝나며, `R`, `low` AST 흐름, `I`는 실행을 실패시키지 않습니다. (`jq`로 `severity == "High"`를 거는 방식도 지금은 거의 같은 집합을 얻습니다. severity가 티어를 따라가기 때문입니다. `V`는 `High`, `A`는 `Medium`, `R`은 `Info`입니다. 예외는 `I` 라이브러리 결과로, 권고(advisory)의 severity를 그대로 가지므로 `High`일 수 있습니다. [탐지 모델](../detection-model/) 참고.)
 
 `--baseline`은 같은 종료 코드를 신규 여부로 좁힙니다. 기본 `filter` 모드에서는 억제된 건이 종료 코드 판정에 들어가지 않으므로, 백로그가 전부 베이스라인에 들어 있는 실행은 `0`으로 끝납니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고.
 

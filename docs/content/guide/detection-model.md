@@ -128,7 +128,7 @@ Sanitizers are not a grading signal because they already act as a *filter*: the 
 
 `json`, `jsonl`, `toml`, `markdown`, and `sarif` carry `confidence` (with
 `confidence_reason`). `plain` prints a `Confidence:` line with the grade
-only. Three things act on it:
+only. Four things act on it:
 
 - `--min-confidence high` drops every `low` finding (every `R`, plus AST
   flows Dalfox cannot stand behind) before anything else sees it: output in
@@ -143,6 +143,10 @@ only. Three things act on it:
 - AST deduplication breaks a type + severity tie on the grade (`high` first).
 - The exit code follows the filter above: a run whose only findings were
   `low` exits `0` under `--min-confidence high`.
+- `--fail-on high` gates only the exit code: every finding stays in the
+  report, and the run exits `1` only when one is graded `high`. `I` never
+  fails it. When set, `meta.fail_on` reports `{level, matched}`. Config
+  `fail_on`; CLI only, since REST and MCP have no exit code.
 
 `--only-poc` and `--limit-result-type` still select by `type`, and SARIF
 `level` still follows severity (the grade is under `properties`).
@@ -222,7 +226,7 @@ It also covers a run with no findings that could not finish cleanly: a lost
 session under the default `--on-session-loss abort`, a crashed scan worker, or
 severe transport loss. A lone `R`, or a single `I` from `--detect-outdated-libs`, exits `1` the same way a `V` does.
 For CI that should fail only on what Dalfox asserts is exploitable, run
-`--only-poc v`; to fail only on claims graded `high`, run `--min-confidence high`.
+`--only-poc v`; to fail only on claims graded `high` and still report the rest, run `--fail-on high`.
 The full rule is in [Exit codes](../output/#exit-codes).
 
 ## Choosing flags by intent
@@ -236,3 +240,4 @@ The full rule is in [Exit codes](../output/#exit-codes).
 | Triage a large AST batch | `-f json`, sort on `confidence`, then read `confidence_reason` |
 | Fail CI only on asserted vulnerabilities | `--only-poc v` (otherwise any tier exits `1`) |
 | Drop findings Dalfox cannot stand behind | `--min-confidence high` (`I` is kept) |
+| Fail CI only on `high` claims, keep the rest in the report | `--fail-on high` |

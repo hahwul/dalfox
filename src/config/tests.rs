@@ -33,6 +33,7 @@ fn full_scan_config() -> ScanConfig {
         baseline: Some("baseline.json".to_string()),
         baseline_mode: Some("annotate".to_string()),
         min_confidence: Some("high".to_string()),
+        fail_on: Some("high".to_string()),
         no_color: Some(false),
         param: Some(vec!["q".to_string(), "id:query".to_string()]),
         data: Some("name=test".to_string()),
@@ -575,12 +576,13 @@ fn test_normalize_and_validate_rejects_invalid_enums() {
         waf_bypass: Some("always".to_string()),
         dedup_urls: Some("fuzzy".to_string()),
         min_confidence: Some("medium".to_string()),
+        fail_on: Some("medium".to_string()),
         ..Default::default()
     };
     let warnings = scan.normalize_and_validate();
     assert_eq!(
         warnings.len(),
-        7,
+        8,
         "one warning per invalid field: {warnings:?}"
     );
     assert_eq!(scan.format, None);
@@ -589,6 +591,7 @@ fn test_normalize_and_validate_rejects_invalid_enums() {
     assert_eq!(scan.custom_alert_type, None);
     assert_eq!(scan.waf_bypass, None);
     assert_eq!(scan.min_confidence, None);
+    assert_eq!(scan.fail_on, None);
     assert_eq!(
         scan.dedup_urls, None,
         "an invalid dedup mode must fall back to `exact`, not reach ScanArgs"
@@ -637,6 +640,7 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
             on_session_loss: Some("continue".to_string()),
             baseline_mode: Some("annotate".to_string()),
             min_confidence: Some("high".to_string()),
+            fail_on: Some("high".to_string()),
             ..Default::default()
         }),
     };
@@ -647,16 +651,19 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
     assert_eq!(args.on_session_loss_mode(), "continue");
     assert_eq!(args.baseline_mode(), "annotate");
     assert_eq!(args.min_confidence.as_deref(), Some("high"));
+    assert_eq!(args.fail_on.as_deref(), Some("high"));
 
     // CLI explicitly re-asserts the built-in defaults: config must not win.
     let mut args = default_scan_args();
     args.on_session_loss_arg = Some("abort".to_string());
     args.baseline_mode_arg = Some("filter".to_string());
     args.min_confidence = Some("low".to_string());
+    args.fail_on = Some("any".to_string());
     cfg.apply_to_scan_args_if_default(&mut args);
     assert_eq!(args.on_session_loss_mode(), "abort");
     assert_eq!(args.baseline_mode(), "filter");
     assert_eq!(args.min_confidence.as_deref(), Some("low"));
+    assert_eq!(args.fail_on.as_deref(), Some("any"));
 }
 
 /// The generalization of the test above: `--baseline-mode` and
