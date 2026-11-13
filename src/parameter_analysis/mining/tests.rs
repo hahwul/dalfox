@@ -7,6 +7,7 @@ use tokio::time::{Duration, sleep};
 
 mod bucket_attribution;
 mod collapse_recall;
+mod js_candidates;
 mod request_efficiency;
 
 #[test]

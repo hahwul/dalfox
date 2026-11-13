@@ -108,7 +108,7 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
 | `--skip-ast-analysis` | 소스→싱크 분석을 끕니다 |
 | `--analyze-external-js` | 동일 출처 `<script src>` 번들도 가져와 분석합니다 |
 
-`--skip-mining-dom`은 이 패스에 영향을 주지 않습니다. 이 플래그는 `<input>` 요소의 `id`/`name` 속성에서 파라미터 *이름*을 수집하는 작업만 끕니다. [파라미터와 탐색](../parameters/)을 참고하세요.
+`--skip-mining-dom`은 이 패스에 영향을 주지 않습니다. 이 플래그는 페이지에서 파라미터 *이름*을 수집하는 작업만 끕니다. `<input>` 요소의 `id`/`name` 속성과 스크립트가 참조하는 쿼리 키가 대상입니다. [파라미터와 탐색](../parameters/)을 참고하세요.
 
 ## `confidence`: 주장의 근거 등급
 

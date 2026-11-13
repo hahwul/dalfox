@@ -108,7 +108,7 @@ This also explains a result that looks like a gap but isn't. In a pure client-si
 | `--skip-ast-analysis` | Turn off source→sink analysis |
 | `--analyze-external-js` | Also fetch and analyze same-origin `<script src>` bundles |
 
-`--skip-mining-dom` does not affect this pass. It controls harvesting parameter *names* from the `id`/`name` attributes of `<input>` elements. See [Parameters & Discovery](../parameters/).
+`--skip-mining-dom` does not affect this pass. It controls harvesting parameter *names* from the page: the `id`/`name` attributes of `<input>` elements and the query keys its scripts reference. See [Parameters & Discovery](../parameters/).
 
 ## `confidence`: the grade behind the claim
 

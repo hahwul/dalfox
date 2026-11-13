@@ -287,7 +287,7 @@ fn xml_script_type_is_javascript(script_type: &str) -> bool {
 /// Extract JS blocks (inline `<script>` bodies, `on*` handler bodies, and
 /// `javascript:` href bodies) from an already-parsed document, so callers can
 /// share a single parse.
-fn js_blocks_from_document(document: &Html) -> Vec<String> {
+pub(crate) fn js_blocks_from_document(document: &Html) -> Vec<String> {
     use std::collections::HashSet;
     let mut js_code = Vec::new();
     let mut seen = HashSet::new();

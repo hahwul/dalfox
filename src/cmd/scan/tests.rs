@@ -3413,6 +3413,91 @@ async fn test_run_preflight_and_analysis_analyze_external_js_produces_finding() 
     );
 }
 
+/// Both the external-JS pass and DOM mining read the page's bundle, but it is
+/// fetched once per target: the pass runs first and leaves the names on the
+/// target. A query name that only the bundle carries, and that the page
+/// reflects, is still mined.
+#[tokio::test]
+async fn test_run_preflight_and_analysis_mines_bundle_names_without_refetch() {
+    use super::analysis::run_preflight_and_analysis;
+    use axum::extract::Query;
+    use std::collections::HashMap;
+    use std::sync::atomic::Ordering;
+
+    let bundle_hits = Arc::new(AtomicUsize::new(0));
+    let hits = bundle_hits.clone();
+    let app = Router::new()
+        .route(
+            "/",
+            get(|Query(q): Query<HashMap<String, String>>| async move {
+                let echoed = q.get("bundleOnly").cloned().unwrap_or_default();
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "content-type",
+                    HeaderValue::from_static("text/html; charset=utf-8"),
+                );
+                (
+                    headers,
+                    format!(
+                        r#"<html><head><script src="/app.js"></script></head><body>{echoed}</body></html>"#
+                    ),
+                )
+            }),
+        )
+        .route(
+            "/app.js",
+            get(move || {
+                let hits = hits.clone();
+                async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    let mut headers = HeaderMap::new();
+                    headers.insert(
+                        "content-type",
+                        HeaderValue::from_static("application/javascript"),
+                    );
+                    (headers, r#"fetch("/api/items?bundleOnly=" + v);"#)
+                }
+            }),
+        );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let target = parse_target(&format!("http://{}/", addr)).expect("valid target");
+    let host = target.url.host_str().unwrap_or("127.0.0.1").to_string();
+
+    let mut args = default_scan_args();
+    args.analyze_external_js = true;
+    args.skip_ast_analysis = false;
+    args.skip_xss_scanning = true;
+    args.skip_mining_dict = true;
+    args.skip_waf_probe = true;
+
+    let state = make_scan_state(vec![]);
+    let mut host_groups = std::collections::BTreeMap::new();
+    host_groups.insert(host.clone(), vec![target]);
+
+    run_preflight_and_analysis(&args, &mut host_groups, &state, &AtomicBool::new(false)).await;
+
+    assert_eq!(
+        bundle_hits.load(Ordering::SeqCst),
+        1,
+        "bundle fetched more than once"
+    );
+    let params = &host_groups[&host][0].reflection_params;
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "bundleOnly" && p.location == Location::Query),
+        "{params:?}"
+    );
+}
+
 /// A `text/html` server whose every response takes `delay_ms`, counting the
 /// peak number of requests in flight at once.
 async fn spawn_slow_counting_server(delay_ms: u64) -> (std::net::SocketAddr, Arc<AtomicUsize>) {

@@ -415,6 +415,20 @@ pub(crate) async fn preflight_and_analyze_target(
         }
     }
 
+    // Before mining, as in the server/MCP runner: the external-JS pass records
+    // the names its bundles reference on the target, and DOM mining reads them
+    // instead of fetching each bundle a second time. Reads only preflight
+    // state (url, method, CSP, the preflight body), none of what mining sets.
+    run_initial_ast_pass(
+        &mut target,
+        &args_clone,
+        preflight_response_body.as_ref(),
+        &preflight_response_content_type,
+        &results_clone,
+        &findings_count_clone,
+    )
+    .await;
+
     // Silence parameter analysis logs and progress; show spinner for single-target runs.
     // When multi_pb_clone is active, analyze_parameters renders its own indicatif
     // spinner via that MultiProgress — skip the stdout spinner so we don't double up.
@@ -448,16 +462,6 @@ pub(crate) async fn preflight_and_analyze_target(
         &target,
         &args_clone,
         preflight_response_body.as_ref(),
-        &results_clone,
-        &findings_count_clone,
-    )
-    .await;
-
-    run_initial_ast_pass(
-        &target,
-        &args_clone,
-        preflight_response_body.as_ref(),
-        &preflight_response_content_type,
         &results_clone,
         &findings_count_clone,
     )
@@ -928,7 +932,7 @@ pub(crate) async fn detect_outdated_libs(
 /// findings for the same page — but editing *this* wrapper moves the CLI alone.
 /// Security posture comes from the `Target`, which preflight already enriched.
 async fn run_initial_ast_pass(
-    target: &Target,
+    target: &mut Target,
     args_clone: &ScanArgs,
     preflight_response_body: Option<&String>,
     response_content_type: &str,
@@ -965,13 +969,14 @@ async fn run_initial_ast_pass(
             && crate::utils::response_has_markup_document(response_content_type, response_text)
         {
             let ext_client = target.build_client_or_default();
-            let mut ext_batch = crate::scanning::fetch_and_analyze_external_js(
+            let (mut ext_batch, bundle_names) = crate::scanning::fetch_and_analyze_external_js(
                 &ext_client,
                 target,
                 response_text,
                 args_clone,
             )
             .await;
+            target.bundle_param_names = bundle_names;
             crate::scanning::result::stamp_origin(&mut ext_batch, &target.state_key());
             crate::scanning::accumulate_findings(
                 results_clone,

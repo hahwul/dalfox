@@ -748,7 +748,7 @@ pub(crate) async fn execute_scan(
                                         response_content_type,
                                         &body,
                                     ) {
-                                        let ext_batch =
+                                        let (ext_batch, bundle_names) =
                                             crate::scanning::fetch_and_analyze_external_js(
                                                 &client,
                                                 target,
@@ -756,6 +756,9 @@ pub(crate) async fn execute_scan(
                                                 args.as_ref(),
                                             )
                                             .await;
+                                        // Read by DOM mining in
+                                        // `analyze_parameters` below.
+                                        target.bundle_param_names = bundle_names;
                                         crate::scanning::accumulate_findings(
                                             &results,
                                             &findings_count,
