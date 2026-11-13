@@ -1136,6 +1136,15 @@ pub(crate) async fn derive_outcome(
         return ScanOutcome::Error;
     }
 
+    // Only reachable under `--fail-on high` (with `any`, findings imply
+    // `failing`): the run had findings, none gating, and Ctrl-C, `--limit` or
+    // `--scan-timeout` stopped it. `--limit` counts every tier, so the first
+    // `R` can end the scan before the tests that would have found a `V`; 0
+    // would claim a clean result the run never established.
+    if !failing && !final_results.is_empty() && !state.interrupted_targets.lock().await.is_empty() {
+        return ScanOutcome::Error;
+    }
+
     if failing {
         ScanOutcome::Findings
     } else {

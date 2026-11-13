@@ -479,8 +479,9 @@ pub struct ScanArgs {
     /// (default: any)
     ///
     /// Changes only the exit code: every finding is still reported. Under high,
-    /// informational findings never fail the run. Applied after --only-poc,
-    /// --baseline and --min-confidence.
+    /// nothing graded below high (R, I, a low V or AST flow) fails the run, and
+    /// a run with only such findings that was cut short exits 2. Applied after
+    /// --only-poc, --baseline and --min-confidence.
     //
     // `None` so an explicit `--fail-on any` beats a config-file `high`.
     #[arg(long, value_name = "LEVEL", value_parser = clap::builder::PossibleValuesParser::new(FAIL_ON_VALUES.iter().copied()))]

@@ -84,7 +84,7 @@ See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-inter
 | `--baseline` |  | Diff against a previous Dalfox JSON/JSONL report and report only findings new since it. An ordinary `-f json -o` report is the baseline |
 | `--baseline-mode` | `filter` | `filter` drops known findings (counts and exit code describe only what is new), `annotate` keeps them and marks each `new` |
 | `--min-confidence` | `low` | `high` drops every `low`-confidence finding (every `R`, plus AST flows Dalfox cannot stand behind) before output, `target_summary` counts, `--baseline`, and the exit code. `I` findings carry no grade and are kept. `low` keeps everything |
-| `--fail-on` | `any` | `high` exits `1` only when a reported finding is graded `high`. `R`, `low` AST flows and `I` stay in the report but do not fail the run. Changes only the exit code, after `--only-poc`, `--baseline` and `--min-confidence` |
+| `--fail-on` | `any` | `high` exits `1` only when a reported finding is graded `high`. Anything not graded `high` (`R`, `I`, a `low` `V` or AST flow) stays in the report but does not fail the run. Changes only the exit code, after `--only-poc`, `--baseline` and `--min-confidence` |
 
 See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for the fingerprint rules and the CI recipe.
 

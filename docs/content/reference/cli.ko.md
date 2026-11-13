@@ -84,7 +84,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--baseline` |  | 이전 Dalfox JSON/JSONL 리포트와 비교해 그 이후 새로 생긴 건만 보고합니다. 평범한 `-f json -o` 리포트가 그대로 베이스라인입니다 |
 | `--baseline-mode` | `filter` | `filter`는 알려진 건을 제거하고(카운트와 종료 코드가 신규 기준), `annotate`는 유지한 채 각각에 `new`를 표시합니다 |
 | `--min-confidence` | `low` | `high`는 `low` 등급 탐지 결과(모든 `R`, 그리고 Dalfox가 확신할 수 없는 AST 흐름)를 출력, `target_summary` 개수, `--baseline`, 종료 코드보다 먼저 제거합니다. `I`는 등급이 없으므로 유지됩니다. `low`는 모두 유지합니다 |
-| `--fail-on` | `any` | `high`는 보고된 결과 중 `high` 등급이 있을 때만 `1`로 끝냅니다. `R`, `low` AST 흐름, `I`는 리포트에 남지만 실행을 실패시키지 않습니다. 종료 코드만 바꾸며 `--only-poc`, `--baseline`, `--min-confidence` 다음에 적용됩니다 |
+| `--fail-on` | `any` | `high`는 보고된 결과 중 `high` 등급이 있을 때만 `1`로 끝냅니다. `high`가 아닌 결과(`R`, `I`, `low` 등급의 `V`나 AST 흐름)는 리포트에 남지만 실행을 실패시키지 않습니다. 종료 코드만 바꾸며 `--only-poc`, `--baseline`, `--min-confidence` 다음에 적용됩니다 |
 
 지문 규칙과 CI 레시피는 [베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)을 참고하세요.
 

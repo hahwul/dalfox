@@ -78,7 +78,7 @@ What reads `confidence`:
   findings were `low` exits `0` under `high`.
 - **`--fail-on high`** (config `fail_on`; CLI only) gates only the exit code:
   everything stays in the report, and the run exits `1` only when a reported
-  finding is graded `high` (`I` never fails it). When set, `meta.fail_on`
+  finding is graded `high` (`R`, `I` and a `low` `V`/AST flow never fail it; an R-only run cut short exits `2`). When set, `meta.fail_on`
   reports `{level, matched}`.
 - **Dedup** ranks duplicate AST findings by type, then severity, then
   confidence (`high` before `low`).

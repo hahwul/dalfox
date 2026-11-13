@@ -4442,14 +4442,14 @@ async fn render_with_min_confidence(
         sent: 42,
         failed: 0,
     };
-    render_and_exit(args, findings, requests, tag).await
+    render_and_exit(args, make_scan_state(findings), requests, tag).await
 }
 
 /// JSON report + exit code for `findings` under `args`, the two steps
 /// `run_scan` ends with.
 async fn render_and_exit(
     mut args: ScanArgs,
-    findings: Vec<ScanResult>,
+    state: ScanState,
     requests: crate::cmd::scan::output::RequestTally,
     tag: &str,
 ) -> (String, ScanOutcome) {
@@ -4457,7 +4457,6 @@ async fn render_and_exit(
     let path = temp_out_path(tag);
     args.output = Some(path.clone());
     let urls = vec!["https://example.com".to_string()];
-    let state = make_scan_state(findings);
     let (results, write_failed) = render_results(
         &args,
         &state,
@@ -4776,7 +4775,7 @@ async fn fail_on_high_gates_only_the_exit_code() {
     // R + I only: reported, counted, but exit 0 under `high`.
     let (out, exit) = render_and_exit(
         fail_on(Some("high")),
-        vec![low.clone(), info.clone()],
+        make_scan_state(vec![low.clone(), info.clone()]),
         ok,
         "failon_high_ri",
     )
@@ -4793,7 +4792,7 @@ async fn fail_on_high_gates_only_the_exit_code() {
     // Adding a `high` V fails the run.
     let (out, exit) = render_and_exit(
         fail_on(Some("high")),
-        vec![low.clone(), high, info.clone()],
+        make_scan_state(vec![low.clone(), high, info.clone()]),
         ok,
         "failon_high_v",
     )
@@ -4805,7 +4804,7 @@ async fn fail_on_high_gates_only_the_exit_code() {
     // `I` alone is not an XSS claim.
     let (_, exit) = render_and_exit(
         fail_on(Some("high")),
-        vec![info.clone()],
+        make_scan_state(vec![info.clone()]),
         ok,
         "failon_high_i",
     )
@@ -4813,10 +4812,20 @@ async fn fail_on_high_gates_only_the_exit_code() {
     assert_eq!(exit, ScanOutcome::Clean);
 
     // `any` (and unset) fail on everything; the report differs only by meta.
-    let (default_out, default_exit) =
-        render_and_exit(fail_on(None), vec![info.clone()], ok, "failon_unset").await;
-    let (any_out, any_exit) =
-        render_and_exit(fail_on(Some("any")), vec![info], ok, "failon_any").await;
+    let (default_out, default_exit) = render_and_exit(
+        fail_on(None),
+        make_scan_state(vec![info.clone()]),
+        ok,
+        "failon_unset",
+    )
+    .await;
+    let (any_out, any_exit) = render_and_exit(
+        fail_on(Some("any")),
+        make_scan_state(vec![info]),
+        ok,
+        "failon_any",
+    )
+    .await;
     assert_eq!(default_exit, ScanOutcome::Findings);
     assert_eq!(any_exit, ScanOutcome::Findings);
     let mut any_v: serde_json::Value = serde_json::from_str(&any_out).expect("json");
@@ -4836,10 +4845,99 @@ async fn fail_on_high_gates_only_the_exit_code() {
         sent: 170,
         failed: 148,
     };
-    let (_, exit) =
-        render_and_exit(fail_on(None), vec![low.clone()], lossy, "failon_lossy_any").await;
+    let (_, exit) = render_and_exit(
+        fail_on(None),
+        make_scan_state(vec![low.clone()]),
+        lossy,
+        "failon_lossy_any",
+    )
+    .await;
     assert_eq!(exit, ScanOutcome::Findings);
-    let (_, exit) =
-        render_and_exit(fail_on(Some("high")), vec![low], lossy, "failon_lossy_high").await;
+    let (_, exit) = render_and_exit(
+        fail_on(Some("high")),
+        make_scan_state(vec![low.clone()]),
+        lossy,
+        "failon_lossy_high",
+    )
+    .await;
     assert_eq!(exit, ScanOutcome::Error);
+
+    // The grade decides, not the type: a legacy-promoted `V` graded `low`
+    // does not fail the run, an `A` graded `high` does.
+    let mut v_low = reflected_result(url, "vl", "<v>");
+    v_low.result_type = FindingType::Verified;
+    v_low.confidence = Some(Confidence::Low);
+    let mut a_high = reflected_result(url, "ah", "<a>");
+    a_high.result_type = FindingType::AstDetected;
+    a_high.confidence = Some(Confidence::High);
+    for r in [&mut v_low, &mut a_high] {
+        r.origin_target = Some(url.to_string());
+        r.message_id = 606;
+    }
+    let (_, exit) = render_and_exit(
+        fail_on(Some("high")),
+        make_scan_state(vec![v_low]),
+        ok,
+        "failon_vlow",
+    )
+    .await;
+    assert_eq!(exit, ScanOutcome::Clean);
+    let (_, exit) = render_and_exit(
+        fail_on(Some("high")),
+        make_scan_state(vec![a_high]),
+        ok,
+        "failon_ahigh",
+    )
+    .await;
+    assert_eq!(exit, ScanOutcome::Findings);
+
+    // A lost session and an early stop (`--limit` ending on the first `R`)
+    // with nothing gating are errors under `high`, findings under `any`.
+    let lost = || {
+        let state = make_scan_state(vec![low.clone()]);
+        state
+            .session_lost
+            .try_lock()
+            .expect("fresh state")
+            .insert(url.to_string(), "401".to_string());
+        state
+    };
+    let stopped = || {
+        let state = make_scan_state(vec![low.clone()]);
+        state
+            .interrupted_targets
+            .try_lock()
+            .expect("fresh state")
+            .insert(url.to_string(), None);
+        state
+    };
+    let crashed = || {
+        let state = make_scan_state(vec![low.clone()]);
+        state
+            .skipped_targets
+            .try_lock()
+            .expect("fresh state")
+            .insert(
+                "https://sibling.example/".to_string(),
+                crate::cmd::error_codes::INTERNAL_ERROR,
+            );
+        state
+    };
+    for (name, make) in [
+        ("crashed", &crashed as &dyn Fn() -> ScanState),
+        ("lost", &lost),
+        ("stopped", &stopped),
+    ] {
+        let (_, exit) =
+            render_and_exit(fail_on(None), make(), ok, &format!("failon_{name}_any")).await;
+        assert_eq!(exit, ScanOutcome::Findings, "{name} under any");
+        let (_, exit) = render_and_exit(
+            fail_on(Some("high")),
+            make(),
+            ok,
+            &format!("failon_{name}_high"),
+        )
+        .await;
+        assert_eq!(exit, ScanOutcome::Error, "{name} under high");
+    }
 }
