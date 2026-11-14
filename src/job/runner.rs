@@ -685,6 +685,18 @@ pub(crate) async fn execute_scan(
                                         ));
                                 }
 
+                                // A `Range`-honouring host sent only the first
+                                // 8 KiB; the baseline above wants that prefix,
+                                // everything below wants the page (mirrors the CLI).
+                                let body = if resp_status == 206 {
+                                    crate::utils::http::fetch_full_page_after_partial(
+                                        &client, target,
+                                    )
+                                    .await
+                                    .unwrap_or(body)
+                                } else {
+                                    body
+                                };
                                 waf_seed = crate::waf::fingerprint_from_response(
                                     &resp_headers,
                                     Some(&body),

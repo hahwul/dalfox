@@ -627,6 +627,28 @@ pub(crate) fn build_preflight_request(
     rb
 }
 
+/// The landing page in full after a preflight `Range` GET came back `206`.
+///
+/// Preflight asks for `Range: bytes=0-8191` to keep the probe small. A server
+/// that ignores it (most dynamic ones) returns the page with `200`; one that
+/// honours it (nginx, S3, CloudFront static hosting) returns just that prefix,
+/// and every consumer of the preflight body — the landing-page AST pass,
+/// outdated-library and technology detection, the `<meta>` CSP — then sees
+/// only the first 8 KiB. One more GET without the `Range` fixes that, and is
+/// only sent on that one status. `None` when it fails or is not a 2xx.
+pub(crate) async fn fetch_full_page_after_partial(
+    client: &Client,
+    target: &Target,
+) -> Option<String> {
+    let rb = build_preflight_request(client, target, false, None);
+    crate::record_outbound_request().await;
+    let resp = rb.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    read_body_counted(resp).await.ok()
+}
+
 /// Absolute ceiling on any single retry backoff sleep (ms), applied to both
 /// the exponential backoff and a server-supplied `Retry-After`.
 const BACKOFF_CAP_MS: u64 = 30_000;

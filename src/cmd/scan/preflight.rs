@@ -329,6 +329,20 @@ pub(crate) async fn preflight_content_type(
                 };
             }
 
+            // The session baseline above is measured against this prefix
+            // (`SessionBaseline::body_len`); everything below wants the page.
+            let body = if get_status == 206 {
+                match crate::utils::http::fetch_full_page_after_partial(&client, target).await {
+                    Some(full) => {
+                        response_body = Some(full.clone());
+                        full
+                    }
+                    None => body,
+                }
+            } else {
+                body
+            };
+
             // WAF detection from GET response (headers + body). Same
             // reasoning as the HEAD-based pass above — fingerprinting
             // runs unconditionally so operators using `--waf-bypass off`
