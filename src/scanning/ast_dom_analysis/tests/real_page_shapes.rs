@@ -747,3 +747,49 @@ fn a_trust_bypass_call_keeps_the_flows_around_it() {
         assert_eq!(got, want, "{js}");
     }
 }
+
+/// A minifier reuses one short name for unrelated variables. A `let` /
+/// `const` in a nested block is a new binding for that block, so the outer
+/// name's taint does not read through it, and what it holds does not leak
+/// back out.
+#[test]
+fn a_block_scoped_name_is_not_the_outer_one() {
+    assert_clean(&[
+        // Outer `s` is tainted; the loop body's `s` is a row of data.
+        "function setup(){const s=new URLSearchParams(location.search).get('region'),Q=document.createElement('div');function z(e){for(const i in e){const s=e[i];Q.innerHTML=s.category}}return z} setup();",
+        "var t=location.hash.slice(1); if(ok){const t=icon('check'); el.innerHTML=t}",
+        // The inner name's taint stays in its block.
+        "var t=el.getAttribute('data-id'); if(preview){let t=new URLSearchParams(location.search).get('previewTime'); use(t)} box.innerHTML=t;",
+        "var q='fixed'; {let q=location.hash.slice(1); log(q)} el.innerHTML=q;",
+        "var q='fixed'; try{const q=location.hash.slice(1); log(q)}catch(e){} el.innerHTML=q;",
+    ]);
+    assert_reported(&[
+        // Not redeclared in the block: the outer binding, read or written.
+        "var q=location.hash.slice(1); if(ok){el.innerHTML=q}",
+        "var q=''; if(ok){q=location.hash.slice(1)} el.innerHTML=q;",
+        // A `var` in a block is the function's.
+        "if(ok){var q=location.hash.slice(1)} el.innerHTML=q;",
+        // The block's own flow, and the outer one after the block ends.
+        "var q='fixed'; {let q=location.hash.slice(1); el.innerHTML=q}",
+        "var q=location.hash.slice(1); {let q='fixed'; log(q)} el.innerHTML=q;",
+    ]);
+}
+
+/// Summaries are keyed by bare name, and some other function in a bundle
+/// has the same one-letter name. A name a body binds to a value (a
+/// destructured `useState` setter, a call's result) is not that function.
+#[test]
+fn a_local_value_is_not_the_function_of_the_same_name() {
+    assert_clean(&[
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); N(location.hash.slice(1))} C();",
+        "function i(h){box.insertAdjacentHTML('beforeend',h)} function k(e,t,r){var i=lookup(e,t); return function(a){return i.apply(r,[document.cookie])}} k();",
+        "function N(h){document.body.innerHTML=h} function C(){const {N}=props; N(location.hash.slice(1))} C();",
+    ]);
+    assert_reported(&[
+        // The page's function, called where nothing rebinds the name.
+        "function N(h){document.body.innerHTML=h} function C(){N(location.hash.slice(1))} C();",
+        // A local bound to a function it defines, or left unset, is not a value.
+        "function C(){var show=function(h){document.body.innerHTML=h}; show(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){var x; N(location.hash.slice(1))} C();",
+    ]);
+}

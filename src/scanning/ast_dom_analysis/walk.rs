@@ -27,9 +27,7 @@ impl<'a> DomXssVisitor<'a> {
             Statement::ExpressionStatement(expr_stmt) => {
                 self.walk_expression(&expr_stmt.expression);
             }
-            Statement::BlockStatement(block) => {
-                self.walk_statements(&block.body);
-            }
+            Statement::BlockStatement(block) => self.walk_block(&block.body),
             Statement::IfStatement(if_stmt) => {
                 self.walk_expression(&if_stmt.test);
                 // What the test vouches for on each branch (see `guards`).
@@ -223,16 +221,16 @@ impl<'a> DomXssVisitor<'a> {
                 // `catch`/`finally` are conditional; the `try` block may also
                 // abort partway, so treat the whole construct as a branch.
                 self.branch_depth += 1;
-                self.walk_statements(&try_stmt.block.body);
+                self.walk_block(&try_stmt.block.body);
                 if let Some(handler) = &try_stmt.handler {
                     let mut bound = HashSet::new();
                     if let Some(param) = &handler.param {
                         Self::collect_binding_pattern_strs(&param.pattern, &mut bound);
                     }
-                    self.with_block_bindings(&bound, |v| v.walk_statements(&handler.body.body));
+                    self.with_block_bindings(&bound, |v| v.walk_block(&handler.body.body));
                 }
                 if let Some(finalizer) = &try_stmt.finalizer {
-                    self.walk_statements(&finalizer.body);
+                    self.walk_block(&finalizer.body);
                 }
                 self.branch_depth -= 1;
             }
@@ -892,6 +890,9 @@ impl<'a> DomXssVisitor<'a> {
         for name in &declared {
             self.shadow_params.remove(name.as_str());
         }
+        for name in Self::value_locals(statements) {
+            self.shadow_params.insert(name);
+        }
         for name in std::mem::take(&mut self.iife_passthrough) {
             self.shadow_params.remove(name.as_str());
         }
@@ -982,6 +983,110 @@ impl<'a> DomXssVisitor<'a> {
             }
             self.global_taints.insert(name);
         }
+    }
+
+    /// Walk a `{ … }` block. A `let` / `const` / `class` it declares is a new
+    /// binding for the block: it starts untainted whatever an outer variable
+    /// of the same name holds (a minifier reuses `s` for both), and what it
+    /// holds when the block ends does not reach the outer one.
+    /// ponytail: taint only; a block-scoped name still shares the outer
+    /// one's URL lead, instance class and element tag.
+    fn walk_block(&mut self, statements: &[Statement<'a>]) {
+        let mut names = HashSet::new();
+        for statement in statements {
+            match statement {
+                Statement::VariableDeclaration(declaration)
+                    if declaration.kind != VariableDeclarationKind::Var =>
+                {
+                    for declarator in &declaration.declarations {
+                        Self::collect_binding_pattern_strs(&declarator.id, &mut names);
+                    }
+                }
+                Statement::ClassDeclaration(class) => {
+                    names.extend(class.id.iter().map(|id| id.name.to_string()));
+                }
+                _ => {}
+            }
+        }
+        if names.is_empty() {
+            return self.walk_statements(statements);
+        }
+        let outer: Vec<_> = names
+            .into_iter()
+            .map(|name| {
+                let state = (
+                    self.tainted_vars.remove(name.as_str()),
+                    self.var_aliases.remove(name.as_str()),
+                    self.global_taints.remove(name.as_str()),
+                    self.field_only_taint.remove(name.as_str()),
+                );
+                (name, state)
+            })
+            .collect();
+        self.walk_statements(statements);
+        for (name, (tainted, alias, global, field_only)) in outer {
+            self.tainted_vars.remove(name.as_str());
+            self.var_aliases.remove(name.as_str());
+            self.global_taints.remove(name.as_str());
+            self.field_only_taint.remove(name.as_str());
+            if tainted {
+                self.tainted_vars.insert(name.clone());
+            }
+            if let Some(alias) = alias {
+                self.var_aliases.insert(name.clone(), alias);
+            }
+            if global {
+                self.global_taints.insert(name.clone());
+            }
+            if field_only {
+                self.field_only_taint.insert(name);
+            }
+        }
+    }
+
+    /// Names a body's own top level binds to a value that is not a function
+    /// it defines there: a destructuring target, a call's result, a literal
+    /// (`let [open, setOpen] = useState(false)`, `var i = lookup(a, b)`).
+    /// Summaries are keyed by bare name, and a minified bundle has some
+    /// other `i` that is a function; a call through this binding is not a
+    /// call to that one (see `shadow_params`). A name bound to a function,
+    /// object or class literal, to another name, or to nothing yet is left
+    /// alone: it may be the summarised function, or an alias of one.
+    pub(super) fn value_locals(statements: &[Statement<'a>]) -> Vec<String> {
+        let mut names = Vec::new();
+        for statement in statements {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let is_value = match (&declarator.id, &declarator.init) {
+                    (BindingPattern::BindingIdentifier(_), None) => false,
+                    (BindingPattern::BindingIdentifier(_), Some(init)) => {
+                        match init.without_parentheses() {
+                            Expression::CallExpression(call) => !matches!(
+                                &call.callee,
+                                Expression::StaticMemberExpression(member)
+                                    if member.property.name == "bind"
+                            ),
+                            init => {
+                                init.is_literal()
+                                    || matches!(
+                                        init,
+                                        Expression::NewExpression(_)
+                                            | Expression::ArrayExpression(_)
+                                            | Expression::TemplateLiteral(_)
+                                    )
+                            }
+                        }
+                    }
+                    _ => true,
+                };
+                if is_value {
+                    Self::collect_binding_pattern_names(&declarator.id, &mut names);
+                }
+            }
+        }
+        names
     }
 
     /// Names bound by declarations anywhere in a function body, so the escape

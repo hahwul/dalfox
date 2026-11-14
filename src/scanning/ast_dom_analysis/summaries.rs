@@ -219,6 +219,9 @@ impl<'a> DomXssVisitor<'a> {
         for name in &declared {
             self.shadow_params.remove(name.as_str());
         }
+        for name in Self::value_locals(body_stmts) {
+            self.shadow_params.insert(name);
+        }
         let is_outer = |path: &String| {
             let root = path.split(['.', '[']).next().unwrap_or(path);
             !root.starts_with("this@") && !locals.contains(root)
