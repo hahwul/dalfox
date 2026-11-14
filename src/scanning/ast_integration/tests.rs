@@ -1834,7 +1834,7 @@ fn reflected_markup_flow_is_found_and_graded_reachable() {
         js.iter()
             .flat_map(|code| {
                 analyze_javascript_for_dom_xss_with_html_context(
-                    code,
+                    &code.code,
                     &ids,
                     &markup,
                     false,
@@ -1984,5 +1984,34 @@ fn initial_pass_follows_a_global_across_script_blocks() {
              <script>var q = location.hash.slice(1);</script>"
         ),
         0
+    );
+    // A handler's or a module's bindings are its own: they are not handed on,
+    // and a handler's `event` is not the page's.
+    for html in [
+        "<script>var t='<b>hi</b>';</script>\
+         <a onclick=\"var t=location.hash.slice(1); track(t)\">a</a>\
+         <a onclick=\"document.body.innerHTML=t\">b</a>",
+        "<script>var event=location.hash.slice(1);</script>\
+         <button onclick=\"document.body.innerHTML=event.type\">x</button>",
+        "<script type=\"module\">const q=location.hash.slice(1);</script>\
+         <script>document.body.innerHTML=q;</script>",
+        "<script>var q=location.hash.slice(1);</script>\
+         <script type=\"module\">const q='safe';document.body.innerHTML=q;</script>",
+        // A script repeated further down ran again there; what it did to the
+        // globals is not known, so nothing is carried past it.
+        "<script>var q='';</script><script>q=location.hash.slice(1);show(q)</script>\
+         <script>var q='';</script><script>document.body.innerHTML=q;</script>",
+    ] {
+        assert_eq!(flows(html), 0, "{html}");
+    }
+    // One handler clearing the global does not hide it from the next: each
+    // reads what the scripts left.
+    assert_eq!(
+        flows(
+            "<script>var q=location.hash.slice(1);</script>\
+             <button onclick=\"q=''\">clear</button>\
+             <button onclick=\"document.body.innerHTML=q\">show</button>"
+        ),
+        1
     );
 }

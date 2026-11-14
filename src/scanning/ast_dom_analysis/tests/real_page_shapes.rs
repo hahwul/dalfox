@@ -3,6 +3,9 @@
 //! walk used to lose. Each fixture is a minimal reduction, not vendored code.
 
 use super::*;
+use crate::scanning::ast_dom_analysis::carried::{
+    MAX_CARRIED_GLOBALS, MAX_CARRIED_TEXT_BYTES, MAX_CARRY_WORK,
+};
 
 fn found(js: &str) -> Vec<DomXssVulnerability> {
     AstDomAnalyzer::new().analyze(js).expect("parses")
@@ -748,6 +751,15 @@ fn a_trust_bypass_call_keeps_the_flows_around_it() {
     }
 }
 
+fn page_flows_after(globals: &mut CarriedGlobals, js: &str) -> Vec<String> {
+    AstDomAnalyzer::new()
+        .analyze_after(js, globals)
+        .unwrap_or_default()
+        .iter()
+        .map(|v| format!("{} -> {}", v.source, v.sink))
+        .collect()
+}
+
 /// Flows of a page's scripts analyzed in document order, each alone, with
 /// the globals the earlier ones left tainted.
 fn page_flows(blocks: &[&str]) -> Vec<String> {
@@ -792,6 +804,19 @@ fn a_tainted_global_reaches_the_scripts_after_it() {
         &["var q=location.hash.slice(1)", "var = ;", "x.innerHTML=q"],
         // `var q;` without a value does not reset it.
         &["var q=location.hash.slice(1)", "var q; x.innerHTML=q"],
+        // A `var` is the script's wherever it sits outside a function, and
+        // an assignment counts wherever it is nested in a statement.
+        &[
+            "try{var q=decodeURIComponent(location.hash.slice(1))}catch(e){}",
+            "x.innerHTML=q",
+        ],
+        &[
+            "if(location.hash){var q=location.hash.slice(1)}",
+            "x.innerHTML=q",
+        ],
+        &["var a=q=location.hash.slice(1)", "x.innerHTML=q"],
+        &["ready&&(q=location.hash.slice(1))", "x.innerHTML=q"],
+        &["var {hash}=location", "x.innerHTML=hash"],
     ] {
         assert_eq!(
             page_flows(blocks),
@@ -837,9 +862,15 @@ fn a_global_that_was_rebound_or_never_shared_is_not_carried() {
             "function f(){var q=location.hash.slice(1)} f()",
             "x.innerHTML=q",
         ],
-        // Block-scoped, or set only in a branch the first script may skip.
+        // Block-scoped.
         &["{ let q=location.hash.slice(1) }", "x.innerHTML=q"],
-        &["if(a){ q=location.hash.slice(1) }", "x.innerHTML=q"],
+        // A later script's own `let` / `const` / import of that name.
+        &["q=location.hash.slice(1)", "let q='safe'; x.innerHTML=q"],
+        &["q=location.hash.slice(1)", "const q='safe'; x.innerHTML=q"],
+        &[
+            "q=location.hash.slice(1)",
+            "import {q} from './m.js'; x.innerHTML=q",
+        ],
         // A module's top-level bindings are its own.
         &[
             "import a from './a.js'; const q=location.hash.slice(1)",
@@ -868,9 +899,75 @@ fn a_global_that_was_rebound_or_never_shared_is_not_carried() {
     }
 }
 
-/// One script's globals are bounded: the page chooses how many it declares.
+/// A carried name keeps what made the joined script clean or named its
+/// source: its URL lead, and that it is the page's URL or a `URL` /
+/// `URLSearchParams` object. Split in two, each of these reads like one
+/// script.
 #[test]
-fn carried_globals_are_capped() {
+fn a_carried_global_keeps_what_the_walk_knew_about_it() {
+    for blocks in [
+        &["var here=location.href", "location.href=here"][..],
+        &[
+            "var currentUrl=window.location.href",
+            "setTimeout(function(){window.location=currentUrl},30000)",
+        ],
+        &[
+            "var href=location.href",
+            "if(top!=self) top.location.href=href",
+        ],
+        &[
+            "var base=location.protocol+'//'+location.host+location.pathname",
+            "function go(l){location.href=base+'?lang='+l} go('en')",
+        ],
+        &[
+            "var redirect='/login?next='+location.pathname",
+            "location.href=redirect",
+        ],
+        &["var u='/go?to='+location.hash.slice(1)", "location.href=u"],
+        &["var u=new URL(location.href)", "location.href=u"],
+        &["var u=new URL(location.href)", "x.innerHTML=u.origin"],
+        &["var h=document.URL", "window.open(h)"],
+    ] {
+        let joined = blocks.join(";\n");
+        assert!(
+            page_flows(&[joined.as_str()]).is_empty(),
+            "joined: {blocks:?}"
+        );
+        assert!(
+            page_flows(blocks).is_empty(),
+            "{blocks:?}: {:?}",
+            page_flows(blocks)
+        );
+    }
+    // The source keeps its key, so the PoC goes where the page reads it.
+    assert_eq!(
+        page_flows(&[
+            "var p=new URLSearchParams(location.search)",
+            "x.innerHTML=p.get('q')"
+        ]),
+        ["URLSearchParams.get(q) -> innerHTML"]
+    );
+    let via_url = [
+        "var u=new URL(location.href)",
+        "x.innerHTML=u.searchParams.get('q')",
+    ];
+    assert_eq!(
+        page_flows(&via_url),
+        page_flows(&[via_url.join(";").as_str()])
+    );
+    assert!(!page_flows(&via_url).is_empty());
+    // A lead the attacker does write is still a finding.
+    assert_eq!(
+        page_flows(&["var to=location.hash.slice(1)", "location.href=to"]),
+        ["location.hash -> location.href"]
+    );
+}
+
+/// What one script hands on is bounded, and so is what a page of many
+/// blocks spends on seeding them: the page chooses the names, their length
+/// and how many blocks follow.
+#[test]
+fn carried_globals_are_bounded() {
     let js: String = (0..MAX_CARRIED_GLOBALS + 50)
         .map(|i| format!("var v{i}=location.hash;"))
         .collect();
@@ -879,4 +976,37 @@ fn carried_globals_are_capped() {
         .analyze_after(&js, &mut globals)
         .unwrap();
     assert_eq!(globals.len(), MAX_CARRIED_GLOBALS);
+
+    // Its own writes are kept ahead of what it received.
+    AstDomAnalyzer::new()
+        .analyze_after("var own=location.hash;", &mut globals)
+        .unwrap();
+    assert_eq!(globals.len(), MAX_CARRIED_GLOBALS);
+    assert_eq!(
+        page_flows_after(&mut globals, "document.write(own)"),
+        ["location.hash -> document.write"]
+    );
+
+    // A name too long to be worth copying into every block is not carried.
+    let long = "q".repeat(MAX_CARRIED_TEXT_BYTES + 1);
+    let mut globals = CarriedGlobals::new();
+    AstDomAnalyzer::new()
+        .analyze_after(
+            &format!("var {long}=location.hash, q=location.hash;"),
+            &mut globals,
+        )
+        .unwrap();
+    assert_eq!(globals.len(), 1);
+
+    // Past the page's seeding budget nothing is carried any further.
+    let mut globals = CarriedGlobals::new();
+    AstDomAnalyzer::new()
+        .analyze_after(&js, &mut globals)
+        .unwrap();
+    for _ in 0..=MAX_CARRY_WORK / MAX_CARRIED_GLOBALS {
+        AstDomAnalyzer::new()
+            .analyze_after("f(1)", &mut globals)
+            .unwrap();
+    }
+    assert_eq!(globals.len(), 0);
 }

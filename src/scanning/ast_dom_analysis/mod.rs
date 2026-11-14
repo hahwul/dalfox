@@ -44,6 +44,7 @@ mod async_flow;
 mod bindings;
 mod bound_calls;
 mod carried;
+pub(crate) use carried::CarriedGlobals;
 mod events;
 mod guards;
 mod reflected_markup;
@@ -1179,16 +1180,6 @@ pub struct AstDomAnalyzer {
     trusted_types_enforced: bool,
 }
 
-/// Global variables one `<script>` leaves tainted for the scripts after it,
-/// name to source label. A page's classic scripts share one global scope, so
-/// `<script>var q = location.hash</script><script>el.innerHTML = q</script>`
-/// is one flow across two blocks that are each analyzed alone.
-pub(crate) type CarriedGlobals = BTreeMap<String, String>;
-
-/// Most names one script hands on. The page chooses how many globals it
-/// declares and how many blocks follow, and each block copies the map.
-const MAX_CARRIED_GLOBALS: usize = 256;
-
 impl AstDomAnalyzer {
     /// Create a new AST DOM analyzer
     pub fn new() -> Self {
@@ -1273,56 +1264,7 @@ impl AstDomAnalyzer {
             trusted_types_enforced: self.trusted_types_enforced,
             ..DomXssVisitor::new(source_code)
         };
-        let body = &ret.program.body;
-        let written = carried::top_level_writes(body);
-        // A function or class declared here replaces the global of that name
-        // before anything runs.
-        for name in &written.redeclared {
-            globals.remove(*name);
-        }
-        for (name, source) in globals.iter() {
-            visitor.taint_var(name.clone());
-            visitor.var_aliases.insert(name.clone(), source.clone());
-        }
-        visitor.walk_statements(body);
-        // What this script hands on: the globals it received or wrote at its
-        // own top level that are still tainted whole when it ends. A name
-        // tainted only inside a function body is not among them (the body may
-        // never run), and a module's bindings are its own.
-        let candidates: Vec<&str> = if written.is_module {
-            globals.keys().map(String::as_str).collect()
-        } else {
-            globals
-                .keys()
-                .map(String::as_str)
-                .chain(written.names.iter().copied())
-                .collect()
-        };
-        let mut handed_on = CarriedGlobals::new();
-        for name in candidates {
-            if handed_on.len() >= MAX_CARRIED_GLOBALS {
-                break;
-            }
-            if visitor.tainted_vars.contains(name)
-                && !visitor.field_only_taint.contains(name)
-                && let Some(source) = visitor.var_aliases.get(name)
-            {
-                handed_on.insert(name.to_string(), source.clone());
-            }
-        }
-        if !handed_on.is_empty() {
-            crate::dbg_log!(
-                "[ast] {} tainted global(s) handed to the next script: {}",
-                handed_on.len(),
-                handed_on
-                    .keys()
-                    .take(8)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-        }
-        *globals = handed_on;
+        visitor.walk_script_after(&ret.program.body, globals);
         if visitor.work_steps.get() >= visitor.work_budget {
             crate::dbg_log!(
                 "[ast] DOM-XSS analysis of a {}-byte script stopped at its {}-step work budget; {} finding(s) kept",
