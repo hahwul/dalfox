@@ -383,6 +383,14 @@ enum TtParam {
 struct DomXssVisitor<'a> {
     /// Set of tainted variable names
     tainted_vars: ScopedSet<String>,
+    /// Names in `tainted_vars` only because a field of theirs was assigned a
+    /// tainted value (`o.html = location.hash`): `o` flows on whole, but a
+    /// read of another of its fields is clean. Cleared by any other taint.
+    /// Deliberately not rolled back with nested bodies: a whole reassignment
+    /// inside one (`cfg = JSON.parse(…)`) outlives it, and a stale mark on a
+    /// name that is not tainted reads nothing. Only summary passes, which
+    /// are hypothetical, swap it out.
+    field_only_taint: HashSet<String>,
     /// Map of variable aliases (e.g., var x = location.search)
     var_aliases: ScopedMap<String, String>,
     /// List of detected vulnerabilities
@@ -924,6 +932,7 @@ impl<'a> DomXssVisitor<'a> {
         }
         Self {
             tainted_vars: Default::default(),
+            field_only_taint: Default::default(),
             var_aliases: Default::default(),
             vulnerabilities: Vec::new(),
             sources: &*STATIC_SOURCES,

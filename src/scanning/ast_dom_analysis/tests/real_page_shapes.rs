@@ -525,3 +525,40 @@ fn comma_callees_use_the_callee_summary() {
         "function g(s){document.body.innerHTML=s} function h(s){} (g,h)(location.hash);",
     ]);
 }
+
+/// A tainted field taints its object as a whole value (`render(o)`,
+/// `JSON.stringify(o)`), not the object's other fields: one cookie-derived
+/// `ICMS.userId` used to make every `ICMS.*` config value and method result
+/// tainted, and webpack's `c.b = document.baseURI` did the same to `c.p`.
+#[test]
+fn a_tainted_field_does_not_taint_its_siblings() {
+    assert_reported(&[
+        "var o = {}; o.html = location.hash; document.body.innerHTML = o.html;",
+        "var o = {}; o.html = location.hash; document.body.innerHTML = o.html.trim();",
+        "var o = {}; o.html = location.hash; function render(c) { document.body.innerHTML = c.html; } render(o);",
+        "var o = {}; o.html = location.hash; document.body.innerHTML = JSON.stringify(o);",
+        "var o = {}; o.html = location.hash; var p = o; document.body.innerHTML = p.html;",
+        "var o = {}; o.a = location.hash; [o].forEach(function (x) { document.body.innerHTML = x.a; });",
+        "var o = {}; o.a = JSON.parse(location.hash.slice(1)); document.body.innerHTML = o.a.html;",
+        // Rebound to a tainted value whole: every field reads tainted again.
+        "var o = {}; o.a = location.hash; o = JSON.parse(location.hash.slice(1)); document.body.innerHTML = o.b;",
+        // A whole reassignment inside a nested body outlives it.
+        "var params = {}; params.q = new URLSearchParams(location.search).get('q'); window.onhashchange = function () { params = JSON.parse(decodeURIComponent(location.hash.slice(1))); show(); }; function show() { document.getElementById('out').innerHTML = params.msg; }",
+        "var cfg = {}; cfg.ref = document.referrer; function load() { cfg = JSON.parse(decodeURIComponent(location.hash.slice(1))); } load(); document.body.innerHTML = cfg.b;",
+        // Tainted whole through an escape or a summary's global write.
+        "var cfg; (function () { cfg = JSON.parse(decodeURIComponent(location.hash.slice(1))); })(); cfg.ts = location.search; document.body.innerHTML = cfg.html;",
+        "var o = {}; o.a = location.search; o = {}; function load() { o = JSON.parse(location.hash.slice(1)); } load(); document.body.innerHTML = o.b;",
+        // A field written in a callback whose own field taint is dropped.
+        "var o = {}; o.a = location.search; [1].forEach(function () { o.html = location.hash; }); document.body.innerHTML = o.html;",
+        "var o = {}; o.a = location.search; $.each([1], function () { o.html = location.hash; }); document.body.innerHTML = o.html;",
+        "var o = {}; o.a = location.search; [1].forEach(function () { o.html = location.hash; render(); }); function render() { document.body.innerHTML = o.html; }",
+        // Already tainted whole before the field write.
+        "var o = JSON.parse(location.hash.slice(1)); o.a = location.hash; document.body.innerHTML = o.b;",
+    ]);
+    assert_clean(&[
+        "var o = {}; o.a = location.hash; o.b = 'x'; document.body.innerHTML = o.b;",
+        "var c = {}; c.b = document.baseURI; document.body.innerHTML = c.p;",
+        "var c = {}; c.b = document.baseURI; document.body.innerHTML = c.zz(1);",
+        "var I = {}; I.userId = document.cookie; I.libs = ['/a.js']; var s = document.createElement('script'); s.src = I.libs[0];",
+    ]);
+}

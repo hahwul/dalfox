@@ -188,7 +188,7 @@ impl<'a> DomXssVisitor<'a> {
         if let Expression::StaticMemberExpression(member) = init
             && let Some(source) = self.url_search_params_source_for_member(member)
         {
-            self.tainted_vars.insert(var_name.to_string());
+            self.taint_var(var_name.to_string());
             self.var_aliases
                 .insert(var_name.to_string(), source.clone());
             self.url_search_params_sources
@@ -221,7 +221,7 @@ impl<'a> DomXssVisitor<'a> {
         if let Some(source_expr) = self.get_expr_string(init)
             && self.is_source(source_expr.as_str())
         {
-            self.tainted_vars.insert(var_name.to_string());
+            self.taint_var(var_name.to_string());
             self.var_aliases
                 .insert(var_name.to_string(), source_expr.clone());
         }
@@ -233,7 +233,7 @@ impl<'a> DomXssVisitor<'a> {
             && (callee_str == "localStorage.getItem" || callee_str == "sessionStorage.getItem")
         {
             // Mark this variable as tainted
-            self.tainted_vars.insert(var_name.to_string());
+            self.taint_var(var_name.to_string());
             let source = self
                 .storage_get_source(call, &callee_str)
                 .unwrap_or(callee_str);
@@ -252,7 +252,7 @@ impl<'a> DomXssVisitor<'a> {
                 _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
             };
             if is_arg_tainted {
-                self.tainted_vars.insert(var_name.to_string());
+                self.taint_var(var_name.to_string());
                 let source_expr = match arg {
                     Argument::SpreadElement(spread) => Some(&spread.argument),
                     _ => arg.as_expression(),
@@ -289,11 +289,11 @@ impl<'a> DomXssVisitor<'a> {
             && member.property.name.as_str() == "get"
         {
             if let Some(source) = self.url_search_params_get_source(call, &member.object) {
-                self.tainted_vars.insert(var_name.to_string());
+                self.taint_var(var_name.to_string());
                 self.var_aliases.insert(var_name.to_string(), source);
             } else if self.is_tainted(&member.object) {
                 // Check if the object is tainted (e.g., taintedMap.get())
-                self.tainted_vars.insert(var_name.to_string());
+                self.taint_var(var_name.to_string());
                 if let Some(source) = self.find_source_in_expr(&member.object) {
                     let source = self.normalize_search_param_source(&source);
                     self.var_aliases.insert(var_name.to_string(), source);
@@ -319,7 +319,7 @@ impl<'a> DomXssVisitor<'a> {
                     _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
                 };
                 if is_arg_tainted {
-                    self.tainted_vars.insert(var_name.to_string());
+                    self.taint_var(var_name.to_string());
                     let source_expr = match arg {
                         Argument::SpreadElement(spread) => Some(&spread.argument),
                         _ => arg.as_expression(),
@@ -334,7 +334,7 @@ impl<'a> DomXssVisitor<'a> {
 
         // Also check if init expression is tainted (includes template literals, arrays, objects)
         if self.is_tainted(init) {
-            self.tainted_vars.insert(var_name.to_string());
+            self.taint_var(var_name.to_string());
             // Try to find a source from the init expression for better reporting
             if !self.var_aliases.contains_key(var_name)
                 && let Some(source) = self.find_source_in_expr(init)

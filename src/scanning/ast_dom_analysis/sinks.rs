@@ -177,7 +177,16 @@ impl<'a> DomXssVisitor<'a> {
                         && self.global_alias_of(&member.object).is_none()
                         && self.is_tainted(&assign.right)
                     {
-                        self.tainted_vars.insert(obj_id.name.to_string());
+                        // Only the written field is known tainted: the object
+                        // itself flows on (`render(o)`), its other fields do
+                        // not (`o.title`, see `field_only_taint`).
+                        let name = obj_id.name.to_string();
+                        if !self.tainted_vars.contains(name.as_str())
+                            && !self.global_taints.contains(name.as_str())
+                        {
+                            self.field_only_taint.insert(name.clone());
+                        }
+                        self.tainted_vars.insert(name);
                         if let Some(source) = right_source.clone() {
                             self.var_aliases.insert(obj_id.name.to_string(), source);
                         }
@@ -245,7 +254,7 @@ impl<'a> DomXssVisitor<'a> {
                     && let Expression::Identifier(obj_id) = &member.object
                     && self.global_alias_of(&member.object).is_none()
                 {
-                    self.tainted_vars.insert(obj_id.name.to_string());
+                    self.taint_var(obj_id.name.to_string());
                     if let Some(source) = right_source.clone() {
                         self.var_aliases.insert(obj_id.name.to_string(), source);
                     }
@@ -329,7 +338,7 @@ impl<'a> DomXssVisitor<'a> {
 
                 // Propagate taint through direct assignments like `a = taintedValue;`
                 if right_tainted {
-                    self.tainted_vars.insert(target_name.to_string());
+                    self.taint_var(target_name.to_string());
                     if let Some(source) = right_source.clone() {
                         self.var_aliases.insert(target_name.to_string(), source);
                     }
@@ -368,7 +377,7 @@ impl<'a> DomXssVisitor<'a> {
                 for name in Self::destructured_target_names(target) {
                     self.forget_url_lead(&name);
                     if taints {
-                        self.tainted_vars.insert(name.clone());
+                        self.taint_var(name.clone());
                         if let Some(source) = right_source.clone() {
                             self.var_aliases.insert(name, source);
                         }
@@ -907,7 +916,7 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             if let Some(source) = tainted_source {
-                self.tainted_vars.insert(target.to_string());
+                self.taint_var(target.to_string());
                 self.var_aliases.insert(target.to_string(), source.clone());
                 if method == "set" && self.url_search_params_objects.contains(target) {
                     self.url_search_params_sources
@@ -1438,7 +1447,7 @@ impl<'a> DomXssVisitor<'a> {
         {
             let (value_tainted, source_hint) = self.argument_taint_and_source(&call.arguments[1]);
             if value_tainted && let Expression::Identifier(obj_id) = &member.object {
-                self.tainted_vars.insert(obj_id.name.to_string());
+                self.taint_var(obj_id.name.to_string());
                 if let Some(source) = source_hint {
                     self.var_aliases.insert(obj_id.name.to_string(), source);
                 }
