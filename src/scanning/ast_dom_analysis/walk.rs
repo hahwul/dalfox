@@ -1345,7 +1345,11 @@ impl<'a> DomXssVisitor<'a> {
                         self.walk_expression(value);
                     }
                 }
-                ClassElement::StaticBlock(block) => self.walk_statements(&block.body),
+                ClassElement::StaticBlock(block) => {
+                    let body_frame = self.enter_body();
+                    self.walk_statements(&block.body);
+                    self.leave_body(body_frame);
+                }
                 _ => {}
             }
         }

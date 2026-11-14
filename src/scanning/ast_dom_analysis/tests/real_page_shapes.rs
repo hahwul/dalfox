@@ -808,6 +808,7 @@ fn a_local_value_is_not_the_function_of_the_same_name() {
         "function C(){let [O,N]=useState(''); window.addEventListener('message',function(e){function N(h){document.body.innerHTML=h} N('x')}); N(location.hash.slice(1))} C();",
         "function C(){let [O,N]=useState(''); fetch('/x').then(function(r){function N(h){document.body.innerHTML=h} N('x')}); N(location.hash.slice(1))} C();",
         "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); if(x){const N=function(h){el.textContent=h}; N('x')} N(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); class K{static{function N(h){}}} N(location.hash.slice(1))} C();",
     ]);
     assert_reported(&[
         // The page's function, called where nothing rebinds the name.
