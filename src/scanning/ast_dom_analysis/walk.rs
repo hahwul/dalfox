@@ -27,9 +27,7 @@ impl<'a> DomXssVisitor<'a> {
             Statement::ExpressionStatement(expr_stmt) => {
                 self.walk_expression(&expr_stmt.expression);
             }
-            Statement::BlockStatement(block) => {
-                self.walk_statements(&block.body);
-            }
+            Statement::BlockStatement(block) => self.walk_block(&block.body),
             Statement::IfStatement(if_stmt) => {
                 self.walk_expression(&if_stmt.test);
                 // What the test vouches for on each branch (see `guards`).
@@ -223,16 +221,16 @@ impl<'a> DomXssVisitor<'a> {
                 // `catch`/`finally` are conditional; the `try` block may also
                 // abort partway, so treat the whole construct as a branch.
                 self.branch_depth += 1;
-                self.walk_statements(&try_stmt.block.body);
+                self.walk_block(&try_stmt.block.body);
                 if let Some(handler) = &try_stmt.handler {
                     let mut bound = HashSet::new();
                     if let Some(param) = &handler.param {
                         Self::collect_binding_pattern_strs(&param.pattern, &mut bound);
                     }
-                    self.with_block_bindings(&bound, |v| v.walk_statements(&handler.body.body));
+                    self.with_block_bindings(&bound, |v| v.walk_block(&handler.body.body));
                 }
                 if let Some(finalizer) = &try_stmt.finalizer {
-                    self.walk_statements(&finalizer.body);
+                    self.walk_block(&finalizer.body);
                 }
                 self.branch_depth -= 1;
             }
@@ -251,6 +249,10 @@ impl<'a> DomXssVisitor<'a> {
             self.forget_url_lead(name);
         }
         walk(self);
+        // What the block's own binding stood for ends with the block.
+        for name in names {
+            self.global_aliases.remove(name.as_str());
+        }
         for (name, global) in hidden {
             self.global_aliases.insert(name, global);
         }
@@ -312,6 +314,7 @@ impl<'a> DomXssVisitor<'a> {
     /// The methods can be called in any order, so when they use `this` at
     /// all they are walked once beforehand just for the fields they taint.
     pub(super) fn walk_object_literal(&mut self, object: &ObjectExpression<'a>, this: usize) {
+        self.register_webpack_modules(object);
         let is_method = |property: &ObjectPropertyKind<'a>| {
             matches!(property, ObjectPropertyKind::ObjectProperty(p)
                 if matches!(p.value, Expression::FunctionExpression(_)))
@@ -872,9 +875,28 @@ impl<'a> DomXssVisitor<'a> {
                 _ => {}
             }
         }
+        // Inside a webpack factory its third parameter is `require`; a
+        // nested function that binds the same name hides it.
+        let outer_require = self.webpack_require.clone();
+        let outer_map_var = self.webpack_map_var.clone();
+        if let Some(require) = self.webpack_factories.get(&params.span) {
+            self.webpack_require = Some(require.clone());
+        } else if outer_require
+            .as_ref()
+            .is_some_and(|name| own_names.contains(name))
+        {
+            self.webpack_require = None;
+        }
+        if outer_map_var
+            .as_ref()
+            .is_some_and(|name| own_names.contains(name))
+        {
+            self.webpack_map_var = None;
+        }
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         let shadow_params_checkpoint = self.shadow_params.checkpoint();
+        let value_locals_checkpoint = self.value_locals.checkpoint();
         let url_lead_scope = self.url_leads_enter(&own_names);
         let global_aliases_checkpoint = self.global_aliases.checkpoint();
         for name in &own_names {
@@ -891,6 +913,12 @@ impl<'a> DomXssVisitor<'a> {
         }
         for name in &declared {
             self.shadow_params.remove(name.as_str());
+            // Its own declaration of an outer value local's name is whatever
+            // it binds here (`var N = window.N`), not that value.
+            self.value_locals.remove(name.as_str());
+        }
+        for name in Self::value_local_names(statements) {
+            self.value_locals.insert(name);
         }
         for name in std::mem::take(&mut self.iife_passthrough) {
             self.shadow_params.remove(name.as_str());
@@ -956,6 +984,8 @@ impl<'a> DomXssVisitor<'a> {
             })
             .collect();
 
+        self.webpack_require = outer_require;
+        self.webpack_map_var = outer_map_var;
         self.url_leads_exit(url_lead_scope, &locals);
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
@@ -964,6 +994,7 @@ impl<'a> DomXssVisitor<'a> {
         self.local_names.rollback(local_names_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
         self.shadow_params.rollback(shadow_params_checkpoint);
+        self.value_locals.rollback(value_locals_checkpoint);
         self.global_aliases.rollback(global_aliases_checkpoint);
         for name in &own_names {
             self.instance_classes.remove(name.as_str());
@@ -982,6 +1013,143 @@ impl<'a> DomXssVisitor<'a> {
             }
             self.global_taints.insert(name);
         }
+    }
+
+    /// Walk a `{ … }` block. A `let` / `const` / `class` it declares is a new
+    /// binding for the block: it starts with none of what the walk knows
+    /// about an outer variable of the same name (a minifier reuses `s` for
+    /// both), and what it holds when the block ends does not reach the outer
+    /// one. That is the taint, and with it what pins or names a URL value:
+    /// left shared, the inner declarator would rewrite the outer name's lead
+    /// while it is hidden.
+    /// ponytail: an outer name's instance class and element tag are still
+    /// shared with the block's.
+    fn walk_block(&mut self, statements: &[Statement<'a>]) {
+        let mut names = HashSet::new();
+        for statement in statements {
+            match statement {
+                Statement::VariableDeclaration(declaration)
+                    if declaration.kind != VariableDeclarationKind::Var =>
+                {
+                    for declarator in &declaration.declarations {
+                        Self::collect_binding_pattern_strs(&declarator.id, &mut names);
+                    }
+                }
+                Statement::ClassDeclaration(class) => {
+                    names.extend(class.id.iter().map(|id| id.name.to_string()));
+                }
+                _ => {}
+            }
+        }
+        if names.is_empty() {
+            return self.walk_statements(statements);
+        }
+        let outer: Vec<_> = names
+            .iter()
+            .map(|name| (name.clone(), self.take_binding_state(name)))
+            .collect();
+        // A value local the block rebinds to a function is one again after it.
+        let value_locals: Vec<String> = names
+            .iter()
+            .filter(|name| self.value_locals.contains(name.as_str()))
+            .cloned()
+            .collect();
+        // …and the global object an outer `var d = document` stood for.
+        self.with_block_bindings(&names, |v| v.walk_statements(statements));
+        for name in value_locals {
+            self.value_locals.insert(name);
+        }
+        for (name, state) in outer {
+            self.take_binding_state(&name);
+            if state.tainted {
+                self.tainted_vars.insert(name.clone());
+            }
+            if let Some(alias) = state.alias {
+                self.var_aliases.insert(name.clone(), alias);
+            }
+            if state.global {
+                self.global_taints.insert(name.clone());
+            }
+            if state.field_only {
+                self.field_only_taint.insert(name.clone());
+            }
+            if let Some(lead) = state.url_lead {
+                self.url_leads.insert(name.clone(), lead);
+            }
+            if state.page_url {
+                self.page_url_objects.insert(name);
+            }
+        }
+    }
+
+    /// Remove and return what the walk holds about the variable `name`.
+    fn take_binding_state(&mut self, name: &str) -> BindingState {
+        BindingState {
+            tainted: self.tainted_vars.remove(name),
+            alias: self.var_aliases.remove(name),
+            global: self.global_taints.remove(name),
+            field_only: self.field_only_taint.remove(name),
+            url_lead: self.url_leads.remove(name),
+            page_url: self.page_url_objects.remove(name),
+        }
+    }
+
+    /// Names a body's own top level binds to a value that is not a function
+    /// it defines there: a destructuring target (or its ES5 form, an element
+    /// read by index), a call's result, a literal
+    /// (`let [open, setOpen] = useState(false)`, `var i = lookup(a, b)`).
+    /// Summaries are keyed by bare name, and a minified bundle has some
+    /// other `i` that is a function; a call through this binding is not a
+    /// call to that one (see [`DomXssVisitor::value_locals`]). A name bound
+    /// to a function, object or class literal, to what an IIFE returns (a
+    /// module object, a compiled class), to another name, or to nothing yet
+    /// is left alone: it may be the summarised function, or an alias of one.
+    pub(super) fn value_local_names(statements: &[Statement<'a>]) -> Vec<String> {
+        let mut names = Vec::new();
+        for statement in statements {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let is_value = match (&declarator.id, &declarator.init) {
+                    (BindingPattern::BindingIdentifier(_), None) => false,
+                    (BindingPattern::BindingIdentifier(_), Some(init)) => {
+                        match init.without_parentheses() {
+                            Expression::CallExpression(call) => {
+                                !matches!(
+                                    call.callee.without_parentheses(),
+                                    Expression::FunctionExpression(_)
+                                        | Expression::ArrowFunctionExpression(_)
+                                ) && !matches!(
+                                    &call.callee,
+                                    Expression::StaticMemberExpression(member)
+                                        if member.property.name == "bind"
+                                )
+                            }
+                            // `O = P[1]`: what ES5 output makes of
+                            // `[L, O] = useState()`.
+                            Expression::ComputedMemberExpression(member) => {
+                                matches!(member.expression, Expression::NumericLiteral(_))
+                            }
+                            init => {
+                                init.is_literal()
+                                    || matches!(
+                                        init,
+                                        Expression::NewExpression(_)
+                                            | Expression::ArrayExpression(_)
+                                            | Expression::TemplateLiteral(_)
+                                    )
+                            }
+                        }
+                    }
+                    _ => true,
+                };
+                if is_value {
+                    Self::collect_binding_pattern_names(&declarator.id, &mut names);
+                }
+            }
+        }
+        names
     }
 
     /// Names bound by declarations anywhere in a function body, so the escape
@@ -1198,7 +1366,11 @@ impl<'a> DomXssVisitor<'a> {
                         self.walk_expression(value);
                     }
                 }
-                ClassElement::StaticBlock(block) => self.walk_statements(&block.body),
+                ClassElement::StaticBlock(block) => {
+                    let body_frame = self.enter_body();
+                    self.walk_statements(&block.body);
+                    self.leave_body(body_frame);
+                }
                 _ => {}
             }
         }

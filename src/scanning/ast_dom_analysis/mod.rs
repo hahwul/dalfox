@@ -56,6 +56,7 @@ mod taint;
 mod trusted_types;
 mod url_lead;
 mod walk;
+mod webpack;
 
 /// Maximum AST recursion depth for the taint-analysis visitor. The JavaScript
 /// fed to the analyzer comes from the scanned (attacker-controlled) page, and
@@ -531,6 +532,12 @@ struct DomXssVisitor<'a> {
     /// name — summaries are keyed by bare name, and minified code reuses
     /// `e`/`t`/`n` in every scope. A body's own declarations take the name back.
     shadow_params: ScopedSet<String>,
+    /// Names an enclosing function body binds to a value that is not a
+    /// function (see `value_local_names`). A call *through* such a name is
+    /// not a call to the function a bare-name summary describes; a member
+    /// key (`W.render`, registered for `W.prototype.render = …` in the same
+    /// body) is still its own.
+    value_locals: ScopedSet<String>,
     /// Parameter lists (by span) of functions whose calls this analysis sees
     /// with their arguments — summarised functions and IIFEs — so their
     /// defaults apply per call, not to every walk of the body.
@@ -541,6 +548,20 @@ struct DomXssVisitor<'a> {
     overridden_coercions: HashSet<String>,
     /// Track `instanceVar -> ClassName` for class instance method summary resolution.
     instance_classes: ScopedMap<String, String>,
+    /// Webpack module factories found so far (see [`webpack`]), by the span
+    /// of their parameter list: the name of each one's `require` parameter.
+    webpack_factories: HashMap<oxc_span::Span, String>,
+    /// The `require` parameter of the webpack factory being walked.
+    webpack_require: Option<String>,
+    /// The variable holding the module map in the scope being walked, which
+    /// the runtime's `n.m = t` names its require function by.
+    webpack_map_var: Option<String>,
+    /// Object literals already looked at, and whether each is a module map.
+    webpack_maps_seen: HashMap<oxc_span::Span, bool>,
+    /// Module id to the factory that defines it, and the ids more than one
+    /// factory defines.
+    webpack_module_spans: HashMap<String, oxc_span::Span>,
+    webpack_ambiguous_ids: HashSet<String>,
     /// `"Class.field" -> constructor parameter index`, for fields a class
     /// constructor stores straight from one of its parameters
     /// (`constructor(v) { this._value = v; }`). Together with
@@ -791,6 +812,16 @@ impl SinkCtx {
             SinkCtx::Html
         }
     }
+}
+
+/// What the walk holds about one variable name (see `walk_block`).
+struct BindingState {
+    tainted: bool,
+    alias: Option<String>,
+    global: bool,
+    field_only: bool,
+    url_lead: Option<(UrlLead, bool)>,
+    page_url: bool,
 }
 
 /// RAII token returned by [`DomXssVisitor::enter_recursion`]; decrements the
@@ -1059,10 +1090,17 @@ impl<'a> DomXssVisitor<'a> {
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
             shadow_params: Default::default(),
+            value_locals: Default::default(),
             plain_params: HashSet::new(),
             arity_known: HashSet::new(),
             overridden_coercions: HashSet::new(),
             instance_classes: Default::default(),
+            webpack_factories: HashMap::new(),
+            webpack_require: None,
+            webpack_map_var: None,
+            webpack_maps_seen: HashMap::new(),
+            webpack_module_spans: HashMap::new(),
+            webpack_ambiguous_ids: HashSet::new(),
             class_ctor_param_fields: HashMap::new(),
             class_getter_fields: HashMap::new(),
             bound_function_aliases: Default::default(),
@@ -1134,7 +1172,10 @@ impl<'a> DomXssVisitor<'a> {
     /// [`shadow_params`](Self::shadow_params)).
     fn summary(&self, key: &str) -> Option<&FunctionSummary> {
         let root = key.split('.').next().unwrap_or(key);
-        if self.shadow_params.contains(root) {
+        // `new N(x)` looks up `N.constructor`: still a call through `N`.
+        let called = key.strip_suffix(".constructor").unwrap_or(key);
+        if self.shadow_params.contains(root) || (called == root && self.value_locals.contains(root))
+        {
             return None;
         }
         self.function_summaries.get(key)

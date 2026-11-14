@@ -747,3 +747,209 @@ fn a_trust_bypass_call_keeps_the_flows_around_it() {
         assert_eq!(got, want, "{js}");
     }
 }
+
+/// A minifier reuses one short name for unrelated variables. A `let` /
+/// `const` in a nested block is a new binding for that block, so the outer
+/// name's taint does not read through it, and what it holds does not leak
+/// back out.
+#[test]
+fn a_block_scoped_name_is_not_the_outer_one() {
+    assert_clean(&[
+        // Outer `s` is tainted; the loop body's `s` is a row of data.
+        "function setup(){const s=new URLSearchParams(location.search).get('region'),Q=document.createElement('div');function z(e){for(const i in e){const s=e[i];Q.innerHTML=s.category}}return z} setup();",
+        "var t=location.hash.slice(1); if(ok){const t=icon('check'); el.innerHTML=t}",
+        // The inner name's taint stays in its block.
+        "var t=el.getAttribute('data-id'); if(preview){let t=new URLSearchParams(location.search).get('previewTime'); use(t)} box.innerHTML=t;",
+        "var q='fixed'; {let q=location.hash.slice(1); log(q)} el.innerHTML=q;",
+        "var q='fixed'; try{const q=location.hash.slice(1); log(q)}catch(e){} el.innerHTML=q;",
+        // The outer name keeps what pins its URL while the block's own
+        // binding of that name is something else.
+        "var u='/list?p='+location.hash.slice(1); {const u=other(); log(u)} location.href=u;",
+        "var u='/list?p='+location.hash.slice(1); for(const k in rows){const u=rows[k]; log(u)} a.href=u;",
+        "const BASE='/api/v1/'; var t=BASE+location.hash.slice(1); if(ok){const t=icon('check'); el.title=t} location.href=t;",
+        "var u=new URL(location.href); if(a){const u=other(); log(u)} location.href=u;",
+        "var u=location.href; try{const u=other(); log(u)}catch(e){} window.open(u);",
+        // What the block's own binding stood for ends with the block.
+        "var d={cookie:'x'}; {const d=document; log(d)} el.innerHTML=d.cookie;",
+    ]);
+    assert_reported(&[
+        // Not redeclared in the block: the outer binding, read or written.
+        "var q=location.hash.slice(1); if(ok){el.innerHTML=q}",
+        "var q=''; if(ok){q=location.hash.slice(1)} el.innerHTML=q;",
+        // A `var` in a block is the function's.
+        "if(ok){var q=location.hash.slice(1)} el.innerHTML=q;",
+        // The block's own flow, and the outer one after the block ends.
+        "var q='fixed'; {let q=location.hash.slice(1); el.innerHTML=q}",
+        "var q=location.hash.slice(1); {let q='fixed'; log(q)} el.innerHTML=q;",
+        // An inner pinned URL does not pin the outer name, nor an inner
+        // object hide the global the outer name stands for.
+        "var u=location.hash.slice(1); if(a){const u='/fixed/'+location.hash.slice(1); log(u)} location.href=u;",
+        "var u=location.hash.slice(1); {const u=new URL(location.href); log(u)} location.href=u;",
+        "var d=document; {const d=new Date(); log(d)} d.write(location.hash.slice(1));",
+    ]);
+}
+
+/// Summaries are keyed by bare name, and some other function in a bundle
+/// has the same one-letter name. A name a body binds to a value (a
+/// destructured `useState` setter, a call's result) is not that function.
+#[test]
+fn a_local_value_is_not_the_function_of_the_same_name() {
+    assert_clean(&[
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); N(location.hash.slice(1))} C();",
+        "function i(h){box.insertAdjacentHTML('beforeend',h)} function k(e,t,r){var i=lookup(e,t); return function(a){return i.apply(r,[document.cookie])}} k();",
+        "function N(h){document.body.innerHTML=h} function C(){const {N}=props; N(location.hash.slice(1))} C();",
+        // ES5 output of the destructuring: an element read by index.
+        "function O(h){document.body.innerHTML=h} function C(){var P=useState(''),L=P[0],O=P[1]; O(location.hash.slice(1))} C();",
+        // Also as a constructor.
+        "class N{constructor(h){document.body.innerHTML=h}} function C(){const [O,N]=useState(''); new N(location.hash.slice(1))} C();",
+        // A function of that name declared in a handler, a promise callback
+        // or a block inside the body is theirs: after it the name is the
+        // value again.
+        "function C(){let [O,N]=useState(''); window.addEventListener('message',function(e){function N(h){document.body.innerHTML=h} N('x')}); N(location.hash.slice(1))} C();",
+        "function C(){let [O,N]=useState(''); fetch('/x').then(function(r){function N(h){document.body.innerHTML=h} N('x')}); N(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); if(x){const N=function(h){el.textContent=h}; N('x')} N(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); class K{static{function N(h){}}} N(location.hash.slice(1))} C();",
+    ]);
+    assert_reported(&[
+        // The page's function, called where nothing rebinds the name.
+        "function N(h){document.body.innerHTML=h} function C(){N(location.hash.slice(1))} C();",
+        // A local bound to a function it defines, or left unset, is not a value.
+        "function C(){var show=function(h){document.body.innerHTML=h}; show(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){var x; N(location.hash.slice(1))} C();",
+        // What an IIFE returns is a module object or a compiled class.
+        "(function(){var Mod=(function(){function show(h){document.body.innerHTML=h}return{show:show}})(); Mod.show(location.hash.slice(1))})();",
+        "(function(){var Foo=(function(){function Foo(h){el.innerHTML=h}return Foo}()); new Foo(location.hash.slice(1))})();",
+        "define(['require','exports'],function(require,exports){var View=(function(){function View(){}View.prototype.show=function(html){document.getElementById('o').innerHTML=html};return View}()); var v=new View(); v.show(decodeURIComponent(location.hash.slice(1)))});",
+        "!function(){var api=(function(){function load(){return location.hash.slice(1)}return{load:load}})(); document.write(api.load())}();",
+        // A member of a value local is its own summary: a factory-made
+        // constructor whose methods the same body defines.
+        "(function(){var W=makeClass(); W.prototype.render=function(h){el.innerHTML=h}; var w=new W(); w.render(location.hash.slice(1))})();",
+        "(function(){var W=Base.extend({}); W.prototype={render:function(h){el.innerHTML=h}}; new W().render(location.hash.slice(1))})();",
+        // A value local a nested block rebinds to a function.
+        "function main(){var t=0; if(x){const t=function(h){el.innerHTML=h}; t(location.hash.slice(1))}} main();",
+        "function main(){const [t,n]=pair(); for(const k of list){const t=(h)=>{el.innerHTML=h}; t(location.hash.slice(1))}} main();",
+        "function main(){var t=0; if(x){let t={show(h){el.innerHTML=h}}; t.show(location.hash.slice(1))}} main();",
+        "function main(){var a=1; var a=function(h){el.innerHTML=h}; a(location.hash.slice(1))} main();",
+        // A nested function's own declaration of the name is not the outer
+        // value: here it is an alias of the page's function again.
+        "function N(h){document.body.innerHTML=h} function C(){const [O,N]=useState(''); function inner(){var N=window.N; N(location.hash.slice(1))} inner()} C();",
+        "function N(h){document.body.innerHTML=h} function C(){const [O,N]=useState(''); list.forEach(function(){let N=other.N; N(location.hash.slice(1))})} C();",
+    ]);
+    // A page method named like a framework's trust bypass, on a module
+    // object, is still judged by its own body.
+    assert_clean(&[
+        "function main(){var S=(function(){function bypassSecurityTrustHtml(v){return String(v).replace(/</g,'&lt;')}return{bypassSecurityTrustHtml:bypassSecurityTrustHtml}})(); x.textContent=S.bypassSecurityTrustHtml(location.hash.slice(1))} main();",
+    ]);
+}
+
+/// A webpack bundle: one module publishes a function with
+/// `n.d(t, {Z: …})`, another reads the module with `n(456)` and calls
+/// `r.Z(x)`. The callee is the function declared in module 456, whatever
+/// the same minified name means in the factory next door.
+#[test]
+fn a_call_across_webpack_modules_uses_the_exporting_modules_function() {
+    for js in [
+        // webpack 5, arrow factories and getters; the importer comes first.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[179],{
+            123:(e,t,n)=>{"use strict";var r=n(456);r.Z(location.hash.slice(1))},
+            456:(e,t,n)=>{"use strict";n.d(t,{Z:()=>o});function o(e){document.getElementById("x").innerHTML=e}}
+        }]);"#,
+        // Function factories, function getters, a comma callee.
+        r#"(window.webpackJsonp=window.webpackJsonp||[]).push([[0],{
+            456:function(e,t,n){"use strict";n.d(t,{Z:function(){return o}});function o(e){document.getElementById("x").innerHTML=e}},
+            123:function(e,t,n){"use strict";var r=n(456);(0,r.Z)(location.hash.slice(1))}
+        }]);"#,
+        // webpack 4's three-argument form, `n.r(t)` in the same statement.
+        r#"var __webpack_modules__={
+            "./src/view.js":function(e,t,n){"use strict";n.r(t),n.d(t,"render",function(){return o});var o=function(e){document.body.innerHTML=e}},
+            "./src/main.js":function(e,t,n){"use strict";var r=n("./src/view.js");r.render(location.hash.slice(1))}
+        };"#,
+        // Through a second module, and through the return value.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);document.body.innerHTML=r.a(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{a:()=>o});var i=n(3);function o(e){return i.b(e)}},
+            3:(e,t,n)=>{n.d(t,{b:()=>o});const o=e=>"<p>"+e+"</p>"}
+        }]);"#,
+        // Forwarded to a third module's sink.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);r.a(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{a:()=>o});var i=n(3);function o(e){i.b(e)}},
+            3:(e,t,n)=>{n.d(t,{b:()=>o});function o(e){document.body.innerHTML=e}}
+        }]);"#,
+        // The importer's own `o` is another function.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);function o(e){return 1}r.Z(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}
+        }]);"#,
+    ] {
+        assert_eq!(flows(js), ["location.hash -> innerHTML"], "{js}");
+    }
+}
+
+/// webpack 5.112 `--mode production` output of a three-module app, runtime
+/// trimmed to what names the pieces: the entry module runs in the runtime's
+/// scope, where `n` is the require function the runtime publishes its module
+/// map on (`n.m = t`).
+#[test]
+fn a_webpack_entry_module_calls_through_the_runtimes_require() {
+    let runtime = r#"const e={};function n(o){const r=e[o];if(void 0!==r)return r.exports;const i=e[o]={exports:{}};return t[o](i,i.exports,n),i.exports}n.m=t,n.d=(t,e)=>{for(var o in e)n.o(e,o)&&!n.o(t,o)&&Object.defineProperty(t,o,{enumerable:!0,get:e[o]})},n.o=(t,e)=>Object.prototype.hasOwnProperty.call(t,e);"#;
+    let modules = r#"var t={865(t,e,n){function o(t){return new URLSearchParams(location.search).get(t)}n.d(e,{u:()=>o})},826(t,e,n){function o(t){document.getElementById("out").innerHTML=t}function i(t){document.getElementById("out").textContent=t}n.d(e,{X:()=>o,Y:()=>i})}};"#;
+    let bundle = |entry: &str| format!(r#"(()=>{{"use strict";{modules}{runtime}{entry}}})();"#);
+    assert_eq!(
+        flows(&bundle(
+            r#"var o=n(826),r=n(865);(0,o.X)(location.hash.slice(1)),document.getElementById("b").onclick=function(){(0,o.X)("<b>"+(0,r.u)("q")+"</b>")}"#
+        )),
+        ["location.hash -> innerHTML", "location.search -> innerHTML"]
+    );
+    // The same entry through the export that escapes, and through a `require`
+    // the runtime never published the map on.
+    assert_clean(&[
+        &bundle(r#"var o=n(826),r=n(865);(0,o.Y)(location.hash.slice(1)),(0,o.Y)((0,r.u)("q"))"#),
+        &format!(
+            r#"(()=>{{{modules}function n(o){{return lookup(o)}}n.m=other;var o=n(826);(0,o.X)(location.hash.slice(1))}})();"#
+        ),
+    ]);
+}
+
+/// What the export does decides, not the name: a module whose export does
+/// not reach a sink, an id two maps define, a `require` a nested function
+/// rebinds, and an object that is not a module map.
+#[test]
+fn a_webpack_export_that_is_not_a_sink_stays_clean() {
+    assert_clean(&[
+        // Module 2's `o` is harmless; module 3's `o` is the sink but is not
+        // what `r.Z` names.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){return e.length}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // The export escapes its argument.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.textContent=e}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // Another export of the same module is the sink.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Y:()=>i,Z:()=>o});function i(e){document.body.innerHTML=e}function o(e){return e}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // Two maps define module 2 differently.
+        r#"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}}]);
+           b.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){return e}},
+                        1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"#,
+        // `n` inside the callback is its own parameter, not `require`.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            1:(e,t,n)=>{[lookup].forEach(function(n){var r=n(2);r.Z(location.hash.slice(1))})}
+        }]);"#,
+        // A call that is not `require`, though its argument is a module id.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            1:(e,t,n)=>{var r=pick(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // An ordinary object of three-parameter functions.
+        r#"var handlers={2:function(e,t,n){n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}};
+           function go(n){var r=n(2);r.Z(location.hash.slice(1))} go(pick);"#,
+    ]);
+}
