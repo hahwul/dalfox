@@ -23,6 +23,10 @@ Dalfox is a powerful open-source tool that focuses on automation, making it idea
 And the various options required for the testing :D
 
 ## Installation
+
+> [!WARNING]
+> Get Dalfox only from [GitHub Releases](https://github.com/hahwul/dalfox/releases) or the channels in the [Installation guide](https://dalfox.hahwul.com/getting-started/installation/). Dalfox is never shipped as a Windows `.exe` installer; the Windows release is a plain `.zip` holding `dalfox.exe`. Fake Dalfox download pages have been seen serving malware ([#1700](https://github.com/hahwul/dalfox/issues/1700)).
+
 ### Homebrew (macOS/Linux)
 ```bash
 brew install dalfox
