@@ -253,8 +253,12 @@ impl<'a> DomXssVisitor<'a> {
     /// - `render` -> `render`
     /// - `helper.render` -> `helper.render`
     /// - `inst.render` where `inst` is `new Renderer()` -> `Renderer.render`
+    /// - `(0, render)` / `(0, helper.render)` -> as without the comma: the
+    ///   form Babel, TypeScript, esbuild and webpack emit for every call to an
+    ///   imported function. Same call, only `this` differs, and summaries
+    ///   never bind a receiver's `this@N`.
     pub(super) fn get_summary_key_for_callee_expr(&self, expr: &Expression<'a>) -> Option<String> {
-        match expr {
+        match unwrap_comma_callee(expr)? {
             Expression::Identifier(id) => Some(id.name.to_string()),
             Expression::StaticMemberExpression(member) => {
                 let base = self.get_summary_object_prefix(&member.object)?;
@@ -411,4 +415,19 @@ pub(crate) fn attribute_sink_target(sink: &str) -> &str {
         .iter()
         .find_map(|prefix| sink.strip_prefix(prefix))
         .unwrap_or(sink)
+}
+
+/// Strip parentheses and comma operands from a callee: `(0, f)` and `((f))`
+/// both call `f`. Only the last operand of a sequence is the callee; the
+/// earlier ones are evaluated and discarded.
+pub(super) fn unwrap_comma_callee<'b, 'a>(
+    mut expr: &'b Expression<'a>,
+) -> Option<&'b Expression<'a>> {
+    loop {
+        match expr {
+            Expression::ParenthesizedExpression(p) => expr = &p.expression,
+            Expression::SequenceExpression(seq) => expr = seq.expressions.last()?,
+            _ => return Some(expr),
+        }
+    }
 }

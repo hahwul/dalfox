@@ -49,14 +49,7 @@ impl<'a> DomXssVisitor<'a> {
     /// Returns a name only when it resolves to an already-known sink — this
     /// never invents one.
     pub(super) fn indirect_call_sink_name(&self, call: &CallExpression<'a>) -> Option<String> {
-        let mut current = &call.callee;
-        loop {
-            match current {
-                Expression::ParenthesizedExpression(p) => current = &p.expression,
-                Expression::SequenceExpression(seq) => current = seq.expressions.last()?,
-                _ => break,
-            }
-        }
+        let current = super::resolve::unwrap_comma_callee(&call.callee)?;
         let name = self.get_expr_string(current)?;
         self.sinks.contains(name.as_str()).then_some(name)
     }
