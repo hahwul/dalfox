@@ -841,3 +841,115 @@ fn a_local_value_is_not_the_function_of_the_same_name() {
         "function main(){var S=(function(){function bypassSecurityTrustHtml(v){return String(v).replace(/</g,'&lt;')}return{bypassSecurityTrustHtml:bypassSecurityTrustHtml}})(); x.textContent=S.bypassSecurityTrustHtml(location.hash.slice(1))} main();",
     ]);
 }
+
+/// A webpack bundle: one module publishes a function with
+/// `n.d(t, {Z: …})`, another reads the module with `n(456)` and calls
+/// `r.Z(x)`. The callee is the function declared in module 456, whatever
+/// the same minified name means in the factory next door.
+#[test]
+fn a_call_across_webpack_modules_uses_the_exporting_modules_function() {
+    for js in [
+        // webpack 5, arrow factories and getters; the importer comes first.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[179],{
+            123:(e,t,n)=>{"use strict";var r=n(456);r.Z(location.hash.slice(1))},
+            456:(e,t,n)=>{"use strict";n.d(t,{Z:()=>o});function o(e){document.getElementById("x").innerHTML=e}}
+        }]);"#,
+        // Function factories, function getters, a comma callee.
+        r#"(window.webpackJsonp=window.webpackJsonp||[]).push([[0],{
+            456:function(e,t,n){"use strict";n.d(t,{Z:function(){return o}});function o(e){document.getElementById("x").innerHTML=e}},
+            123:function(e,t,n){"use strict";var r=n(456);(0,r.Z)(location.hash.slice(1))}
+        }]);"#,
+        // webpack 4's three-argument form, `n.r(t)` in the same statement.
+        r#"var __webpack_modules__={
+            "./src/view.js":function(e,t,n){"use strict";n.r(t),n.d(t,"render",function(){return o});var o=function(e){document.body.innerHTML=e}},
+            "./src/main.js":function(e,t,n){"use strict";var r=n("./src/view.js");r.render(location.hash.slice(1))}
+        };"#,
+        // Through a second module, and through the return value.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);document.body.innerHTML=r.a(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{a:()=>o});var i=n(3);function o(e){return i.b(e)}},
+            3:(e,t,n)=>{n.d(t,{b:()=>o});const o=e=>"<p>"+e+"</p>"}
+        }]);"#,
+        // Forwarded to a third module's sink.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);r.a(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{a:()=>o});var i=n(3);function o(e){i.b(e)}},
+            3:(e,t,n)=>{n.d(t,{b:()=>o});function o(e){document.body.innerHTML=e}}
+        }]);"#,
+        // The importer's own `o` is another function.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);function o(e){return 1}r.Z(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}
+        }]);"#,
+    ] {
+        assert_eq!(flows(js), ["location.hash -> innerHTML"], "{js}");
+    }
+}
+
+/// webpack 5.112 `--mode production` output of a three-module app, runtime
+/// trimmed to what names the pieces: the entry module runs in the runtime's
+/// scope, where `n` is the require function the runtime publishes its module
+/// map on (`n.m = t`).
+#[test]
+fn a_webpack_entry_module_calls_through_the_runtimes_require() {
+    let runtime = r#"const e={};function n(o){const r=e[o];if(void 0!==r)return r.exports;const i=e[o]={exports:{}};return t[o](i,i.exports,n),i.exports}n.m=t,n.d=(t,e)=>{for(var o in e)n.o(e,o)&&!n.o(t,o)&&Object.defineProperty(t,o,{enumerable:!0,get:e[o]})},n.o=(t,e)=>Object.prototype.hasOwnProperty.call(t,e);"#;
+    let modules = r#"var t={865(t,e,n){function o(t){return new URLSearchParams(location.search).get(t)}n.d(e,{u:()=>o})},826(t,e,n){function o(t){document.getElementById("out").innerHTML=t}function i(t){document.getElementById("out").textContent=t}n.d(e,{X:()=>o,Y:()=>i})}};"#;
+    let bundle = |entry: &str| format!(r#"(()=>{{"use strict";{modules}{runtime}{entry}}})();"#);
+    assert_eq!(
+        flows(&bundle(
+            r#"var o=n(826),r=n(865);(0,o.X)(location.hash.slice(1)),document.getElementById("b").onclick=function(){(0,o.X)("<b>"+(0,r.u)("q")+"</b>")}"#
+        )),
+        ["location.hash -> innerHTML", "location.search -> innerHTML"]
+    );
+    // The same entry through the export that escapes, and through a `require`
+    // the runtime never published the map on.
+    assert_clean(&[
+        &bundle(r#"var o=n(826),r=n(865);(0,o.Y)(location.hash.slice(1)),(0,o.Y)((0,r.u)("q"))"#),
+        &format!(
+            r#"(()=>{{{modules}function n(o){{return lookup(o)}}n.m=other;var o=n(826);(0,o.X)(location.hash.slice(1))}})();"#
+        ),
+    ]);
+}
+
+/// What the export does decides, not the name: a module whose export does
+/// not reach a sink, an id two maps define, a `require` a nested function
+/// rebinds, and an object that is not a module map.
+#[test]
+fn a_webpack_export_that_is_not_a_sink_stays_clean() {
+    assert_clean(&[
+        // Module 2's `o` is harmless; module 3's `o` is the sink but is not
+        // what `r.Z` names.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){return e.length}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // The export escapes its argument.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.textContent=e}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // Another export of the same module is the sink.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Y:()=>i,Z:()=>o});function i(e){document.body.innerHTML=e}function o(e){return e}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // Two maps define module 2 differently.
+        r#"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}}]);
+           b.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){return e}},
+                        1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"#,
+        // `n` inside the callback is its own parameter, not `require`.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            1:(e,t,n)=>{[lookup].forEach(function(n){var r=n(2);r.Z(location.hash.slice(1))})}
+        }]);"#,
+        // A call that is not `require`, though its argument is a module id.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            1:(e,t,n)=>{var r=pick(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // An ordinary object of three-parameter functions.
+        r#"var handlers={2:function(e,t,n){n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}};
+           function go(n){var r=n(2);r.Z(location.hash.slice(1))} go(pick);"#,
+    ]);
+}

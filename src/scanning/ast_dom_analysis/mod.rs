@@ -56,6 +56,7 @@ mod taint;
 mod trusted_types;
 mod url_lead;
 mod walk;
+mod webpack;
 
 /// Maximum AST recursion depth for the taint-analysis visitor. The JavaScript
 /// fed to the analyzer comes from the scanned (attacker-controlled) page, and
@@ -547,6 +548,20 @@ struct DomXssVisitor<'a> {
     overridden_coercions: HashSet<String>,
     /// Track `instanceVar -> ClassName` for class instance method summary resolution.
     instance_classes: ScopedMap<String, String>,
+    /// Webpack module factories found so far (see [`webpack`]), by the span
+    /// of their parameter list: the name of each one's `require` parameter.
+    webpack_factories: HashMap<oxc_span::Span, String>,
+    /// The `require` parameter of the webpack factory being walked.
+    webpack_require: Option<String>,
+    /// The variable holding the module map in the scope being walked, which
+    /// the runtime's `n.m = t` names its require function by.
+    webpack_map_var: Option<String>,
+    /// Object literals already looked at, and whether each is a module map.
+    webpack_maps_seen: HashMap<oxc_span::Span, bool>,
+    /// Module id to the factory that defines it, and the ids more than one
+    /// factory defines.
+    webpack_module_spans: HashMap<String, oxc_span::Span>,
+    webpack_ambiguous_ids: HashSet<String>,
     /// `"Class.field" -> constructor parameter index`, for fields a class
     /// constructor stores straight from one of its parameters
     /// (`constructor(v) { this._value = v; }`). Together with
@@ -1080,6 +1095,12 @@ impl<'a> DomXssVisitor<'a> {
             arity_known: HashSet::new(),
             overridden_coercions: HashSet::new(),
             instance_classes: Default::default(),
+            webpack_factories: HashMap::new(),
+            webpack_require: None,
+            webpack_map_var: None,
+            webpack_maps_seen: HashMap::new(),
+            webpack_module_spans: HashMap::new(),
+            webpack_ambiguous_ids: HashSet::new(),
             class_ctor_param_fields: HashMap::new(),
             class_getter_fields: HashMap::new(),
             bound_function_aliases: Default::default(),

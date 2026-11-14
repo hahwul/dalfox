@@ -314,6 +314,7 @@ impl<'a> DomXssVisitor<'a> {
     /// The methods can be called in any order, so when they use `this` at
     /// all they are walked once beforehand just for the fields they taint.
     pub(super) fn walk_object_literal(&mut self, object: &ObjectExpression<'a>, this: usize) {
+        self.register_webpack_modules(object);
         let is_method = |property: &ObjectPropertyKind<'a>| {
             matches!(property, ObjectPropertyKind::ObjectProperty(p)
                 if matches!(p.value, Expression::FunctionExpression(_)))
@@ -874,6 +875,24 @@ impl<'a> DomXssVisitor<'a> {
                 _ => {}
             }
         }
+        // Inside a webpack factory its third parameter is `require`; a
+        // nested function that binds the same name hides it.
+        let outer_require = self.webpack_require.clone();
+        let outer_map_var = self.webpack_map_var.clone();
+        if let Some(require) = self.webpack_factories.get(&params.span) {
+            self.webpack_require = Some(require.clone());
+        } else if outer_require
+            .as_ref()
+            .is_some_and(|name| own_names.contains(name))
+        {
+            self.webpack_require = None;
+        }
+        if outer_map_var
+            .as_ref()
+            .is_some_and(|name| own_names.contains(name))
+        {
+            self.webpack_map_var = None;
+        }
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         let shadow_params_checkpoint = self.shadow_params.checkpoint();
@@ -965,6 +984,8 @@ impl<'a> DomXssVisitor<'a> {
             })
             .collect();
 
+        self.webpack_require = outer_require;
+        self.webpack_map_var = outer_map_var;
         self.url_leads_exit(url_lead_scope, &locals);
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
