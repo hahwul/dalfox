@@ -1919,3 +1919,16 @@ fn initial_pass_counts_scripts_it_could_not_read() {
         "a zero reason is left out"
     );
 }
+
+/// The trust-bypass sinks get the payload their binding runs: a
+/// script-scheme URL for a resource URL, markup for HTML.
+#[test]
+fn trust_bypass_sinks_get_a_payload_for_their_binding() {
+    let poc = |sink| generate_dom_xss_poc("location.hash", sink).0;
+    for sink in ["bypassSecurityTrustResourceUrl", "trustAsResourceUrl"] {
+        assert!(poc(sink).starts_with("#javascript:alert(1)"), "{sink}");
+    }
+    for sink in ["bypassSecurityTrustHtml", "trustAsHtml"] {
+        assert!(poc(sink).starts_with("#<img "), "{sink}");
+    }
+}

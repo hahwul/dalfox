@@ -106,6 +106,22 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        // Angular's `DomSanitizer.sanitize(SecurityContext.HTML, v)`; the
+        // enum member is `1` once compiled.
+        if self.sink_ctx.get() == SinkCtx::Html
+            && call.arguments.len() == 2
+            && self.get_callee_property_name(&call.callee).as_deref() == Some("sanitize")
+            && call.arguments[0].as_expression().is_some_and(|ctx| {
+                match ctx.without_parentheses() {
+                    Expression::NumericLiteral(n) => n.value == 1.0,
+                    Expression::StaticMemberExpression(m) => m.property.name == "HTML",
+                    _ => false,
+                }
+            })
+        {
+            return (false, None);
+        }
+
         // Reflect.apply(targetFn, thisArg, argsArray) return propagation
         if let Some(callee_name) = self.get_expr_string(&call.callee)
             && callee_name == "Reflect.apply"

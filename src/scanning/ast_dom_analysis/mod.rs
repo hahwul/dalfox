@@ -969,6 +969,8 @@ const DOM_SINKS: &[&str] = &[
 
 const DOM_SANITIZERS: &[&str] = &[
     "DOMPurify.sanitize",
+    // AngularJS ngSanitize.
+    "$sanitize",
     "encodeURIComponent",
     "encodeURI",
     "encodeHTML",
