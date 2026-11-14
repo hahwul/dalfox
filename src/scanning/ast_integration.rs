@@ -1192,6 +1192,7 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     script_element_ids: &Arc<HashSet<String>>,
     reflected_markup: &Arc<crate::scanning::ast_dom_analysis::PageMarkup>,
     trusted_types_enforced: bool,
+    globals: &mut crate::scanning::ast_dom_analysis::CarriedGlobals,
 ) -> Vec<(
     crate::scanning::ast_dom_analysis::DomXssVulnerability,
     String,
@@ -1202,7 +1203,7 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
         .with_reflected_markup(Arc::clone(reflected_markup))
         .with_trusted_types_enforced(trusted_types_enforced);
 
-    match analyzer.analyze(js_code) {
+    match analyzer.analyze_after(js_code, globals) {
         Ok(vulnerabilities) => {
             let mut findings = Vec::new();
             for vuln in vulnerabilities {
@@ -1401,6 +1402,8 @@ pub(crate) fn run_initial_ast_dom_analysis_with_skips(
     let (script_element_ids, page_markup) = (Arc::new(script_element_ids), Arc::new(page_markup));
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();
     let mut skips = AstSkips::default();
+    // The page's blocks share one global scope, in this order.
+    let mut globals = Default::default();
     for js_code in js_blocks {
         skips.record(&js_code);
         let findings = analyze_javascript_for_dom_xss_with_html_context(
@@ -1408,6 +1411,7 @@ pub(crate) fn run_initial_ast_dom_analysis_with_skips(
             &script_element_ids,
             &page_markup,
             posture.trusted_types_enforced,
+            &mut globals,
         );
         // Normalized once per block, not once per finding.
         let mut normalized_js: Option<String> = None;

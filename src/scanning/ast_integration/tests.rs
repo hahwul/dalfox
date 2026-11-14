@@ -28,6 +28,7 @@ fn analyze_javascript_for_dom_xss(
         &Default::default(),
         &Default::default(),
         false,
+        &mut Default::default(),
     )
 }
 
@@ -1832,7 +1833,13 @@ fn reflected_markup_flow_is_found_and_graded_reachable() {
         let (ids, markup) = (Arc::new(ids), Arc::new(markup));
         js.iter()
             .flat_map(|code| {
-                analyze_javascript_for_dom_xss_with_html_context(code, &ids, &markup, false)
+                analyze_javascript_for_dom_xss_with_html_context(
+                    code,
+                    &ids,
+                    &markup,
+                    false,
+                    &mut Default::default(),
+                )
             })
             .map(|(v, _, _)| v)
             .collect::<Vec<_>>()
@@ -1931,4 +1938,51 @@ fn trust_bypass_sinks_get_a_payload_for_their_binding() {
     for sink in ["bypassSecurityTrustHtml", "trustAsHtml"] {
         assert!(poc(sink).starts_with("#<img "), "{sink}");
     }
+}
+
+/// The landing page's blocks are analyzed alone but in document order, each
+/// with the globals the earlier ones left tainted: scripts first, then the
+/// inline handlers that run after them.
+#[test]
+fn initial_pass_follows_a_global_across_script_blocks() {
+    let flows = |html: &str| {
+        run_initial_ast_dom_analysis_with_skips(
+            html,
+            "text/html",
+            "http://h/",
+            "GET",
+            PageSecurityPosture::default(),
+        )
+        .0
+        .len()
+    };
+    assert_eq!(
+        flows(
+            "<div id=x></div><script>var q = location.hash.slice(1);</script>\
+             <script>document.getElementById('x').innerHTML = q;</script>"
+        ),
+        1
+    );
+    assert_eq!(
+        flows(
+            "<script>var q = location.hash.slice(1);</script>\
+             <button onclick=\"document.body.innerHTML = q\">go</button>"
+        ),
+        1
+    );
+    // Rebound in between, and read before it is set.
+    assert_eq!(
+        flows(
+            "<script>var q = location.hash.slice(1);</script><script>q = 'fixed';</script>\
+             <script>document.body.innerHTML = q;</script>"
+        ),
+        0
+    );
+    assert_eq!(
+        flows(
+            "<script>document.body.innerHTML = q;</script>\
+             <script>var q = location.hash.slice(1);</script>"
+        ),
+        0
+    );
 }

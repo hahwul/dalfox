@@ -43,6 +43,7 @@ use url_lead::UrlLead;
 mod async_flow;
 mod bindings;
 mod bound_calls;
+mod carried;
 mod events;
 mod guards;
 mod reflected_markup;
@@ -1178,6 +1179,16 @@ pub struct AstDomAnalyzer {
     trusted_types_enforced: bool,
 }
 
+/// Global variables one `<script>` leaves tainted for the scripts after it,
+/// name to source label. A page's classic scripts share one global scope, so
+/// `<script>var q = location.hash</script><script>el.innerHTML = q</script>`
+/// is one flow across two blocks that are each analyzed alone.
+pub(crate) type CarriedGlobals = BTreeMap<String, String>;
+
+/// Most names one script hands on. The page chooses how many globals it
+/// declares and how many blocks follow, and each block copies the map.
+const MAX_CARRIED_GLOBALS: usize = 256;
+
 impl AstDomAnalyzer {
     /// Create a new AST DOM analyzer
     pub fn new() -> Self {
@@ -1212,14 +1223,30 @@ impl AstDomAnalyzer {
     /// comes from the scanned page, so the parse runs behind [`guarded_parse`];
     /// a skipped or failed parse yields no findings.
     pub fn analyze(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
-        guarded_parse(source_code, || self.analyze_on_stack(source_code))
+        self.analyze_after(source_code, &mut CarriedGlobals::new())
+    }
+
+    /// [`Self::analyze`] for one script of a page's sequence: `globals` holds
+    /// what the scripts before it left tainted, and comes back as what this
+    /// one leaves. A script that is skipped or does not parse never runs, so
+    /// it leaves `globals` as it found them.
+    pub(crate) fn analyze_after(
+        &self,
+        source_code: &str,
+        globals: &mut CarriedGlobals,
+    ) -> Result<Vec<DomXssVulnerability>, String> {
+        guarded_parse(source_code, || self.analyze_on_stack(source_code, globals))
             .unwrap_or_else(|| Ok(Vec::new()))
     }
 
     /// Parse `source_code` and run the DOM-XSS walk, returning the findings.
     /// Factored out of [`analyze`] so it can run on a dedicated large-stack
     /// thread.
-    fn analyze_on_stack(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
+    fn analyze_on_stack(
+        &self,
+        source_code: &str,
+        globals: &mut CarriedGlobals,
+    ) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();
 
         // Module first, so `import`/`export`/top-level `await` bundles keep
@@ -1246,7 +1273,56 @@ impl AstDomAnalyzer {
             trusted_types_enforced: self.trusted_types_enforced,
             ..DomXssVisitor::new(source_code)
         };
-        visitor.walk_statements(&ret.program.body);
+        let body = &ret.program.body;
+        let written = carried::top_level_writes(body);
+        // A function or class declared here replaces the global of that name
+        // before anything runs.
+        for name in &written.redeclared {
+            globals.remove(*name);
+        }
+        for (name, source) in globals.iter() {
+            visitor.taint_var(name.clone());
+            visitor.var_aliases.insert(name.clone(), source.clone());
+        }
+        visitor.walk_statements(body);
+        // What this script hands on: the globals it received or wrote at its
+        // own top level that are still tainted whole when it ends. A name
+        // tainted only inside a function body is not among them (the body may
+        // never run), and a module's bindings are its own.
+        let candidates: Vec<&str> = if written.is_module {
+            globals.keys().map(String::as_str).collect()
+        } else {
+            globals
+                .keys()
+                .map(String::as_str)
+                .chain(written.names.iter().copied())
+                .collect()
+        };
+        let mut handed_on = CarriedGlobals::new();
+        for name in candidates {
+            if handed_on.len() >= MAX_CARRIED_GLOBALS {
+                break;
+            }
+            if visitor.tainted_vars.contains(name)
+                && !visitor.field_only_taint.contains(name)
+                && let Some(source) = visitor.var_aliases.get(name)
+            {
+                handed_on.insert(name.to_string(), source.clone());
+            }
+        }
+        if !handed_on.is_empty() {
+            crate::dbg_log!(
+                "[ast] {} tainted global(s) handed to the next script: {}",
+                handed_on.len(),
+                handed_on
+                    .keys()
+                    .take(8)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        *globals = handed_on;
         if visitor.work_steps.get() >= visitor.work_budget {
             crate::dbg_log!(
                 "[ast] DOM-XSS analysis of a {}-byte script stopped at its {}-step work budget; {} finding(s) kept",

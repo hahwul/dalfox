@@ -99,13 +99,22 @@ pub(crate) async fn run_ast_dom_analysis(
             }
         }
     }
+    // The response's inline blocks share one global scope, in this order. A
+    // fetched script is not in document order with them, so it starts clean.
+    let mut page_globals = crate::scanning::ast_dom_analysis::CarriedGlobals::new();
     for (js_code, markup, script_url) in blocks {
+        let mut own_globals = Default::default();
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &js_code,
                 &script_element_ids,
                 markup,
                 posture.trusted_types_enforced,
+                if script_url.is_some() {
+                    &mut own_globals
+                } else {
+                    &mut page_globals
+                },
             );
         // Normalized once per block (not per finding), and only once a
         // finding survives the dedup below — the bootstrap check is pure, so
@@ -385,6 +394,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 &script_element_ids,
                 &Default::default(),
                 trusted_types_enforced,
+                &mut Default::default(),
             );
 
         // Normalized once per script, not once per finding.
