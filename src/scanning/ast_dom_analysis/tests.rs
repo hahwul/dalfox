@@ -4106,6 +4106,30 @@ fn source_nesting_guard_flags_pathological_input_only() {
         "{}a",
         "typeof ".repeat(over)
     )));
+    for unit in ["+-", "+", "-", "+!", "- ", "a:", "a :"] {
+        assert!(
+            source_nesting_exceeds_limit(&format!("{}x", unit.repeat(over))),
+            "{unit:?} run"
+        );
+    }
+    // Labels, object keys, ternaries and `+`/`-` that do not chain: clean.
+    assert!(!source_nesting_exceeds_limit(
+        &"a: for(;;) break a; x = {k: v, j: 1}; y = c ? d : e; z = a - -b + +c; ".repeat(over)
+    ));
+}
+
+/// A guard-approved script up to the size cap must parse within
+/// ANALYZE_STACK_BYTES. A unary run and a label run cost ~576 stack bytes per
+/// source byte, ~300 MiB at the cap, and aborted the scan before the guard
+/// counted them.
+#[test]
+fn analyze_survives_dense_chains_at_the_size_cap() {
+    let units = MAX_ANALYZE_SOURCE_BYTES / 2 - 8;
+    for unit in ["+-", "a:"] {
+        let src = format!("{}x", unit.repeat(units));
+        assert_eq!(parse_skip_reason(&src), Some(ParseSkipReason::Nesting));
+        assert!(AstDomAnalyzer::new().analyze(&src).unwrap().is_empty());
+    }
 }
 
 #[test]

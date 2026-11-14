@@ -99,10 +99,14 @@ const MAX_ANALYZE_SOURCE_BYTES: usize = 512 * 1024;
 
 /// Stack size for the dedicated thread that runs the parse + walk. The *walk* is
 /// separately bounded to [`MAX_AST_VISIT_DEPTH`] frames by the shared recursion
-/// guard, so the deepest consumer of this stack is the **parser**: the densest
-/// legal-after-pre-parse-guard input is a ~2-byte-per-level assignment/label
-/// chain within [`MAX_ANALYZE_SOURCE_BYTES`], i.e. ~256k parser frames at
-/// ~600 B/frame ≈ 150 MiB, which this absorbs with ~1.7× headroom. The
+/// guard, so the deepest consumer of this stack is the **parser**. Measured
+/// on a release build (oxc 0.133), the densest chains the pre-parse guard
+/// lets through need ≤ ~290 stack bytes per source byte (`a=>a=>…` 288,
+/// `for(;;)…` 263, `x=y=…` 240, `if(a)…` 218), i.e. ≤ ~150 MiB within
+/// [`MAX_ANALYZE_SOURCE_BYTES`], which this absorbs with ~1.7× headroom. The
+/// chains it rejects are the ones this could not hold: a unary run
+/// (`+-+-…x`) or a label run (`a:a:…x`) needs ~576 bytes per source byte,
+/// ~300 MiB at the cap. The
 /// reservation is virtual (lazily committed), so the real RSS cost on the common
 /// shallow script is only the few KB of stack actually touched.
 const ANALYZE_STACK_BYTES: usize = 256 * 1024 * 1024;
@@ -129,19 +133,23 @@ const INLINE_PARSE_BYTES: usize = 2 * 1024;
 const MAX_SOURCE_NESTING_DEPTH: usize = 200;
 
 /// Conservatively reject source whose structural nesting could overflow oxc's
-/// recursive-descent parser. Scans once, counting two independent things that
-/// each drive parser recursion:
+/// recursive-descent parser. Scans once, counting three independent things
+/// that each drive parser recursion:
 ///
 /// * bracket nesting depth — `(`/`[`/`{` raise it, `)`/`]`/`}` lower it;
 /// * the length of a run of consecutive prefix-unary operators — the single
-///   chars `!`/`~` and the word operators `typeof`/`void`/`delete`/`new`/
-///   `await`/`yield`, each of which the parser descends into recursively.
+///   chars `!`/`~`/`+`/`-` and the word operators `typeof`/`void`/`delete`/
+///   `new`/`await`/`yield`, each of which the parser descends into
+///   recursively;
+/// * the length of a run of statement labels (`a:b:c:…`), each labelling
+///   the next.
 ///
 /// The scan is intentionally *not* string/comment aware: counting brackets that
 /// happen to sit inside a string literal can only *over*-estimate nesting, so it
 /// never lets a genuinely dangerous input through — at worst it skips analysis
 /// of a script that crams 200+ literal brackets into a string, which is itself
-/// pathological. Returns `true` when either measure exceeds
+/// pathological. A comment or string holding a 200+ character run of `-`
+/// or `+` is skipped the same way. Returns `true` when any measure exceeds
 /// [`MAX_SOURCE_NESTING_DEPTH`].
 fn source_nesting_exceeds_limit(source: &str) -> bool {
     const PREFIX_KEYWORDS: [&str; 6] = ["typeof", "void", "delete", "new", "await", "yield"];
@@ -149,6 +157,7 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut bracket_depth: usize = 0;
     let mut unary_run: usize = 0;
+    let mut label_run: usize = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
@@ -159,15 +168,20 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
                     return true;
                 }
                 unary_run = 0;
+                label_run = 0;
                 i += 1;
             }
             b')' | b']' | b'}' => {
                 bracket_depth = bracket_depth.saturating_sub(1);
                 unary_run = 0;
+                label_run = 0;
                 i += 1;
             }
-            b'!' | b'~' => {
+            // `+`/`-` too: `+-+-…x` and `++++…x` nest one level per byte,
+            // and a run broken by `!` (`+!+!…`) must still count as one.
+            b'!' | b'~' | b'+' | b'-' => {
                 unary_run += 1;
+                label_run = 0;
                 if unary_run > MAX_SOURCE_NESTING_DEPTH {
                     return true;
                 }
@@ -190,6 +204,22 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
                     }
                 }
                 let word = &source[start..i];
+                // `a:a:a:…` labels a statement with a labelled statement,
+                // two bytes per (large) parser frame.
+                let mut j = i;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if bytes.get(j) == Some(&b':') {
+                    label_run += 1;
+                    unary_run = 0;
+                    if label_run > MAX_SOURCE_NESTING_DEPTH {
+                        return true;
+                    }
+                    i = j + 1;
+                    continue;
+                }
+                label_run = 0;
                 if PREFIX_KEYWORDS.contains(&word) {
                     unary_run += 1;
                     if unary_run > MAX_SOURCE_NESTING_DEPTH {
@@ -201,6 +231,7 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
             }
             _ => {
                 unary_run = 0;
+                label_run = 0;
                 i += 1;
             }
         }

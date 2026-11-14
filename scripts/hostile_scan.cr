@@ -87,6 +87,12 @@ SCENARIOS = [
     "50k-link member chain — flat to a per-call depth counter"),
   Scenario.new("deep-js-helper", "/deep-js?q=dalfox&shape=helper",
     "x.a().a().a()… re-entry — the shape that defeats per-call depth limits"),
+  # 260k levels keep the script under the 512 KiB AST size cap: one or two
+  # bytes per level, ~576 stack bytes per source byte, past the 256 MiB stack.
+  Scenario.new("deep-js-unary", "/deep-js?q=dalfox&shape=unary&depth=260000",
+    "+-+-…x within the size cap — one parser level per byte"),
+  Scenario.new("deep-js-label", "/deep-js?q=dalfox&shape=label&depth=260000",
+    "a:a:…x labelled statements within the size cap"),
   Scenario.new("many-reflections", "/many-reflections?q=dalfox",
     "100k echoes — what the reflection occurrence/range caps exist for"),
   Scenario.new("slowloris", "/slowloris?q=dalfox",
