@@ -234,12 +234,19 @@ impl<'a> DomXssVisitor<'a> {
         outcome: bool,
         out: &mut Vec<GuardTarget>,
     ) -> bool {
-        let Expression::CallExpression(call) = binary.left.without_parentheses() else {
-            return false;
+        // `LIST.indexOf(x) === -1`, or `i === -1` right after `var i = LIST.indexOf(x)`.
+        let (call, stored) = match binary.left.without_parentheses() {
+            Expression::CallExpression(call)
+                if self.get_callee_property_name(&call.callee).as_deref() == Some("indexOf") =>
+            {
+                (Some(call), None)
+            }
+            Expression::Identifier(id) => match &self.adjacent_index {
+                Some((name, target)) if name == id.name.as_str() => (None, Some(target.clone())),
+                _ => return false,
+            },
+            _ => return false,
         };
-        if self.get_callee_property_name(&call.callee).as_deref() != Some("indexOf") {
-            return false;
-        }
         let number = match binary.right.without_parentheses() {
             Expression::NumericLiteral(n) => n.value,
             Expression::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => {
@@ -268,11 +275,55 @@ impl<'a> DomXssVisitor<'a> {
             _ => return true,
         };
         if found_when == outcome
-            && let Some(target) = self.membership_target(call)
+            && let Some(target) = stored.or_else(|| self.membership_target(call?))
         {
             out.push(target);
         }
         true
+    }
+
+    /// `(i, what i === -1 vouches for)` when `prev` is `var i = LIST.indexOf(x)`
+    /// or `i = LIST.indexOf(x)` and `next` is the `if` that tests it. Only the
+    /// adjacent pair: nothing can have rebound `i` or `x` between them.
+    pub(super) fn adjacent_index_result(
+        &self,
+        prev: &Statement<'a>,
+        next: &Statement<'a>,
+    ) -> Option<(String, GuardTarget)> {
+        if !matches!(next, Statement::IfStatement(_)) {
+            return None;
+        }
+        let (name, init) = match prev {
+            Statement::VariableDeclaration(decl) => match decl.declarations.last()? {
+                VariableDeclarator {
+                    id: BindingPattern::BindingIdentifier(id),
+                    init: Some(init),
+                    ..
+                } => (id.name.as_str(), init),
+                _ => return None,
+            },
+            Statement::ExpressionStatement(stmt) => match &stmt.expression {
+                Expression::AssignmentExpression(assign)
+                    if assign.operator == AssignmentOperator::Assign =>
+                {
+                    match &assign.left {
+                        AssignmentTarget::AssignmentTargetIdentifier(id) => {
+                            (id.name.as_str(), &assign.right)
+                        }
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let Expression::CallExpression(call) = init.without_parentheses() else {
+            return None;
+        };
+        if self.get_callee_property_name(&call.callee).as_deref() != Some("indexOf") {
+            return None;
+        }
+        Some((name.to_string(), self.membership_target(call)?))
     }
 
     /// A call that is true only for a vouched-for value: `LIST.includes(x)`,

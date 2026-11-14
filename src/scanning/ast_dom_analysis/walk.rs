@@ -33,7 +33,14 @@ impl<'a> DomXssVisitor<'a> {
             Statement::IfStatement(if_stmt) => {
                 self.walk_expression(&if_stmt.test);
                 // What the test vouches for on each branch (see `guards`).
+                // The index is only trusted as the whole test: in
+                // `reset() || i === -1` the left side may rebind `i` first.
+                if !is_bare_comparison(&if_stmt.test) {
+                    self.adjacent_index = None;
+                }
                 let (when_true, when_false) = self.condition_guards(&if_stmt.test);
+                // Only this test: an `if` nested in the branches is not adjacent.
+                self.adjacent_index = None;
                 // Branch bodies are conditional: suppress detaint inside them.
                 self.branch_depth += 1;
                 self.walk_guarded_branch(&when_true, &if_stmt.consequent);
@@ -1290,5 +1297,17 @@ impl<'a> DomXssVisitor<'a> {
             self.report_vulnerability_with_source(import_expr.span, "import", source);
         }
         self.walk_expression(&import_expr.source);
+    }
+}
+
+/// `a === b`, possibly under `!` and parentheses.
+fn is_bare_comparison(test: &Expression) -> bool {
+    match test {
+        Expression::ParenthesizedExpression(p) => is_bare_comparison(&p.expression),
+        Expression::UnaryExpression(u) if u.operator == UnaryOperator::LogicalNot => {
+            is_bare_comparison(&u.argument)
+        }
+        Expression::BinaryExpression(_) => true,
+        _ => false,
     }
 }
