@@ -2004,6 +2004,39 @@ fn initial_pass_follows_a_global_across_script_blocks() {
     ] {
         assert_eq!(flows(html), 0, "{html}");
     }
+    // A small repeated script is walked again for its effect, so an ad
+    // slot's one-liner between the source and the sink changes nothing. Its
+    // findings are the first copy's.
+    let ad = "<script>(adsbygoogle=window.adsbygoogle||[]).push({});</script>";
+    let page = |repeats: usize, filler: &str| {
+        format!(
+            "<script>var q=location.hash.slice(1);</script>{}\
+             <script>document.body.innerHTML=q;</script>",
+            filler.repeat(repeats)
+        )
+    };
+    assert_eq!(flows(&page(3, ad)), 1);
+    assert_eq!(
+        flows(
+            "<script>document.body.innerHTML=location.hash;</script>\
+               <script>document.body.innerHTML=location.hash;</script>"
+        ),
+        1
+    );
+    // Past the repeats walked per page, or for a large one, the effect is
+    // unknown and the page forgets.
+    assert_eq!(flows(&page(40, ad)), 0);
+    let big = format!("<script>track('{}');</script>", "x".repeat(3000));
+    assert_eq!(flows(&page(2, &big)), 0);
+    // A classic copy of a module's text is its own script.
+    assert_eq!(
+        flows(
+            "<script type=\"module\">var q=location.hash.slice(1);</script>\
+             <script>var q=location.hash.slice(1);</script>\
+             <script>document.body.innerHTML=q;</script>"
+        ),
+        1
+    );
     // One handler clearing the global does not hide it from the next: each
     // reads what the scripts left.
     assert_eq!(

@@ -99,6 +99,10 @@ struct TopLevelWrites<'b> {
     /// Names the script binds anew before anything runs: a top-level
     /// `function`, `class`, `let`, `const` or import.
     rebound: Vec<&'b str>,
+    /// Names a nested block binds for itself (`let` / `const` in a block, a
+    /// `for (let …)` head, a `catch` parameter). The walk has no block
+    /// scope, so an assignment to one inside its block is not a global's.
+    block_scoped: Vec<&'b str>,
     /// The script has `import` / `export`: its top-level bindings are
     /// module-scoped, not globals.
     is_module: bool,
@@ -163,6 +167,16 @@ fn assigned_names<'b>(expr: &'b Expression<'_>, depth: u8, out: &mut Vec<&'b str
     }
 }
 
+fn loop_head_bindings<'b>(left: &'b ForStatementLeft<'_>, out: &mut TopLevelWrites<'b>) {
+    if let ForStatementLeft::VariableDeclaration(declaration) = left
+        && declaration.kind != VariableDeclarationKind::Var
+    {
+        for declarator in &declaration.declarations {
+            binding_names(&declarator.id, &mut out.block_scoped);
+        }
+    }
+}
+
 fn collect_writes<'b>(
     statements: &'b [Statement<'_>],
     top: bool,
@@ -181,6 +195,9 @@ fn collect_writes<'b>(
                 let lexical = declaration.kind != VariableDeclarationKind::Var;
                 // A nested `let` / `const` is the block's own.
                 if lexical && !top {
+                    for declarator in &declaration.declarations {
+                        binding_names(&declarator.id, &mut out.block_scoped);
+                    }
                     continue;
                 }
                 for declarator in &declaration.declarations {
@@ -223,6 +240,9 @@ fn collect_writes<'b>(
             Statement::TryStatement(attempt) => {
                 collect_writes(&attempt.block.body, false, depth - 1, out);
                 if let Some(handler) = &attempt.handler {
+                    if let Some(param) = &handler.param {
+                        binding_names(&param.pattern, &mut out.block_scoped);
+                    }
                     collect_writes(&handler.body.body, false, depth - 1, out);
                 }
                 if let Some(finalizer) = &attempt.finalizer {
@@ -230,17 +250,27 @@ fn collect_writes<'b>(
                 }
             }
             Statement::ForStatement(each) => {
-                if let Some(ForStatementInit::VariableDeclaration(declaration)) = &each.init
-                    && declaration.kind == VariableDeclarationKind::Var
-                {
+                if let Some(ForStatementInit::VariableDeclaration(declaration)) = &each.init {
+                    let var = declaration.kind == VariableDeclarationKind::Var;
                     for declarator in &declaration.declarations {
-                        binding_names(&declarator.id, &mut out.names);
+                        let into = if var {
+                            &mut out.names
+                        } else {
+                            &mut out.block_scoped
+                        };
+                        binding_names(&declarator.id, into);
                     }
                 }
                 nested(&each.body, out);
             }
-            Statement::ForInStatement(each) => nested(&each.body, out),
-            Statement::ForOfStatement(each) => nested(&each.body, out),
+            Statement::ForInStatement(each) => {
+                loop_head_bindings(&each.left, out);
+                nested(&each.body, out)
+            }
+            Statement::ForOfStatement(each) => {
+                loop_head_bindings(&each.left, out);
+                nested(&each.body, out)
+            }
             Statement::WhileStatement(each) => nested(&each.body, out),
             Statement::DoWhileStatement(each) => nested(&each.body, out),
             Statement::LabeledStatement(labeled) => nested(&labeled.body, out),
@@ -260,6 +290,8 @@ impl<'a> DomXssVisitor<'a> {
         let mut written = TopLevelWrites::default();
         collect_writes(body, true, MAX_WRITE_DEPTH, &mut written);
         globals.charge();
+        let block_scoped: HashSet<&str> = written.block_scoped.iter().copied().collect();
+        written.names.retain(|name| !block_scoped.contains(name));
         for name in &written.rebound {
             globals.names.remove(*name);
         }
@@ -311,6 +343,14 @@ impl<'a> DomXssVisitor<'a> {
                 && !self.field_only_taint.contains(name)
                 && let Some(source) = self.var_aliases.get(name)
                 && source.len() <= MAX_CARRIED_TEXT_BYTES
+                && self
+                    .url_object_sources
+                    .get(name)
+                    .is_none_or(|s| s.len() <= MAX_CARRIED_TEXT_BYTES)
+                && self
+                    .url_search_params_sources
+                    .get(name)
+                    .is_none_or(|s| s.len() <= MAX_CARRIED_TEXT_BYTES)
             {
                 handed_on.insert(
                     name.to_string(),

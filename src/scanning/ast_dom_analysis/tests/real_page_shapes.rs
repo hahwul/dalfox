@@ -862,8 +862,21 @@ fn a_global_that_was_rebound_or_never_shared_is_not_carried() {
             "function f(){var q=location.hash.slice(1)} f()",
             "x.innerHTML=q",
         ],
-        // Block-scoped.
+        // Block-scoped, also when the block assigns to its own binding.
         &["{ let q=location.hash.slice(1) }", "x.innerHTML=q"],
+        &[
+            "{ let q=location.hash.slice(1); q=q.trim(); f(q) }",
+            "x.innerHTML=q",
+        ],
+        &[
+            "if(location.hash){ let tab=location.hash.slice(1); tab=decodeURIComponent(tab); show(tab) }",
+            "x.innerHTML=tab",
+        ],
+        &[
+            "for(let q of location.hash.split('&')){ q=q.trim(); f(q) }",
+            "x.innerHTML=q",
+        ],
+        &["try{f()}catch(e){ e=location.hash; g(e) }", "x.innerHTML=e"],
         // A later script's own `let` / `const` / import of that name.
         &["q=location.hash.slice(1)", "let q='safe'; x.innerHTML=q"],
         &["q=location.hash.slice(1)", "const q='safe'; x.innerHTML=q"],
@@ -997,6 +1010,16 @@ fn carried_globals_are_bounded() {
         )
         .unwrap();
     assert_eq!(globals.len(), 1);
+    // Nor one that drags a long fact about its value along.
+    let key = "k".repeat(MAX_CARRIED_TEXT_BYTES + 1);
+    let mut globals = CarriedGlobals::new();
+    AstDomAnalyzer::new()
+        .analyze_after(
+            &format!("var u=new URL(localStorage.getItem('{key}')); u=location.hash;"),
+            &mut globals,
+        )
+        .unwrap();
+    assert_eq!(globals.len(), 0);
 
     // Past the page's seeding budget nothing is carried any further.
     let mut globals = CarriedGlobals::new();

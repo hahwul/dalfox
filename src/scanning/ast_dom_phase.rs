@@ -122,6 +122,7 @@ pub(crate) async fn run_ast_dom_analysis(
                 None => continue,
             }
         };
+        let repeat = block.is_repeat();
         let js_code = block.code;
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
@@ -131,6 +132,9 @@ pub(crate) async fn run_ast_dom_analysis(
                 posture.trusted_types_enforced,
                 globals,
             );
+        if repeat {
+            continue;
+        }
         // Normalized once per block (not per finding), and only once a
         // finding survives the dedup below — the bootstrap check is pure, so
         // running it after the `ast_seen` skip changes nothing but the cost.
