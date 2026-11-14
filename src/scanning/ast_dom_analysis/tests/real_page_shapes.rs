@@ -747,3 +747,97 @@ fn a_trust_bypass_call_keeps_the_flows_around_it() {
         assert_eq!(got, want, "{js}");
     }
 }
+
+/// A minifier reuses one short name for unrelated variables. A `let` /
+/// `const` in a nested block is a new binding for that block, so the outer
+/// name's taint does not read through it, and what it holds does not leak
+/// back out.
+#[test]
+fn a_block_scoped_name_is_not_the_outer_one() {
+    assert_clean(&[
+        // Outer `s` is tainted; the loop body's `s` is a row of data.
+        "function setup(){const s=new URLSearchParams(location.search).get('region'),Q=document.createElement('div');function z(e){for(const i in e){const s=e[i];Q.innerHTML=s.category}}return z} setup();",
+        "var t=location.hash.slice(1); if(ok){const t=icon('check'); el.innerHTML=t}",
+        // The inner name's taint stays in its block.
+        "var t=el.getAttribute('data-id'); if(preview){let t=new URLSearchParams(location.search).get('previewTime'); use(t)} box.innerHTML=t;",
+        "var q='fixed'; {let q=location.hash.slice(1); log(q)} el.innerHTML=q;",
+        "var q='fixed'; try{const q=location.hash.slice(1); log(q)}catch(e){} el.innerHTML=q;",
+        // The outer name keeps what pins its URL while the block's own
+        // binding of that name is something else.
+        "var u='/list?p='+location.hash.slice(1); {const u=other(); log(u)} location.href=u;",
+        "var u='/list?p='+location.hash.slice(1); for(const k in rows){const u=rows[k]; log(u)} a.href=u;",
+        "const BASE='/api/v1/'; var t=BASE+location.hash.slice(1); if(ok){const t=icon('check'); el.title=t} location.href=t;",
+        "var u=new URL(location.href); if(a){const u=other(); log(u)} location.href=u;",
+        "var u=location.href; try{const u=other(); log(u)}catch(e){} window.open(u);",
+        // What the block's own binding stood for ends with the block.
+        "var d={cookie:'x'}; {const d=document; log(d)} el.innerHTML=d.cookie;",
+    ]);
+    assert_reported(&[
+        // Not redeclared in the block: the outer binding, read or written.
+        "var q=location.hash.slice(1); if(ok){el.innerHTML=q}",
+        "var q=''; if(ok){q=location.hash.slice(1)} el.innerHTML=q;",
+        // A `var` in a block is the function's.
+        "if(ok){var q=location.hash.slice(1)} el.innerHTML=q;",
+        // The block's own flow, and the outer one after the block ends.
+        "var q='fixed'; {let q=location.hash.slice(1); el.innerHTML=q}",
+        "var q=location.hash.slice(1); {let q='fixed'; log(q)} el.innerHTML=q;",
+        // An inner pinned URL does not pin the outer name, nor an inner
+        // object hide the global the outer name stands for.
+        "var u=location.hash.slice(1); if(a){const u='/fixed/'+location.hash.slice(1); log(u)} location.href=u;",
+        "var u=location.hash.slice(1); {const u=new URL(location.href); log(u)} location.href=u;",
+        "var d=document; {const d=new Date(); log(d)} d.write(location.hash.slice(1));",
+    ]);
+}
+
+/// Summaries are keyed by bare name, and some other function in a bundle
+/// has the same one-letter name. A name a body binds to a value (a
+/// destructured `useState` setter, a call's result) is not that function.
+#[test]
+fn a_local_value_is_not_the_function_of_the_same_name() {
+    assert_clean(&[
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); N(location.hash.slice(1))} C();",
+        "function i(h){box.insertAdjacentHTML('beforeend',h)} function k(e,t,r){var i=lookup(e,t); return function(a){return i.apply(r,[document.cookie])}} k();",
+        "function N(h){document.body.innerHTML=h} function C(){const {N}=props; N(location.hash.slice(1))} C();",
+        // ES5 output of the destructuring: an element read by index.
+        "function O(h){document.body.innerHTML=h} function C(){var P=useState(''),L=P[0],O=P[1]; O(location.hash.slice(1))} C();",
+        // Also as a constructor.
+        "class N{constructor(h){document.body.innerHTML=h}} function C(){const [O,N]=useState(''); new N(location.hash.slice(1))} C();",
+        // A function of that name declared in a handler, a promise callback
+        // or a block inside the body is theirs: after it the name is the
+        // value again.
+        "function C(){let [O,N]=useState(''); window.addEventListener('message',function(e){function N(h){document.body.innerHTML=h} N('x')}); N(location.hash.slice(1))} C();",
+        "function C(){let [O,N]=useState(''); fetch('/x').then(function(r){function N(h){document.body.innerHTML=h} N('x')}); N(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); if(x){const N=function(h){el.textContent=h}; N('x')} N(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){let [O,N]=useState(''); class K{static{function N(h){}}} N(location.hash.slice(1))} C();",
+    ]);
+    assert_reported(&[
+        // The page's function, called where nothing rebinds the name.
+        "function N(h){document.body.innerHTML=h} function C(){N(location.hash.slice(1))} C();",
+        // A local bound to a function it defines, or left unset, is not a value.
+        "function C(){var show=function(h){document.body.innerHTML=h}; show(location.hash.slice(1))} C();",
+        "function N(h){document.body.innerHTML=h} function C(){var x; N(location.hash.slice(1))} C();",
+        // What an IIFE returns is a module object or a compiled class.
+        "(function(){var Mod=(function(){function show(h){document.body.innerHTML=h}return{show:show}})(); Mod.show(location.hash.slice(1))})();",
+        "(function(){var Foo=(function(){function Foo(h){el.innerHTML=h}return Foo}()); new Foo(location.hash.slice(1))})();",
+        "define(['require','exports'],function(require,exports){var View=(function(){function View(){}View.prototype.show=function(html){document.getElementById('o').innerHTML=html};return View}()); var v=new View(); v.show(decodeURIComponent(location.hash.slice(1)))});",
+        "!function(){var api=(function(){function load(){return location.hash.slice(1)}return{load:load}})(); document.write(api.load())}();",
+        // A member of a value local is its own summary: a factory-made
+        // constructor whose methods the same body defines.
+        "(function(){var W=makeClass(); W.prototype.render=function(h){el.innerHTML=h}; var w=new W(); w.render(location.hash.slice(1))})();",
+        "(function(){var W=Base.extend({}); W.prototype={render:function(h){el.innerHTML=h}}; new W().render(location.hash.slice(1))})();",
+        // A value local a nested block rebinds to a function.
+        "function main(){var t=0; if(x){const t=function(h){el.innerHTML=h}; t(location.hash.slice(1))}} main();",
+        "function main(){const [t,n]=pair(); for(const k of list){const t=(h)=>{el.innerHTML=h}; t(location.hash.slice(1))}} main();",
+        "function main(){var t=0; if(x){let t={show(h){el.innerHTML=h}}; t.show(location.hash.slice(1))}} main();",
+        "function main(){var a=1; var a=function(h){el.innerHTML=h}; a(location.hash.slice(1))} main();",
+        // A nested function's own declaration of the name is not the outer
+        // value: here it is an alias of the page's function again.
+        "function N(h){document.body.innerHTML=h} function C(){const [O,N]=useState(''); function inner(){var N=window.N; N(location.hash.slice(1))} inner()} C();",
+        "function N(h){document.body.innerHTML=h} function C(){const [O,N]=useState(''); list.forEach(function(){let N=other.N; N(location.hash.slice(1))})} C();",
+    ]);
+    // A page method named like a framework's trust bypass, on a module
+    // object, is still judged by its own body.
+    assert_clean(&[
+        "function main(){var S=(function(){function bypassSecurityTrustHtml(v){return String(v).replace(/</g,'&lt;')}return{bypassSecurityTrustHtml:bypassSecurityTrustHtml}})(); x.textContent=S.bypassSecurityTrustHtml(location.hash.slice(1))} main();",
+    ]);
+}
