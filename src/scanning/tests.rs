@@ -2549,7 +2549,7 @@ async fn test_fetch_ext_js_flag_off_returns_empty() {
     let client = target.build_client_or_default();
     let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
     let args = ext_js_scan_args(false);
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         findings.is_empty(),
         "flag off must return empty; got {findings:?}"
@@ -2568,7 +2568,7 @@ async fn test_fetch_ext_js_detects_dom_xss_in_script() {
     let client = target.build_client_or_default();
     let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
     let args = ext_js_scan_args(true);
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         !findings.is_empty(),
         "expected DOM-XSS finding from external script"
@@ -2588,8 +2588,14 @@ async fn test_fetch_ext_js_skips_oversized_body() {
     let client = target.build_client_or_default();
     let html = format!(r#"<html><body><script src="http://{addr}/big.js"></script></body></html>"#);
     let args = ext_js_scan_args(true);
-    // big.js has no sink; primary assertion is no panic on oversized body.
-    let _ = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    // big.js has no sink: no panic, and the dropped body is counted, not
+    // taken for a clean script.
+    let (findings, _, skips) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(findings.is_empty());
+    assert_eq!(
+        skips.size, 1,
+        "oversized script must be reported as skipped"
+    );
 }
 
 /// exclude_url matching the script URL → script skipped, empty result.
@@ -2604,7 +2610,7 @@ async fn test_fetch_ext_js_exclude_url_skips_script() {
     let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
     let mut args = ext_js_scan_args(true);
     args.exclude_url = vec!["app\\.js".to_string()];
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         findings.is_empty(),
         "excluded script must not produce findings; got {findings:?}"
@@ -2622,7 +2628,7 @@ async fn test_fetch_ext_js_non_2xx_response_is_skipped() {
         r#"<html><body><script src="http://{addr}/nonexistent.js"></script></body></html>"#
     );
     let args = ext_js_scan_args(true);
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         findings.is_empty(),
         "non-2xx response must be skipped; got {findings:?}"
@@ -2644,7 +2650,7 @@ async fn test_fetch_ext_js_network_error_is_skipped() {
     let html =
         format!(r#"<html><body><script src="http://{closed_addr}/app.js"></script></body></html>"#);
     let args = ext_js_scan_args(true);
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         findings.is_empty(),
         "network error must be skipped gracefully; got {findings:?}"
@@ -2664,7 +2670,7 @@ async fn test_fetch_ext_js_include_url_skips_non_matching_script() {
     let mut args = ext_js_scan_args(true);
     // Pattern that does NOT match /app.js → the include-filter `continue` branch fires.
     args.include_url = vec!["only_this_pattern_matches".to_string()];
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         findings.is_empty(),
         "script not matching include_url must be skipped; got {findings:?}"
@@ -2699,7 +2705,7 @@ async fn test_fetch_ext_js_body_read_error_is_skipped() {
     let client = target.build_client_or_default();
     let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
     let args = ext_js_scan_args(true);
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         findings.is_empty(),
         "body read error must be skipped gracefully; got {findings:?}"
@@ -2725,7 +2731,7 @@ async fn test_fetch_ext_js_uses_html_for_script_element_ids() {
         r#"<html><body><script id="eval-me"></script><script src="http://{addr}/app.js"></script></body></html>"#
     );
     let args = ext_js_scan_args(true);
-    let (findings, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (findings, _, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
         !findings.is_empty(),
         "expected DOM-XSS finding when host HTML supplies the script element ID; got none"
@@ -6292,7 +6298,7 @@ async fn test_fetch_ext_js_caps_stored_bundle_names() {
         skip_mining_dom: false,
         ..ext_js_scan_args(true)
     };
-    let (_, names) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    let (_, names, _) = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert_eq!(
         names.len(),
         crate::parameter_analysis::mining::MAX_STORED_BUNDLE_NAMES

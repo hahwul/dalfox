@@ -230,11 +230,11 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
 /// or `parse` panicked. A spawn failure must NOT fall back to an inline parse:
 /// a guard-approved ~512 KiB chain can need tens of MiB of stack.
 pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + Send) -> Option<T> {
-    if source.len() > MAX_ANALYZE_SOURCE_BYTES || source_nesting_exceeds_limit(source) {
+    if let Some(reason) = parse_skip_reason(source) {
         crate::dbg_log!(
-            "[ast] skipping parse of a {}-byte script (over length cap {} or nesting guard)",
+            "[ast] skipping parse of a {}-byte script ({})",
             source.len(),
-            MAX_ANALYZE_SOURCE_BYTES
+            reason.as_str()
         );
         return None;
     }
@@ -253,6 +253,37 @@ pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + S
             Err(_) => None,
         }
     })
+}
+
+/// Why [`guarded_parse`] refuses a script without parsing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParseSkipReason {
+    /// Longer than [`MAX_ANALYZE_SOURCE_BYTES`].
+    Size,
+    /// Nested past what the pre-parse guard lets the parser recurse into.
+    Nesting,
+}
+
+impl ParseSkipReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Size => "size",
+            Self::Nesting => "nesting",
+        }
+    }
+}
+
+/// The reason [`guarded_parse`] (and so [`AstDomAnalyzer::analyze`]) would
+/// skip `source`, so a caller can report a script it never read instead of
+/// taking the empty result for a clean one.
+pub(crate) fn parse_skip_reason(source: &str) -> Option<ParseSkipReason> {
+    if source.len() > MAX_ANALYZE_SOURCE_BYTES {
+        Some(ParseSkipReason::Size)
+    } else if source_nesting_exceeds_limit(source) {
+        Some(ParseSkipReason::Nesting)
+    } else {
+        None
+    }
 }
 
 /// Represents a potential DOM XSS vulnerability found via AST analysis

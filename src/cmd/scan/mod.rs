@@ -144,6 +144,10 @@ pub(crate) struct ScanState {
     /// value is the `error_code` to report: `SCAN_TIMEOUT` for a target the
     /// `--scan-timeout` cap cut short, `None` for the other causes.
     pub(crate) interrupted_targets: Arc<Mutex<HashMap<String, Option<&'static str>>>>,
+    /// Scripts the landing-page AST pass could not read (size cap, nesting
+    /// guard), per target. Reported as `ast_skipped` so a page whose real code
+    /// went unread is not taken for a clean one.
+    pub(crate) ast_skipped: Arc<Mutex<HashMap<String, crate::scanning::ast_integration::AstSkips>>>,
     pub(crate) multi_pb: Option<Arc<MultiProgress>>,
     pub(crate) preflight_idx: Arc<AtomicUsize>,
     pub(crate) analyze_idx: Arc<AtomicUsize>,
@@ -548,6 +552,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         session_baselines,
         session_lost,
         interrupted_targets: Arc::new(Mutex::new(HashMap::new())),
+        ast_skipped: Arc::new(Mutex::new(HashMap::new())),
         multi_pb,
         preflight_idx,
         analyze_idx,

@@ -199,6 +199,7 @@ pub(crate) async fn run_preflight_and_analysis(
         target_mutation_stats_clone: state.target_mutation_stats.clone(),
         session_baselines_clone: state.session_baselines.clone(),
         session_lost_clone: state.session_lost.clone(),
+        ast_skipped_clone: state.ast_skipped.clone(),
     };
 
     // A single LocalSet for every group: parameter analysis holds !Send
@@ -311,6 +312,8 @@ pub(crate) struct TargetTaskCtx {
         Arc<Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>>,
     pub(crate) session_baselines_clone: Arc<Mutex<HashMap<String, SessionBaseline>>>,
     pub(crate) session_lost_clone: Arc<Mutex<HashMap<String, String>>>,
+    pub(crate) ast_skipped_clone:
+        Arc<Mutex<HashMap<String, crate::scanning::ast_integration::AstSkips>>>,
 }
 
 /// Preflight one target and analyze its parameters, returning it enriched — or
@@ -334,6 +337,7 @@ pub(crate) async fn preflight_and_analyze_target(
         target_mutation_stats_clone,
         session_baselines_clone,
         session_lost_clone,
+        ast_skipped_clone,
     } = ctx;
     // Concurrency across targets is bounded by the caller, which holds a
     // `--max-concurrent-targets` permit for the lifetime of this task.
@@ -426,6 +430,7 @@ pub(crate) async fn preflight_and_analyze_target(
         &preflight_response_content_type,
         &results_clone,
         &findings_count_clone,
+        &ast_skipped_clone,
     )
     .await;
 
@@ -938,6 +943,7 @@ async fn run_initial_ast_pass(
     response_content_type: &str,
     results_clone: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     findings_count_clone: &Arc<std::sync::atomic::AtomicUsize>,
+    ast_skipped: &Arc<Mutex<HashMap<String, crate::scanning::ast_integration::AstSkips>>>,
 ) {
     // Run AST-based DOM XSS analysis on the initial response
     // (enabled by default). The helper is shared with the
@@ -947,8 +953,8 @@ async fn run_initial_ast_pass(
     if !args_clone.skip_ast_analysis
         && let Some(response_text) = preflight_response_body
     {
-        let mut ast_batch =
-            crate::scanning::ast_integration::run_initial_ast_dom_analysis_for_response(
+        let (mut ast_batch, mut skips) =
+            crate::scanning::ast_integration::run_initial_ast_dom_analysis_with_skips(
                 response_text,
                 response_content_type,
                 target.url.as_str(),
@@ -969,14 +975,16 @@ async fn run_initial_ast_pass(
             && crate::utils::response_has_markup_document(response_content_type, response_text)
         {
             let ext_client = target.build_client_or_default();
-            let (mut ext_batch, bundle_names) = crate::scanning::fetch_and_analyze_external_js(
-                &ext_client,
-                target,
-                response_text,
-                args_clone,
-            )
-            .await;
+            let (mut ext_batch, bundle_names, ext_skips) =
+                crate::scanning::fetch_and_analyze_external_js(
+                    &ext_client,
+                    target,
+                    response_text,
+                    args_clone,
+                )
+                .await;
             target.bundle_param_names = bundle_names;
+            skips.add(ext_skips);
             crate::scanning::result::stamp_origin(&mut ext_batch, &target.state_key());
             crate::scanning::accumulate_findings(
                 results_clone,
@@ -987,6 +995,9 @@ async fn run_initial_ast_pass(
                 args_clone.discard_below_min_confidence,
             )
             .await;
+        }
+        if skips.total() > 0 {
+            ast_skipped.lock().await.insert(target.state_key(), skips);
         }
     }
 }
