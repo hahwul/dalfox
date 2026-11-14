@@ -873,6 +873,10 @@ impl<'a> DomXssVisitor<'a> {
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         let shadow_params_checkpoint = self.shadow_params.checkpoint();
+        let value_locals_checkpoint = self.value_locals.checkpoint();
+        for name in Self::value_local_names(statements) {
+            self.value_locals.insert(name);
+        }
         let url_lead_scope = self.url_leads_enter(&own_names);
         let global_aliases_checkpoint = self.global_aliases.checkpoint();
         for name in &own_names {
@@ -890,9 +894,7 @@ impl<'a> DomXssVisitor<'a> {
         for name in &declared {
             self.shadow_params.remove(name.as_str());
         }
-        for name in Self::value_locals(statements) {
-            self.shadow_params.insert(name);
-        }
+
         for name in std::mem::take(&mut self.iife_passthrough) {
             self.shadow_params.remove(name.as_str());
         }
@@ -965,6 +967,7 @@ impl<'a> DomXssVisitor<'a> {
         self.local_names.rollback(local_names_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
         self.shadow_params.rollback(shadow_params_checkpoint);
+        self.value_locals.rollback(value_locals_checkpoint);
         self.global_aliases.rollback(global_aliases_checkpoint);
         for name in &own_names {
             self.instance_classes.remove(name.as_str());
@@ -986,11 +989,14 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     /// Walk a `{ … }` block. A `let` / `const` / `class` it declares is a new
-    /// binding for the block: it starts untainted whatever an outer variable
-    /// of the same name holds (a minifier reuses `s` for both), and what it
-    /// holds when the block ends does not reach the outer one.
-    /// ponytail: taint only; a block-scoped name still shares the outer
-    /// one's URL lead, instance class and element tag.
+    /// binding for the block: it starts with none of what the walk knows
+    /// about an outer variable of the same name (a minifier reuses `s` for
+    /// both), and what it holds when the block ends does not reach the outer
+    /// one. That is the taint, and with it what pins or names a URL value:
+    /// left shared, the inner declarator would rewrite the outer name's lead
+    /// while it is hidden.
+    /// ponytail: an outer name's instance class and element tag are still
+    /// shared with the block's.
     fn walk_block(&mut self, statements: &[Statement<'a>]) {
         let mut names = HashSet::new();
         for statement in statements {
@@ -1012,35 +1018,43 @@ impl<'a> DomXssVisitor<'a> {
             return self.walk_statements(statements);
         }
         let outer: Vec<_> = names
-            .into_iter()
-            .map(|name| {
-                let state = (
-                    self.tainted_vars.remove(name.as_str()),
-                    self.var_aliases.remove(name.as_str()),
-                    self.global_taints.remove(name.as_str()),
-                    self.field_only_taint.remove(name.as_str()),
-                );
-                (name, state)
-            })
+            .iter()
+            .map(|name| (name.clone(), self.take_binding_state(name)))
             .collect();
-        self.walk_statements(statements);
-        for (name, (tainted, alias, global, field_only)) in outer {
-            self.tainted_vars.remove(name.as_str());
-            self.var_aliases.remove(name.as_str());
-            self.global_taints.remove(name.as_str());
-            self.field_only_taint.remove(name.as_str());
-            if tainted {
+        // …and the global object an outer `var d = document` stood for.
+        self.with_block_bindings(&names, |v| v.walk_statements(statements));
+        for (name, state) in outer {
+            self.take_binding_state(&name);
+            if state.tainted {
                 self.tainted_vars.insert(name.clone());
             }
-            if let Some(alias) = alias {
+            if let Some(alias) = state.alias {
                 self.var_aliases.insert(name.clone(), alias);
             }
-            if global {
+            if state.global {
                 self.global_taints.insert(name.clone());
             }
-            if field_only {
-                self.field_only_taint.insert(name);
+            if state.field_only {
+                self.field_only_taint.insert(name.clone());
             }
+            if let Some(lead) = state.url_lead {
+                self.url_leads.insert(name.clone(), lead);
+            }
+            if state.page_url {
+                self.page_url_objects.insert(name);
+            }
+        }
+    }
+
+    /// Remove and return what the walk holds about the variable `name`.
+    fn take_binding_state(&mut self, name: &str) -> BindingState {
+        BindingState {
+            tainted: self.tainted_vars.remove(name),
+            alias: self.var_aliases.remove(name),
+            global: self.global_taints.remove(name),
+            field_only: self.field_only_taint.remove(name),
+            url_lead: self.url_leads.remove(name),
+            page_url: self.page_url_objects.remove(name),
         }
     }
 
@@ -1049,10 +1063,11 @@ impl<'a> DomXssVisitor<'a> {
     /// (`let [open, setOpen] = useState(false)`, `var i = lookup(a, b)`).
     /// Summaries are keyed by bare name, and a minified bundle has some
     /// other `i` that is a function; a call through this binding is not a
-    /// call to that one (see `shadow_params`). A name bound to a function,
-    /// object or class literal, to another name, or to nothing yet is left
-    /// alone: it may be the summarised function, or an alias of one.
-    pub(super) fn value_locals(statements: &[Statement<'a>]) -> Vec<String> {
+    /// call to that one (see [`DomXssVisitor::value_locals`]). A name bound
+    /// to a function, object or class literal, to what an IIFE returns (a
+    /// module object, a compiled class), to another name, or to nothing yet
+    /// is left alone: it may be the summarised function, or an alias of one.
+    pub(super) fn value_local_names(statements: &[Statement<'a>]) -> Vec<String> {
         let mut names = Vec::new();
         for statement in statements {
             let Statement::VariableDeclaration(declaration) = statement else {
@@ -1063,11 +1078,17 @@ impl<'a> DomXssVisitor<'a> {
                     (BindingPattern::BindingIdentifier(_), None) => false,
                     (BindingPattern::BindingIdentifier(_), Some(init)) => {
                         match init.without_parentheses() {
-                            Expression::CallExpression(call) => !matches!(
-                                &call.callee,
-                                Expression::StaticMemberExpression(member)
-                                    if member.property.name == "bind"
-                            ),
+                            Expression::CallExpression(call) => {
+                                !matches!(
+                                    call.callee.without_parentheses(),
+                                    Expression::FunctionExpression(_)
+                                        | Expression::ArrowFunctionExpression(_)
+                                ) && !matches!(
+                                    &call.callee,
+                                    Expression::StaticMemberExpression(member)
+                                        if member.property.name == "bind"
+                                )
+                            }
                             init => {
                                 init.is_literal()
                                     || matches!(

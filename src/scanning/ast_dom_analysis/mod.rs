@@ -531,6 +531,12 @@ struct DomXssVisitor<'a> {
     /// name — summaries are keyed by bare name, and minified code reuses
     /// `e`/`t`/`n` in every scope. A body's own declarations take the name back.
     shadow_params: ScopedSet<String>,
+    /// Names an enclosing function body binds to a value that is not a
+    /// function (see `value_local_names`). A call *through* such a name is
+    /// not a call to the function a bare-name summary describes; a member
+    /// key (`W.render`, registered for `W.prototype.render = …` in the same
+    /// body) is still its own.
+    value_locals: ScopedSet<String>,
     /// Parameter lists (by span) of functions whose calls this analysis sees
     /// with their arguments — summarised functions and IIFEs — so their
     /// defaults apply per call, not to every walk of the body.
@@ -791,6 +797,16 @@ impl SinkCtx {
             SinkCtx::Html
         }
     }
+}
+
+/// What the walk holds about one variable name (see `walk_block`).
+struct BindingState {
+    tainted: bool,
+    alias: Option<String>,
+    global: bool,
+    field_only: bool,
+    url_lead: Option<(UrlLead, bool)>,
+    page_url: bool,
 }
 
 /// RAII token returned by [`DomXssVisitor::enter_recursion`]; decrements the
@@ -1059,6 +1075,7 @@ impl<'a> DomXssVisitor<'a> {
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
             shadow_params: Default::default(),
+            value_locals: Default::default(),
             plain_params: HashSet::new(),
             arity_known: HashSet::new(),
             overridden_coercions: HashSet::new(),
@@ -1134,7 +1151,7 @@ impl<'a> DomXssVisitor<'a> {
     /// [`shadow_params`](Self::shadow_params)).
     fn summary(&self, key: &str) -> Option<&FunctionSummary> {
         let root = key.split('.').next().unwrap_or(key);
-        if self.shadow_params.contains(root) {
+        if self.shadow_params.contains(root) || (key == root && self.value_locals.contains(key)) {
             return None;
         }
         self.function_summaries.get(key)
