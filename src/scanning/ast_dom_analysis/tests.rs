@@ -4118,10 +4118,11 @@ fn source_nesting_guard_flags_pathological_input_only() {
     ));
 }
 
-/// A guard-approved script up to the size cap must parse within
-/// ANALYZE_STACK_BYTES. A unary run and a label run cost ~576 stack bytes per
-/// source byte, ~300 MiB at the cap, and aborted the scan before the guard
-/// counted them.
+/// A unary run and a label run at the size cap are skipped before the parse
+/// commits ~300 MiB of stack for them (they aborted the scan when the stack
+/// was a flat 256 MiB). The full-size bypass shapes, which only the
+/// length-scaled stack holds, run in `scripts/hostile_scan.cr`: on a debug
+/// build oxc's frames outgrow that stack.
 #[test]
 fn analyze_survives_dense_chains_at_the_size_cap() {
     let units = MAX_ANALYZE_SOURCE_BYTES / 2 - 8;
@@ -5773,4 +5774,14 @@ fn decoded_literal_not_matching_the_sent_value_stays_clean() {
             .expect("parses");
         assert!(found.is_empty(), "{code} -> {found:?}");
     }
+}
+
+#[test]
+fn parse_stack_grows_with_the_script() {
+    assert_eq!(analyze_stack_bytes(0), ANALYZE_STACK_BYTES);
+    assert_eq!(
+        analyze_stack_bytes(MAX_ANALYZE_SOURCE_BYTES),
+        MAX_ANALYZE_SOURCE_BYTES * STACK_BYTES_PER_SOURCE_BYTE
+    );
+    assert!(analyze_stack_bytes(MAX_ANALYZE_SOURCE_BYTES) >= 1 << 30);
 }

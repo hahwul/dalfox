@@ -93,6 +93,12 @@ SCENARIOS = [
     "+-+-…x within the size cap — one parser level per byte"),
   Scenario.new("deep-js-label", "/deep-js?q=dalfox&shape=label&depth=260000",
     "a:a:…x labelled statements within the size cap"),
+  # Units sized to stay under 512 KiB: what only the length-scaled parse
+  # stack holds (~921 and ~565 stack bytes per source byte).
+  Scenario.new("deep-js-hidden", "/deep-js?q=dalfox&shape=hidden&depth=1300",
+    "((((…'))))'… — closers in a string fool the nesting scan"),
+  Scenario.new("deep-js-reset", "/deep-js?q=dalfox&shape=reset&depth=2500",
+    "+-+-…/**/+-+-… — a comment restarts the unary run count"),
   Scenario.new("many-reflections", "/many-reflections?q=dalfox",
     "100k echoes — what the reflection occurrence/range caps exist for"),
   Scenario.new("slowloris", "/slowloris?q=dalfox",

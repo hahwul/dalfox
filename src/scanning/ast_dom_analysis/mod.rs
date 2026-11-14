@@ -85,41 +85,43 @@ const MAX_AST_VISIT_DEPTH: u32 = 256;
 const MAX_AST_WORK_STEPS: u64 = 10_000_000;
 
 /// Upper bound on the size of a single JavaScript block handed to [`analyze`].
-/// oxc's recursive-descent parser has no depth guard, and some constructs the
-/// pre-parse [`source_nesting_exceeds_limit`] scan can't cheaply bound — long
-/// right-leaning statement/assignment chains (`if(a)if(b)…`, `x=y=z=…`,
-/// `for(;;)for(;;)…`) where each level costs ≥2 source bytes — recurse once per
-/// level *inside* `.parse()`. Because every such level consumes at least one
-/// source byte, capping the input length bounds the achievable parser depth;
-/// combined with [`ANALYZE_STACK_BYTES`] this guarantees the parser can't
-/// overflow. Scripts larger than this skip AST analysis (best-effort); the cap
-/// sits far above any realistic inline `<script>` while staying well under the
-/// point where a maximally-dense chain could exhaust the analysis stack.
+/// oxc's recursive-descent parser has no depth guard, and every nesting level
+/// consumes at least one source byte, so capping the input length bounds the
+/// achievable parser depth; the parse stack grows with the length (see
+/// [`STACK_BYTES_PER_SOURCE_BYTE`]), so the parser can't overflow. Scripts
+/// larger than this skip AST analysis (best-effort).
 const MAX_ANALYZE_SOURCE_BYTES: usize = 512 * 1024;
 
-/// Stack size for the dedicated thread that runs the parse + walk. The *walk* is
-/// separately bounded to [`MAX_AST_VISIT_DEPTH`] frames by the shared recursion
-/// guard, so the deepest consumer of this stack is the **parser**. Measured
-/// on a release build (oxc 0.133), the densest chains the pre-parse guard
-/// lets through need ≤ ~290 stack bytes per source byte (`a=>a=>…` 288,
-/// `for(;;)…` 263, `x=y=…` 240, `if(a)…` 218), i.e. ≤ ~150 MiB within
-/// [`MAX_ANALYZE_SOURCE_BYTES`], which this absorbs with ~1.7× headroom. The
-/// chains it rejects are the ones this could not hold: a unary run
-/// (`+-+-…x`) or a label run (`a:a:…x`) needs ~576 bytes per source byte,
-/// ~300 MiB at the cap. The
-/// reservation is virtual (lazily committed), so the real RSS cost on the common
-/// shallow script is only the few KB of stack actually touched.
+/// Smallest stack for the dedicated thread that runs the parse + walk. The
+/// *walk* is bounded to [`MAX_AST_VISIT_DEPTH`] frames by the shared
+/// recursion guard; this floor holds those frames on any build.
 const ANALYZE_STACK_BYTES: usize = 256 * 1024 * 1024;
 
-/// Below this size [`analyze`] parses inline instead of spawning an
-/// [`ANALYZE_STACK_BYTES`] thread. After the pre-parse guard rejects the
-/// 1-byte-per-level chains, every surviving parser-recursion level costs ≥2
-/// source bytes (`=y`, `a:`, `if(a)`, …), so a script this small can reach at
-/// most ~1k parser frames — comfortably within a normal worker stack — and the
-/// visitor walk is depth-capped to [`MAX_AST_VISIT_DEPTH`] regardless of stack.
-/// The vast majority of inline `<script>` blocks land here and skip the
-/// thread-spawn cost; larger blocks pay for the big stack they might need.
-const INLINE_PARSE_BYTES: usize = 2 * 1024;
+/// Parse stack per source byte, so the parser cannot overflow whatever the
+/// pre-parse scan misses. oxc's deepest frame per byte of input (release
+/// build, oxc 0.133) is ~1,840 bytes, for a bare `((((…`; the densest input
+/// that gets past [`source_nesting_exceeds_limit`] measured ~921 (openers
+/// whose closers sit in a string the scan does not skip), and its runs reset
+/// on bytes it does not classify (`/**/`, U+00A0, `\x0b`), which keeps a
+/// `+-+-…` or `a:a:…` chain at ~576. 2,048 covers the bare worst case, so the
+/// scan only spares the commit, never the process: 1 GiB at
+/// [`MAX_ANALYZE_SOURCE_BYTES`]. The reservation is virtual; a shallow
+/// script touches a few KB of it, a hostile one commits what it recurses
+/// into (≤ ~460 MiB at the cap).
+const STACK_BYTES_PER_SOURCE_BYTE: usize = 2048;
+
+/// The stack [`guarded_parse`] gives a `len`-byte script.
+fn analyze_stack_bytes(len: usize) -> usize {
+    ANALYZE_STACK_BYTES.max(len.saturating_mul(STACK_BYTES_PER_SOURCE_BYTE))
+}
+
+/// Below this size [`analyze`] parses inline instead of spawning a
+/// big-stack thread: at most this many parser levels at ~1,840 bytes each
+/// (~470 KB), well within a worker thread's 2 MiB even on a debug build, and
+/// the visitor walk is depth-capped to [`MAX_AST_VISIT_DEPTH`] regardless.
+/// Short inline `<script>` blocks skip the thread-spawn cost; larger blocks
+/// pay for the stack they might need.
+const INLINE_PARSE_BYTES: usize = 256;
 
 /// Maximum source-level nesting depth accepted before parsing. oxc's
 /// recursive-descent parser has **no** internal depth/stack guard (only a 4 GiB
@@ -144,11 +146,11 @@ const MAX_SOURCE_NESTING_DEPTH: usize = 200;
 /// * the length of a run of statement labels (`a:b:c:…`), each labelling
 ///   the next.
 ///
-/// The scan is intentionally *not* string/comment aware: counting brackets that
-/// happen to sit inside a string literal can only *over*-estimate nesting, so it
-/// never lets a genuinely dangerous input through — at worst it skips analysis
-/// of a script that crams 200+ literal brackets into a string, which is itself
-/// pathological. A comment or string holding a 200+ character run of `-`
+/// The scan is *not* string/comment aware, so it is a heuristic: closers in a
+/// string lower the count while the parser keeps nesting, and a byte the scan
+/// does not classify (`/**/`, U+00A0) resets a run the parser continues. The
+/// length-scaled stack ([`analyze_stack_bytes`]) is what keeps those from
+/// overflowing; this scan keeps the plain shapes from committing that stack. A comment or string holding a 200+ character run of `-`
 /// or `+` is skipped the same way. Returns `true` when any measure exceeds
 /// [`MAX_SOURCE_NESTING_DEPTH`].
 fn source_nesting_exceeds_limit(source: &str) -> bool {
@@ -248,18 +250,17 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
 /// 1. **Length cap** ([`MAX_ANALYZE_SOURCE_BYTES`]): every nesting level
 ///    costs ≥1 source byte, so bounding length bounds the achievable parser
 ///    depth. Oversized blocks are skipped (best-effort).
-/// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): rejects the
-///    1-byte-per-level vectors (`((((…`, `!!!!…`) that would otherwise blow
-///    the budget the length cap alone allows.
-/// 3. **Large parse stack** ([`ANALYZE_STACK_BYTES`]): the surviving
-///    multi-byte chains (`if(a)if(b)…`, `x=y=z=…`) still recurse in the
-///    parser, so input above [`INLINE_PARSE_BYTES`] runs `parse` on a
-///    dedicated big-stack thread. `scope` keeps it synchronous and lets the
-///    closure borrow.
+/// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): skips the plain
+///    deep shapes (`((((…`, `!!!!…`, `a:a:…`) before they commit hundreds of
+///    MiB of stack. It is a heuristic, not the bound.
+/// 3. **Length-scaled parse stack** ([`analyze_stack_bytes`]): the bound.
+///    Input above [`INLINE_PARSE_BYTES`] runs `parse` on a dedicated thread
+///    whose stack holds the deepest parse that many bytes can drive.
+///    `scope` keeps it synchronous and lets the closure borrow.
 ///
 /// Returns `None` when the input was skipped, the thread could not be spawned,
 /// or `parse` panicked. A spawn failure must NOT fall back to an inline parse:
-/// a guard-approved ~512 KiB chain can need tens of MiB of stack.
+/// a ~512 KiB script can need up to ~1 GiB of stack.
 pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + Send) -> Option<T> {
     if let Some(reason) = parse_skip_reason(source) {
         crate::dbg_log!(
@@ -275,7 +276,7 @@ pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + S
     }
     std::thread::scope(|scope| {
         match std::thread::Builder::new()
-            .stack_size(ANALYZE_STACK_BYTES)
+            .stack_size(analyze_stack_bytes(source.len()))
             .spawn_scoped(scope, parse)
         {
             // A panic inside the parse (not a stack overflow, which would abort
