@@ -5054,4 +5054,29 @@ async fn ast_skipped_scripts_surface_in_the_meta_envelope() {
     assert_eq!(row["ast_skipped"], expected);
     assert_eq!(row["status"], "clean", "no detection change, only the note");
     assert_eq!(outcome, ScanOutcome::Clean);
+
+    // The plain renderer prints the WRN line from the same total.
+    let state = make_scan_state(vec![]);
+    state.ast_skipped.lock().await.insert(
+        "https://example.com".to_string(),
+        crate::scanning::ast_integration::AstSkips {
+            size: 1,
+            ..Default::default()
+        },
+    );
+    let mut args = default_scan_args();
+    args.format = "plain".to_string();
+    args.output = Some(temp_out_path("ast_skip_plain"));
+    let urls = vec!["https://example.com".to_string()];
+    let (results, write_failed) = render_results(
+        &args,
+        &state,
+        &refs(&urls),
+        std::time::Duration::from_millis(7),
+        requests,
+        false,
+        None,
+    )
+    .await;
+    assert!(results.is_empty() && !write_failed);
 }
