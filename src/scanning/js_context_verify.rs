@@ -1184,12 +1184,8 @@ fn marker_in_exec_sink_on_stack(script_src: &str, marker: &str) -> bool {
         return true;
     }
     let ret_script = Parser::new(&allocator, script_src, SourceType::script()).parse();
-    if ret_script.errors.is_empty()
+    ret_script.errors.is_empty()
         && check_marker_in_statements(&ret_script.program.body, script_src, marker)
-    {
-        return true;
-    }
-    false
 }
 
 fn check_marker_in_statements(stmts: &[Statement<'_>], script_src: &str, marker: &str) -> bool {
