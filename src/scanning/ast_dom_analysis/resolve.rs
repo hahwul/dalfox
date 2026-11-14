@@ -390,7 +390,8 @@ impl<'a> DomXssVisitor<'a> {
 /// Sinks where a tainted value is only script when it supplies the URL's
 /// *scheme* (`javascript:`): navigation and link targets. `src` is not one — a
 /// script `src` is dangerous through its host, which a fixed scheme does not
-/// pin.
+/// pin. A trusted resource URL is one: it is overwhelmingly a frame `src`
+/// (`'https://www.youtube.com/embed/' + id`), which navigates the frame.
 pub(crate) fn is_navigation_sink(sink: &str) -> bool {
     let sink = attribute_sink_target(sink);
     matches!(
@@ -403,9 +404,29 @@ pub(crate) fn is_navigation_sink(sink: &str) -> bool {
             | "window.open"
             | "self.open"
             | "globalThis.open"
+            | "bypassSecurityTrustResourceUrl"
+            | "trustAsResourceUrl"
     ) || ["location.href", "location.assign", "location.replace"]
         .iter()
         .any(|s| sink.ends_with(s))
+}
+
+/// Angular `DomSanitizer` / AngularJS `$sce` methods that mark their argument
+/// trusted for an HTML, script or resource-URL binding.
+pub(crate) fn is_trust_bypass_sink(method: &str) -> bool {
+    is_trust_bypass_script_sink(method)
+        || matches!(
+            method,
+            "bypassSecurityTrustHtml"
+                | "bypassSecurityTrustResourceUrl"
+                | "trustAsHtml"
+                | "trustAsResourceUrl"
+        )
+}
+
+/// The [`is_trust_bypass_sink`] methods whose argument is run as script.
+pub(crate) fn is_trust_bypass_script_sink(method: &str) -> bool {
+    matches!(method, "bypassSecurityTrustScript" | "trustAsJs")
 }
 
 /// The attribute an attribute-setting sink names (`setAttribute:href` →

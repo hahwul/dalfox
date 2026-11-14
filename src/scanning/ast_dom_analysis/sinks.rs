@@ -1281,6 +1281,56 @@ impl<'a> DomXssVisitor<'a> {
             self.report_vulnerability_with_source(call.span(), "jQuery$", source);
         }
     }
+    /// A hyperscript call that sets `innerHTML` as an element prop:
+    /// `h("div", {innerHTML: x})`, and what Vue 3 compiles `v-html` to,
+    /// `createElementVNode("div", {innerHTML: x}, null, 8, ["innerHTML"])`.
+    /// The callee is whatever the minifier renamed it to, so the shape is the
+    /// anchor: argument 0 a string-literal tag name, argument 1 an object
+    /// literal. An `innerHTML` key anywhere else (a translation table, a
+    /// config object, a component's props) stays an ordinary key.
+    pub(super) fn report_vnode_inner_html(&mut self, call: &CallExpression<'a>) {
+        let mut args = call.arguments.iter().map(Argument::as_expression);
+        let (Some(Some(tag)), Some(Some(props))) = (args.next(), args.next()) else {
+            return;
+        };
+        let Expression::StringLiteral(tag) = tag.without_parentheses() else {
+            return;
+        };
+        let tag = tag.value.as_str();
+        let is_tag_name = tag.starts_with(|c: char| c.is_ascii_alphabetic())
+            && tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        if !is_tag_name {
+            return;
+        }
+        if let Expression::ObjectExpression(props) = props.without_parentheses() {
+            self.report_tainted_html_key(props, "innerHTML", "innerHTML");
+        }
+    }
+    /// Angular's `DomSanitizer.bypassSecurityTrust*` and AngularJS's
+    /// `$sce.trustAs*`: calls that exist only to mark a value safe for an
+    /// HTML, script or resource-URL binding, so a tainted argument reaches
+    /// that binding unsanitized. The method names survive minification; the
+    /// receiver (`this.s`, an injected `e`) does not, so it is not checked.
+    pub(super) fn handle_trust_bypass_sink(&mut self, call: &CallExpression<'a>) -> bool {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        if !is_trust_bypass_sink(&method) {
+            return false;
+        }
+        let Some(arg) = call.arguments.first() else {
+            return false;
+        };
+        let (tainted, source) = self.for_sink(&method, |v| v.argument_taint_and_source(arg));
+        let pinned = arg
+            .as_expression()
+            .is_some_and(|e| self.url_sink_is_pinned(&method, e));
+        if !tainted || pinned {
+            return false;
+        }
+        self.report_vulnerability_with_source(call.span(), &method, source);
+        true
+    }
     /// `Object.assign(target, {...})` writing a sink property.
     ///
     /// The property setter still runs, so `Object.assign(location, {href: q})`
@@ -1463,6 +1513,12 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         if self.handle_object_assign_sink(call) {
+            return;
+        }
+
+        self.report_vnode_inner_html(call);
+
+        if self.handle_trust_bypass_sink(call) {
             return;
         }
 

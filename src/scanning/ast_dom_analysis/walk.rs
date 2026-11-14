@@ -481,25 +481,41 @@ impl<'a> DomXssVisitor<'a> {
         self.current_class = outer;
     }
 
-    /// React's `dangerouslySetInnerHTML: { __html: x }` (JSX compiles to this
-    /// props object): `x` is written to `innerHTML` unescaped.
+    /// A props-object entry a framework writes to `innerHTML` unescaped:
+    /// React's `dangerouslySetInnerHTML: { __html: x }` (JSX compiles to
+    /// this) and a Vue 2 render function's `domProps: { innerHTML: x }`
+    /// (what `v-html` compiles to). Both key names survive minification and
+    /// mean nothing else.
     pub(super) fn report_dangerously_set_inner_html(&mut self, property: &ObjectProperty<'a>) {
-        if property.computed
-            || property.key.static_name().as_deref() != Some("dangerouslySetInnerHTML")
-        {
+        if property.computed {
             return;
         }
+        let (html_key, sink) = match property.key.static_name().as_deref() {
+            Some("dangerouslySetInnerHTML") => ("__html", "dangerouslySetInnerHTML"),
+            Some("domProps") => ("innerHTML", "innerHTML"),
+            _ => return,
+        };
         let Expression::ObjectExpression(inner) = property.value.without_parentheses() else {
             return;
         };
-        for inner_prop in &inner.properties {
-            if let ObjectPropertyKind::ObjectProperty(html) = inner_prop
+        self.report_tainted_html_key(inner, html_key, sink);
+    }
+
+    /// Report `props`' own `key: x` entry as `sink` when `x` is tainted.
+    pub(super) fn report_tainted_html_key(
+        &mut self,
+        props: &ObjectExpression<'a>,
+        key: &str,
+        sink: &str,
+    ) {
+        for prop in &props.properties {
+            if let ObjectPropertyKind::ObjectProperty(html) = prop
                 && !html.computed
-                && html.key.static_name().as_deref() == Some("__html")
-                && self.is_tainted(&html.value)
+                && html.key.static_name().as_deref() == Some(key)
+                && self.for_sink(sink, |v| v.is_tainted(&html.value))
             {
                 let source = self.find_source_in_expr(&html.value);
-                self.report_vulnerability_with_source(html.span, "dangerouslySetInnerHTML", source);
+                self.report_vulnerability_with_source(html.span, sink, source);
                 return;
             }
         }
