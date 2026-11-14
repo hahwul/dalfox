@@ -36,9 +36,7 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 pub use reflected_markup::PageMarkup;
-pub(crate) use resolve::{
-    attribute_sink_target, is_navigation_sink, is_trust_bypass_script_sink, is_trust_bypass_sink,
-};
+pub(crate) use resolve::{attribute_sink_target, is_navigation_sink};
 use scoped_state::{ScopedMap, ScopedSet};
 use url_lead::UrlLead;
 
@@ -780,7 +778,6 @@ impl SinkCtx {
                     | "$.globalEval"
                     | "jQuery.globalEval"
             )
-            || is_trust_bypass_script_sink(target)
         {
             SinkCtx::Code
         } else if is_navigation_sink(sink)
@@ -972,6 +969,8 @@ const DOM_SINKS: &[&str] = &[
 
 const DOM_SANITIZERS: &[&str] = &[
     "DOMPurify.sanitize",
+    // AngularJS ngSanitize.
+    "$sanitize",
     "encodeURIComponent",
     "encodeURI",
     "encodeHTML",

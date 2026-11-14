@@ -706,8 +706,7 @@ pub(crate) fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String)
                 | "script.innerHTML"
                 | "$.globalEval"
                 | "jQuery.globalEval"
-        )
-        || crate::scanning::ast_dom_analysis::is_trust_bypass_script_sink(target);
+        );
     // Navigation sinks (`location.href`, `a.href`, `window.open`, a form
     // action, …): only a `javascript:` URL runs there — a top-level `data:`
     // navigation is blocked, and an HTML payload is just a relative path.

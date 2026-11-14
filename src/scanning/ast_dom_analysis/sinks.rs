@@ -1285,9 +1285,10 @@ impl<'a> DomXssVisitor<'a> {
     /// `h("div", {innerHTML: x})`, and what Vue 3 compiles `v-html` to,
     /// `createElementVNode("div", {innerHTML: x}, null, 8, ["innerHTML"])`.
     /// The callee is whatever the minifier renamed it to, so the shape is the
-    /// anchor: argument 0 a string-literal tag name, argument 1 an object
-    /// literal. An `innerHTML` key anywhere else (a translation table, a
-    /// config object, a component's props) stays an ordinary key.
+    /// anchor: argument 0 a string literal naming an element, argument 1 an
+    /// object literal (or Vue's `mergeProps(…)` / `normalizeProps(…)` around
+    /// one). An `innerHTML` key anywhere else (a translation table, an event
+    /// payload, a component's props) stays an ordinary key.
     pub(super) fn report_vnode_inner_html(&mut self, call: &CallExpression<'a>) {
         let mut args = call.arguments.iter().map(Argument::as_expression);
         let (Some(Some(tag)), Some(Some(props))) = (args.next(), args.next()) else {
@@ -1296,40 +1297,110 @@ impl<'a> DomXssVisitor<'a> {
         let Expression::StringLiteral(tag) = tag.without_parentheses() else {
             return;
         };
+        // React's element factories ignore an `innerHTML` prop.
+        let react_factory = resolve::unwrap_comma_callee(&call.callee)
+            .and_then(|callee| self.get_callee_property_name(callee))
+            .is_some_and(|name| {
+                matches!(name.as_str(), "createElement" | "jsx" | "jsxs" | "jsxDEV")
+            });
         let tag = tag.value.as_str();
-        let is_tag_name = tag.starts_with(|c: char| c.is_ascii_alphabetic())
-            && tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-        if !is_tag_name {
+        if react_factory || !resolve::is_markup_element_name(tag) {
             return;
         }
-        if let Expression::ObjectExpression(props) = props.without_parentheses() {
-            self.report_tainted_html_key(props, "innerHTML", "innerHTML");
+        let mut literals = Vec::new();
+        Self::props_literals(props, 2, &mut literals);
+        for props in literals {
+            // A `<script>`'s content runs, unless its `type` says it is data.
+            let sink = if tag != "script" {
+                "innerHTML"
+            } else if Self::props_type_is_data(props) {
+                continue;
+            } else {
+                "script.innerHTML"
+            };
+            self.report_tainted_html_key(props, &["innerHTML", ".innerHTML"], sink);
         }
     }
-    /// Angular's `DomSanitizer.bypassSecurityTrust*` and AngularJS's
-    /// `$sce.trustAs*`: calls that exist only to mark a value safe for an
-    /// HTML, script or resource-URL binding, so a tainted argument reaches
-    /// that binding unsanitized. The method names survive minification; the
-    /// receiver (`this.s`, an injected `e`) does not, so it is not checked.
-    pub(super) fn handle_trust_bypass_sink(&mut self, call: &CallExpression<'a>) -> bool {
+    /// The object literals a vnode's props argument is built from: itself, or
+    /// the literal arguments of the call(s) wrapping it (`mergeProps(a, {…})`,
+    /// `normalizeProps(guardReactiveProps({…}))`).
+    fn props_literals<'b>(
+        expr: &'b Expression<'a>,
+        depth: u8,
+        out: &mut Vec<&'b ObjectExpression<'a>>,
+    ) {
+        match expr.without_parentheses() {
+            Expression::ObjectExpression(object) => out.push(object),
+            Expression::CallExpression(call) if depth > 0 => {
+                for arg in call.arguments.iter().filter_map(Argument::as_expression) {
+                    Self::props_literals(arg, depth - 1, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    /// A `<script>` vnode whose literal `type` is not JavaScript
+    /// (`application/ld+json`): its content is data, never run.
+    fn props_type_is_data(props: &ObjectExpression<'a>) -> bool {
+        props.properties.iter().any(|prop| {
+            if let ObjectPropertyKind::ObjectProperty(p) = prop
+                && !p.computed
+                && p.key.static_name().as_deref() == Some("type")
+                && let Expression::StringLiteral(ty) = p.value.without_parentheses()
+            {
+                let ty = ty.value.to_ascii_lowercase();
+                !(ty.is_empty() || ty == "module" || ty.contains("javascript"))
+            } else {
+                false
+            }
+        })
+    }
+    /// Angular's `DomSanitizer.bypassSecurityTrustHtml` / `…ResourceUrl` and
+    /// AngularJS's `$sce.trustAsHtml` / `trustAsResourceUrl` /
+    /// `trustAs(type, value)`: calls that exist only to mark a value safe for
+    /// an HTML or resource-URL binding, so a tainted argument reaches that
+    /// binding unsanitized. The method names survive minification; the
+    /// receiver (`this.s`, an injected `e`) does not, so it is not checked —
+    /// except that a method the page defines under one of these names is
+    /// judged by its own body.
+    pub(super) fn report_trust_bypass(&mut self, call: &CallExpression<'a>) {
         let Some(method) = self.get_callee_property_name(&call.callee) else {
-            return false;
+            return;
         };
-        if !is_trust_bypass_sink(&method) {
-            return false;
+        let (sink, value) = if method == "trustAs" {
+            let kind = call.arguments.first().and_then(Argument::as_expression);
+            let kind = kind.and_then(|kind| match kind.without_parentheses() {
+                Expression::StringLiteral(s) => Some(s.value.to_string()),
+                Expression::StaticMemberExpression(m) => Some(m.property.name.to_string()),
+                _ => None,
+            });
+            let sink = match kind.as_deref() {
+                Some("html" | "HTML") => "trustAsHtml",
+                Some("resourceUrl" | "RESOURCE_URL") => "trustAsResourceUrl",
+                _ => return,
+            };
+            (sink, call.arguments.get(1))
+        } else if resolve::is_trust_bypass_sink(&method) {
+            (method.as_str(), call.arguments.first())
+        } else {
+            return;
+        };
+        let Some(value) = value else {
+            return;
+        };
+        if self
+            .get_summary_key_for_callee_expr(&call.callee)
+            .is_some_and(|key| self.summary(&key).is_some())
+        {
+            return;
         }
-        let Some(arg) = call.arguments.first() else {
-            return false;
-        };
-        let (tainted, source) = self.for_sink(&method, |v| v.argument_taint_and_source(arg));
-        let pinned = arg
+        let (tainted, source) = self.for_sink(sink, |v| v.argument_taint_and_source(value));
+        let pinned = value
             .as_expression()
-            .is_some_and(|e| self.url_sink_is_pinned(&method, e));
-        if !tainted || pinned {
-            return false;
+            .is_some_and(|e| self.url_sink_is_pinned(sink, e));
+        if tainted && !pinned {
+            self.report_vulnerability_with_source(call.span(), sink, source);
         }
-        self.report_vulnerability_with_source(call.span(), &method, source);
-        true
     }
     /// `Object.assign(target, {...})` writing a sink property.
     ///
@@ -1517,10 +1588,7 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         self.report_vnode_inner_html(call);
-
-        if self.handle_trust_bypass_sink(call) {
-            return;
-        }
+        self.report_trust_bypass(call);
 
         if self.handle_exec_callback_iteration(call) {
             return;

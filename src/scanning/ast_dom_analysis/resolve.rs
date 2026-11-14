@@ -412,21 +412,113 @@ pub(crate) fn is_navigation_sink(sink: &str) -> bool {
 }
 
 /// Angular `DomSanitizer` / AngularJS `$sce` methods that mark their argument
-/// trusted for an HTML, script or resource-URL binding.
-pub(crate) fn is_trust_bypass_sink(method: &str) -> bool {
-    is_trust_bypass_script_sink(method)
-        || matches!(
-            method,
-            "bypassSecurityTrustHtml"
-                | "bypassSecurityTrustResourceUrl"
-                | "trustAsHtml"
-                | "trustAsResourceUrl"
-        )
+/// trusted for an HTML or resource-URL binding. `bypassSecurityTrustScript`
+/// and `trustAsJs` are left out: neither framework binds a script context,
+/// so the value runs only if app code evaluates it, which is its own sink.
+pub(super) fn is_trust_bypass_sink(method: &str) -> bool {
+    matches!(
+        method,
+        "bypassSecurityTrustHtml"
+            | "bypassSecurityTrustResourceUrl"
+            | "trustAsHtml"
+            | "trustAsResourceUrl"
+    )
 }
 
-/// The [`is_trust_bypass_sink`] methods whose argument is run as script.
-pub(crate) fn is_trust_bypass_script_sink(method: &str) -> bool {
-    matches!(method, "bypassSecurityTrustScript" | "trustAsJs")
+/// An element whose `innerHTML` is parsed as markup that can run script: a
+/// known HTML element or a custom element (`my-card`), other than the ones
+/// whose content is text (`style`, `textarea`, `title`). An arbitrary word
+/// (`"click"`, `"welcome"`) is an event name or a message key, not a tag.
+pub(super) fn is_markup_element_name(tag: &str) -> bool {
+    const ELEMENTS: &[&str] = &[
+        "a",
+        "abbr",
+        "address",
+        "article",
+        "aside",
+        "b",
+        "bdi",
+        "bdo",
+        "blockquote",
+        "body",
+        "button",
+        "caption",
+        "center",
+        "cite",
+        "code",
+        "dd",
+        "del",
+        "details",
+        "dfn",
+        "dialog",
+        "div",
+        "dl",
+        "dt",
+        "em",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "font",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "head",
+        "header",
+        "hgroup",
+        "html",
+        "i",
+        "ins",
+        "kbd",
+        "label",
+        "legend",
+        "li",
+        "main",
+        "mark",
+        "menu",
+        "nav",
+        "ol",
+        "output",
+        "p",
+        "pre",
+        "q",
+        "s",
+        "samp",
+        "script",
+        "search",
+        "section",
+        "small",
+        "span",
+        "strike",
+        "strong",
+        "sub",
+        "summary",
+        "sup",
+        "svg",
+        "table",
+        "tbody",
+        "td",
+        "template",
+        "tfoot",
+        "th",
+        "thead",
+        "time",
+        "tr",
+        "tt",
+        "u",
+        "ul",
+        "var",
+    ];
+    let custom = tag.contains('-')
+        && tag.starts_with(|c: char| c.is_ascii_lowercase())
+        && tag
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_'));
+    ELEMENTS.contains(&tag.to_ascii_lowercase().as_str()) || custom
 }
 
 /// The attribute an attribute-setting sink names (`setAttribute:href` →

@@ -569,8 +569,9 @@ fn sinks_of(js: &str) -> Vec<String> {
 
 /// Framework output keeps its property and method names through a minifier,
 /// whatever the callee and receiver were renamed to: an `innerHTML` prop on a
-/// string-tagged vnode (Vue 3 `v-html`, `h()`), `domProps.innerHTML` (Vue 2
-/// render functions), and the Angular / AngularJS trust-bypass calls.
+/// vnode tagged with an element name (Vue 3 `v-html`, `h()`),
+/// `domProps.innerHTML` (Vue 2 render functions), and the Angular /
+/// AngularJS trust-bypass calls.
 #[test]
 fn framework_html_sinks_are_keyed_on_names_minifiers_keep() {
     for (js, sink) in [
@@ -591,24 +592,24 @@ fn framework_html_sinks_are_keyed_on_names_minifiers_keep() {
             "bypassSecurityTrustHtml",
         ),
         (
-            "t.bypassSecurityTrustScript(decodeURIComponent(location.hash.slice(1)))",
-            "bypassSecurityTrustScript",
-        ),
-        (
             "var u=new URLSearchParams(location.search).get('u');n.bypassSecurityTrustResourceUrl(u)",
             "bypassSecurityTrustResourceUrl",
         ),
         ("e.trustAsHtml(location.hash.substr(1))", "trustAsHtml"),
-        ("$sce.trustAsJs(location.hash.substr(1))", "trustAsJs"),
+        // The generic AngularJS form names the context in argument 0.
+        (
+            "$sce.trustAs($sce.HTML, location.hash.substr(1))",
+            "trustAsHtml",
+        ),
+        (
+            r#"$sceDelegate.trustAs("resourceUrl", location.hash.substr(1))"#,
+            "trustAsResourceUrl",
+        ),
         (
             "$sce.trustAsResourceUrl(location.hash.substr(1))",
             "trustAsResourceUrl",
         ),
-        // An HTML sanitizer does not make a value safe to run or to load.
-        (
-            "t.bypassSecurityTrustScript(DOMPurify.sanitize(location.hash.slice(1)))",
-            "bypassSecurityTrustScript",
-        ),
+        // An HTML sanitizer does not make a URL safe to load.
         (
             "$sce.trustAsResourceUrl(DOMPurify.sanitize(location.hash.slice(1)))",
             "trustAsResourceUrl",
@@ -627,6 +628,30 @@ fn framework_html_sinks_are_keyed_on_names_minifiers_keep() {
             r##"var Xs=Ai(()=>{$i();new A({el:"#app",render(e){var t=location.hash.slice(1);return e("div",{domProps:{innerHTML:t}})}})});Xs();"##,
             "innerHTML",
         ),
+        // Vue 3 wraps the props when `v-html` meets `v-bind="obj"`, and
+        // compiles `.innerHTML="q"` to a dotted key.
+        (
+            r#"var q=location.hash.slice(1);_createElementVNode("div",_mergeProps(_ctx.$attrs,{innerHTML:q}),null,16,["innerHTML"])"#,
+            "innerHTML",
+        ),
+        (
+            r#"var q=location.hash.slice(1);_createElementVNode("div",_normalizeProps(_guardReactiveProps({innerHTML:q})),null,16)"#,
+            "innerHTML",
+        ),
+        (
+            r#"var q=location.hash.slice(1);h("div",{".innerHTML":q},null,8,[".innerHTML"])"#,
+            "innerHTML",
+        ),
+        // A `<script>` vnode's content runs.
+        (
+            r#"var q=location.hash.slice(1);h("script",{innerHTML:q})"#,
+            "script.innerHTML",
+        ),
+        // A page method that only forwards to the framework's.
+        (
+            "var svc={trustAsHtml:function(v){return $sce.trustAsHtml(v)}}; $scope.h=svc.trustAsHtml(location.hash.slice(1));",
+            "trustAsHtml",
+        ),
         // vue-template-compiler quotes the key.
         (
             r#"function r(){var q=location.hash.slice(1);return _c('div',{domProps:{"innerHTML":_s(q)}})}"#,
@@ -638,7 +663,7 @@ fn framework_html_sinks_are_keyed_on_names_minifiers_keep() {
 }
 
 /// The same names where they are not that sink: an `innerHTML` key that is
-/// not a prop of a string-tagged vnode, a sanitized or constant value, and a
+/// not a prop of an element vnode, a sanitized or constant value, and a
 /// resource URL whose start the attacker does not write.
 #[test]
 fn framework_html_sink_lookalikes_are_clean() {
@@ -662,7 +687,63 @@ fn framework_html_sink_lookalikes_are_clean() {
         // A resource URL behind a fixed prefix cannot become `javascript:`.
         "var id=location.hash.slice(1); s.bypassSecurityTrustResourceUrl('https://www.youtube.com/embed/'+id);",
         "$sce.trustAsResourceUrl('/x?q='+new URLSearchParams(location.search).get('q'));",
-        // The other bypass methods are not HTML/script/resource sinks.
+        // The other bypass methods are not HTML or resource-URL sinks; nothing
+        // binds a script context, and `trustAs` needs a context it names.
         "s.bypassSecurityTrustStyle(location.hash.slice(1));",
+        "s.bypassSecurityTrustScript(location.hash.slice(1));",
+        "$sce.trustAsJs(location.hash.slice(1));",
+        "$sce.trustAs($sce.CSS, location.hash.slice(1));",
+        "$sce.trustAs(kind, location.hash.slice(1));",
+        // The frameworks' own sanitizers in front of the bypass.
+        "$sce.trustAsHtml($sanitize(location.hash.slice(1)));",
+        "this.sanitizer.bypassSecurityTrustHtml(this.sanitizer.sanitize(1, location.hash.slice(1)));",
+        "s.bypassSecurityTrustHtml(s.sanitize(SecurityContext.HTML, location.hash.slice(1)));",
+        // A method the page defines under the same name is judged by its body.
+        "var svc={trustAsHtml:function(v){return $sce.trustAsHtml(DOMPurify.sanitize(v))}}; $scope.h=svc.trustAsHtml(location.hash.slice(1));",
+        r#"class U{trustAsHtml(v){return String(v).replace(/</g,"&lt;")}} x.textContent=new U().trustAsHtml(location.hash);"#,
+        // A word that is not an element, React's factories (which ignore the
+        // prop), and elements whose content is text or data.
+        r#"var q=location.hash.slice(1); track("click",{innerHTML:q});"#,
+        r#"var q=location.hash.slice(1); t("welcome",{innerHTML:q});"#,
+        r#"var q=location.hash.slice(1); bus.emit("update",{innerHTML:q});"#,
+        r#"var q=location.hash.slice(1); React.createElement("div",{innerHTML:q});"#,
+        r#"var q=location.hash.slice(1); (0,r.jsx)("div",{innerHTML:q});"#,
+        r#"var q=location.hash.slice(1); h("style",{innerHTML:":root{--c:"+q+"}"});"#,
+        r#"var q=location.hash.slice(1); h("textarea",{innerHTML:q});"#,
+        r#"h("script",{type:"application/ld+json",innerHTML:JSON.stringify({url:location.href})});"#,
     ]);
+}
+
+/// A trust-bypass call does not hide what its arguments and receiver do:
+/// the flows inside them are still walked, and its result is still tainted.
+#[test]
+fn a_trust_bypass_call_keeps_the_flows_around_it() {
+    for (js, sinks) in [
+        (
+            "var q=location.hash.slice(1); s.bypassSecurityTrustHtml(eval(q));",
+            vec!["eval", "bypassSecurityTrustHtml"],
+        ),
+        (
+            "var q=location.hash.slice(1); s.bypassSecurityTrustHtml(q,function(){el.innerHTML=q});",
+            vec!["bypassSecurityTrustHtml", "innerHTML"],
+        ),
+        (
+            "var q=location.hash.slice(1); mk(function(){document.write(q)}).bypassSecurityTrustHtml(q);",
+            vec!["bypassSecurityTrustHtml", "document.write"],
+        ),
+        (
+            r#"var q=location.hash.slice(1); s.bypassSecurityTrustHtml(h("div",{innerHTML:q}));"#,
+            vec!["bypassSecurityTrustHtml", "innerHTML"],
+        ),
+        (
+            "var q=location.hash.slice(1); var t=s.bypassSecurityTrustHtml(q); el.innerHTML=t;",
+            vec!["bypassSecurityTrustHtml", "innerHTML"],
+        ),
+    ] {
+        let mut got = sinks_of(js);
+        got.sort();
+        let mut want: Vec<String> = sinks.iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(got, want, "{js}");
+    }
 }

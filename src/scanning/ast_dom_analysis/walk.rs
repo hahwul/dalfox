@@ -498,20 +498,24 @@ impl<'a> DomXssVisitor<'a> {
         let Expression::ObjectExpression(inner) = property.value.without_parentheses() else {
             return;
         };
-        self.report_tainted_html_key(inner, html_key, sink);
+        self.report_tainted_html_key(inner, &[html_key], sink);
     }
 
-    /// Report `props`' own `key: x` entry as `sink` when `x` is tainted.
+    /// Report `props`' own entry under one of `keys` as `sink` when its value
+    /// is tainted.
     pub(super) fn report_tainted_html_key(
         &mut self,
         props: &ObjectExpression<'a>,
-        key: &str,
+        keys: &[&str],
         sink: &str,
     ) {
         for prop in &props.properties {
             if let ObjectPropertyKind::ObjectProperty(html) = prop
                 && !html.computed
-                && html.key.static_name().as_deref() == Some(key)
+                && html
+                    .key
+                    .static_name()
+                    .is_some_and(|name| keys.contains(&name.as_ref()))
                 && self.for_sink(sink, |v| v.is_tainted(&html.value))
             {
                 let source = self.find_source_in_expr(&html.value);
