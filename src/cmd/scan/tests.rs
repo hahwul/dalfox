@@ -1016,6 +1016,7 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         session_baselines: Arc::new(Mutex::new(HashMap::new())),
         session_lost: Arc::new(Mutex::new(HashMap::new())),
         interrupted_targets: Arc::new(Mutex::new(HashMap::new())),
+        ast_skipped: Arc::new(Mutex::new(HashMap::new())),
         multi_pb: None,
         preflight_idx: Arc::new(AtomicUsize::new(0)),
         analyze_idx: Arc::new(AtomicUsize::new(0)),
@@ -5012,4 +5013,70 @@ async fn preflight_keeps_the_prefix_when_the_full_page_fetch_fails() {
     };
     handle.abort();
     assert_eq!(preflight.response_body.as_deref(), Some("<html>prefix"));
+}
+
+/// Scripts the AST pass could not read surface on the target's summary row
+/// and in `meta`, without changing its status: "clean" still means nothing
+/// was found, `ast_skipped` says what was never read.
+#[tokio::test]
+async fn ast_skipped_scripts_surface_in_the_meta_envelope() {
+    let requests = crate::cmd::scan::output::RequestTally { sent: 3, failed: 0 };
+    let (plain, outcome) = render_and_exit(
+        default_scan_args(),
+        make_scan_state(vec![]),
+        requests,
+        "ast_skip_none",
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&plain).expect("valid json");
+    assert!(
+        v["meta"].get("ast_skipped").is_none(),
+        "absent when nothing was skipped"
+    );
+    assert!(v["meta"]["target_summary"][0].get("ast_skipped").is_none());
+    assert_eq!(outcome, ScanOutcome::Clean);
+
+    let state = make_scan_state(vec![]);
+    state.ast_skipped.lock().await.insert(
+        "https://example.com".to_string(),
+        crate::scanning::ast_integration::AstSkips {
+            size: 2,
+            nesting: 1,
+            limit: 0,
+        },
+    );
+    let (out, outcome) =
+        render_and_exit(default_scan_args(), state, requests, "ast_skip_some").await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+    let expected = serde_json::json!({"scripts": 3, "reasons": {"size": 2, "nesting": 1}});
+    assert_eq!(v["meta"]["ast_skipped"], expected);
+    let row = &v["meta"]["target_summary"][0];
+    assert_eq!(row["ast_skipped"], expected);
+    assert_eq!(row["status"], "clean", "no detection change, only the note");
+    assert_eq!(outcome, ScanOutcome::Clean);
+
+    // The plain renderer prints the WRN line from the same total.
+    let state = make_scan_state(vec![]);
+    state.ast_skipped.lock().await.insert(
+        "https://example.com".to_string(),
+        crate::scanning::ast_integration::AstSkips {
+            size: 1,
+            ..Default::default()
+        },
+    );
+    let mut args = default_scan_args();
+    args.format = "plain".to_string();
+    args.output = Some(temp_out_path("ast_skip_plain"));
+    let urls = vec!["https://example.com".to_string()];
+    let (results, write_failed) = render_results(
+        &args,
+        &state,
+        &refs(&urls),
+        std::time::Duration::from_millis(7),
+        requests,
+        false,
+        None,
+    )
+    .await;
+    assert!(results.is_empty() && !write_failed);
 }

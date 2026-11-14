@@ -809,6 +809,24 @@ fn test_results_to_markdown_with_meta_shows_fail_on() {
     );
 }
 
+/// The `ast_skipped` meta gets its own row, like the other "this report is
+/// not the whole picture" fields.
+#[test]
+fn test_results_to_markdown_with_meta_shows_ast_skipped() {
+    let mut meta = mk_meta();
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(
+        !md.contains("AST Skipped"),
+        "absent when nothing was skipped"
+    );
+    meta.ast_skipped = Some(serde_json::json!({"scripts": 3, "reasons": {"size": 3}}));
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(
+        md.contains("| **AST Skipped** | 3 script(s) not analyzed |"),
+        "{md}"
+    );
+}
+
 #[test]
 fn test_results_to_toml_with_meta() {
     let result = Result::builder(FindingType::Verified)

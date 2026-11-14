@@ -177,6 +177,13 @@ impl Result {
                     c.get("dropped").and_then(|v| v.as_u64()).unwrap_or(0)
                 );
             }
+            if let Some(s) = &m.ast_skipped {
+                let _ = writeln!(
+                    out,
+                    "| **AST Skipped** | {} script(s) not analyzed |",
+                    s.get("scripts").and_then(|v| v.as_u64()).unwrap_or(0)
+                );
+            }
             if let Some(f) = &m.fail_on {
                 let _ = writeln!(
                     out,

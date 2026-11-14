@@ -1871,3 +1871,51 @@ fn form_ids_prescan_and_form_action_payload() {
         "{payload}"
     );
 }
+
+/// A script the analyzer refuses is counted by reason, so a page whose only
+/// real code went unread is not reported as a clean one.
+#[test]
+fn initial_pass_counts_scripts_it_could_not_read() {
+    let big = format!(
+        "{}document.body.innerHTML = location.hash;",
+        "var a=0;".repeat(80_000)
+    );
+    let deep = format!("x={}{};", "[".repeat(3000), "]".repeat(3000));
+    let html = format!(
+        "<html><body><script>{big}</script><script>{deep}</script><script>var ok = 1;</script></body></html>"
+    );
+    let (results, skips) = run_initial_ast_dom_analysis_with_skips(
+        &html,
+        "text/html",
+        "http://h/",
+        "GET",
+        PageSecurityPosture::default(),
+    );
+    assert!(
+        results.is_empty(),
+        "the oversized flow is skipped, not analyzed"
+    );
+    assert_eq!((skips.size, skips.nesting), (1, 1));
+    assert_eq!(
+        skips.to_json(),
+        serde_json::json!({"scripts": 2, "reasons": {"size": 1, "nesting": 1}})
+    );
+    let (_, none) = run_initial_ast_dom_analysis_with_skips(
+        "<html><body><script>var ok = 1;</script></body></html>",
+        "text/html",
+        "http://h/",
+        "GET",
+        PageSecurityPosture::default(),
+    );
+    assert_eq!(none.total(), 0);
+    assert_eq!(
+        AstSkips {
+            size: 2,
+            nesting: 0,
+            limit: 0,
+        }
+        .to_json(),
+        serde_json::json!({"scripts": 2, "reasons": {"size": 2}}),
+        "a zero reason is left out"
+    );
+}

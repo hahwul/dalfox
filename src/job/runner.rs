@@ -760,7 +760,7 @@ pub(crate) async fn execute_scan(
                                         response_content_type,
                                         &body,
                                     ) {
-                                        let (ext_batch, bundle_names) =
+                                        let (ext_batch, bundle_names, _) =
                                             crate::scanning::fetch_and_analyze_external_js(
                                                 &client,
                                                 target,

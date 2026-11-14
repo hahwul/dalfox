@@ -582,6 +582,7 @@ pub(crate) async fn render_results(
     let skipped_targets = state.skipped_targets.clone();
     let target_meta = state.target_meta.clone();
     let target_mutation_stats = state.target_mutation_stats.clone();
+    let ast_skipped = state.ast_skipped.lock().await.clone();
     // `--min-confidence` runs first — before AST dedup, so dedup picks the
     // strongest *surviving* claim instead of picking a low-graded one that the
     // filter then drops along with the high-graded duplicate it beat; and
@@ -729,6 +730,9 @@ pub(crate) async fn render_results(
             if let Some(code) = error_code {
                 entry["error_code"] = serde_json::json!(code);
             }
+            if let Some(skips) = ast_skipped.get(key) {
+                entry["ast_skipped"] = skips.to_json();
+            }
             // Which signal fired, verbatim. Present for both the `incomplete`
             // case above and a `skipped` target aborted by the scan loop.
             if let Some(reason) = session_lost.get(key) {
@@ -802,6 +806,13 @@ pub(crate) async fn render_results(
     // `json` and `jsonl` arms each inlined their own copy of this object next
     // to three `ScanMetadata` literals, so every new meta field had to be added
     // in five places — and reached only the formats whose copy was remembered.
+    let ast_skipped_total = ast_skipped.values().fold(
+        crate::scanning::ast_integration::AstSkips::default(),
+        |mut sum, skips| {
+            sum.add(*skips);
+            sum
+        },
+    );
     let scan_meta = crate::scanning::result::ScanMetadata {
         dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
         // The targets as named (URLs, or the list/spec file path). A piped
@@ -842,6 +853,7 @@ pub(crate) async fn render_results(
                 "matched": final_results.iter().filter(|r| args.fails_run(r)).count(),
             })
         }),
+        ast_skipped: (ast_skipped_total.total() > 0).then(|| ast_skipped_total.to_json()),
     };
 
     let output_content = if args.format == "json" {
@@ -925,6 +937,19 @@ pub(crate) async fn render_results(
                     requests.failed,
                     requests.sent,
                     requests.failure_ratio() * 100.0
+                ),
+            );
+        }
+
+        if ast_skipped_total.total() > 0 {
+            log_warn(
+                args,
+                &format!(
+                    "AST: \x1b[33m{}\x1b[0m script(s) were not analyzed ({} over the size cap, {} nested too deeply, {} past the external-script cap) — DOM-XSS coverage of those pages is partial",
+                    ast_skipped_total.total(),
+                    ast_skipped_total.size,
+                    ast_skipped_total.nesting,
+                    ast_skipped_total.limit
                 ),
             );
         }

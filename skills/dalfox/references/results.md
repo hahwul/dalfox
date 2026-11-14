@@ -169,7 +169,7 @@ Every format except `plain` (so `markdown` too) suppresses the banner, so stdout
 }
 ```
 
-`target_summary[].status` is `clean`, `findings`, `incomplete` (ran but cut short or lost its session) or `skipped` (never analyzed), with `error_code` / `error_message` when there is a reason. Optional `meta` keys (`baseline`, `resumed`, `min_confidence`, `targets_unparsable`) appear only when they apply; `--dry-run` / `--only-discovery` use a different `meta` (`warnings`, `skipped`). `jsonl` is the same `{"meta": …}` object on line one, then one finding per line.
+`target_summary[].status` is `clean`, `findings`, `incomplete` (ran but cut short or lost its session) or `skipped` (never analyzed), with `error_code` / `error_message` when there is a reason, and `ast_skipped` `{scripts, reasons: {size, nesting, limit}}` when the AST pass could not read a landing-page script (status unchanged; a `clean` row with it had partial DOM-XSS coverage). Optional `meta` keys (`baseline`, `resumed`, `min_confidence`, `fail_on`, `ast_skipped`, `targets_unparsable`) appear only when they apply; `--dry-run` / `--only-discovery` use a different `meta` (`warnings`, `skipped`). `jsonl` is the same `{"meta": …}` object on line one, then one finding per line.
 
 **Before calling a target clean**: its row says `clean` (not `incomplete` / `skipped`), `meta.incomplete` is `false`, and `failed_requests` is small next to `total_requests`.
 

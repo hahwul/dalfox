@@ -92,7 +92,9 @@ pub(crate) async fn run_ast_dom_analysis(
                 .filter(|(_, value)| carries_param(value, injected))
                 .map(|(key, _)| key.into_owned())
                 .collect();
-            if let Some(body) = fetch_external_js(client, target, url, scan_args).await {
+            if let Some(ExternalJs::Body(body)) =
+                fetch_external_js(client, target, url, scan_args).await
+            {
                 blocks.push((body, &script_markup, Some((url_str, keys))));
             }
         }
@@ -314,15 +316,23 @@ pub(crate) async fn accumulate_findings(
 /// without a second fetch; the caller stores them in
 /// `Target::bundle_param_names`. Empty when mining will not use them.
 ///
-/// Returns two empty `Vec`s when `--analyze-external-js` is not set.
+/// The third value counts the scripts fetched but not analyzed (over the
+/// byte cap, or refused by the parser guard).
+///
+/// Returns empty values when `--analyze-external-js` is not set.
 pub(crate) async fn fetch_and_analyze_external_js(
     client: &reqwest::Client,
     target: &Target,
     html: &str,
     scan_args: &ScanArgs,
-) -> (Vec<crate::scanning::result::Result>, Vec<String>) {
+) -> (
+    Vec<crate::scanning::result::Result>,
+    Vec<String>,
+    crate::scanning::ast_integration::AstSkips,
+) {
+    let mut skips = crate::scanning::ast_integration::AstSkips::default();
     if !scan_args.analyze_external_js {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), skips);
     }
     let want_names = !scan_args.skip_mining && !scan_args.skip_mining_dom;
     let mut param_names: Vec<String> = Vec::new();
@@ -340,6 +350,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
     let mut results: Vec<crate::scanning::result::Result> = Vec::new();
 
     // extract_same_origin_script_srcs already deduplicates; just cap the count.
+    skips.limit = script_urls.len().saturating_sub(MAX_EXTERNAL_JS_FILES);
     for script_url in script_urls.into_iter().take(MAX_EXTERNAL_JS_FILES) {
         let url_str = script_url.as_str().to_owned();
 
@@ -348,9 +359,15 @@ pub(crate) async fn fetch_and_analyze_external_js(
             continue;
         }
 
-        let Some(body) = fetch_external_js(client, target, script_url, scan_args).await else {
-            continue;
+        let body = match fetch_external_js(client, target, script_url, scan_args).await {
+            Some(ExternalJs::Body(body)) => body,
+            Some(ExternalJs::Oversized) => {
+                skips.size += 1;
+                continue;
+            }
+            None => continue,
         };
+        skips.record(&body);
         if want_names {
             for name in crate::parameter_analysis::mining::js_param_candidates(&body) {
                 if param_names.len() >= crate::parameter_analysis::mining::MAX_STORED_BUNDLE_NAMES {
@@ -408,16 +425,23 @@ pub(crate) async fn fetch_and_analyze_external_js(
         }
     }
 
-    (results, param_names)
+    (results, param_names, skips)
 }
-/// GET one external script, `None` when it fails or exceeds
-/// [`MAX_EXTERNAL_JS_BYTES`].
+
+/// A fetched external script: its body, or the fact that it was too large to
+/// analyze (dropped unread, but worth reporting).
+enum ExternalJs {
+    Body(String),
+    Oversized,
+}
+
+/// GET one external script, `None` when the request fails.
 async fn fetch_external_js(
     client: &reqwest::Client,
     target: &Target,
     url: url::Url,
     scan_args: &ScanArgs,
-) -> Option<String> {
+) -> Option<ExternalJs> {
     let rb = crate::utils::build_request(client, target, reqwest::Method::GET, url, None);
     let send_result =
         crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay).await;
@@ -430,7 +454,11 @@ async fn fetch_external_js(
     let body = crate::utils::http::read_body_capped(resp, MAX_EXTERNAL_JS_BYTES + 1)
         .await
         .ok()?;
-    (body.len() <= MAX_EXTERNAL_JS_BYTES).then_some(body)
+    Some(if body.len() <= MAX_EXTERNAL_JS_BYTES {
+        ExternalJs::Body(body)
+    } else {
+        ExternalJs::Oversized
+    })
 }
 
 /// Same-origin `<script src>` URLs in `html` that carry the scanned parameter:

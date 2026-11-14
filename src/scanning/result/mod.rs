@@ -588,6 +588,12 @@ pub(crate) struct ScanMetadata {
     /// was set, so a report with findings and exit 0 explains itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fail_on: Option<serde_json::Value>,
+    /// Scripts the AST pass could not read (`{scripts, reasons: {size,
+    /// nesting}}`), summed over the targets whose `target_summary` entry
+    /// carries the same object. Present only when a script was skipped: a
+    /// page whose real code went unread otherwise reads as clean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ast_skipped: Option<serde_json::Value>,
     /// At least one target was not fully tested: its authenticated session
     /// died mid-scan (see `error_codes::SESSION_LOST`), or a significant share
     /// of this run's requests never reached the target at all.
@@ -684,6 +690,11 @@ impl Result {
             && let serde_json::Value::Object(ref mut map) = value
         {
             map.insert("fail_on".to_string(), fail_on.clone());
+        }
+        if let Some(ast_skipped) = &meta.ast_skipped
+            && let serde_json::Value::Object(ref mut map) = value
+        {
+            map.insert("ast_skipped".to_string(), ast_skipped.clone());
         }
         value
     }

@@ -1313,6 +1313,71 @@ pub(crate) fn run_initial_ast_dom_analysis_for_response(
     target_method: &str,
     posture: PageSecurityPosture,
 ) -> Vec<crate::scanning::result::Result> {
+    run_initial_ast_dom_analysis_with_skips(
+        response_text,
+        content_type,
+        target_url,
+        target_method,
+        posture,
+    )
+    .0
+}
+
+/// Scripts the AST pass did not read, by reason. A page whose only real code
+/// was skipped otherwise reads exactly like a clean one.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AstSkips {
+    /// Over the analyzer's (or the external-JS fetch's) size cap.
+    pub size: usize,
+    /// Nested deeper than the parser is allowed to recurse.
+    pub nesting: usize,
+    /// External scripts past the per-page fetch cap, never fetched.
+    pub limit: usize,
+}
+
+impl AstSkips {
+    /// Count `js` when the analyzer will refuse it.
+    pub(crate) fn record(&mut self, js: &str) {
+        use crate::scanning::ast_dom_analysis::ParseSkipReason;
+        match crate::scanning::ast_dom_analysis::parse_skip_reason(js) {
+            Some(ParseSkipReason::Size) => self.size += 1,
+            Some(ParseSkipReason::Nesting) => self.nesting += 1,
+            None => {}
+        }
+    }
+    pub(crate) fn add(&mut self, other: AstSkips) {
+        self.size += other.size;
+        self.nesting += other.nesting;
+        self.limit += other.limit;
+    }
+    pub(crate) fn total(&self) -> usize {
+        self.size + self.nesting + self.limit
+    }
+    /// `{"scripts": n, "reasons": {"size": a, "nesting": b, "limit": c}}`,
+    /// zero reasons left out.
+    pub(crate) fn to_json(self) -> serde_json::Value {
+        let mut reasons = serde_json::Map::new();
+        for (name, n) in [
+            ("size", self.size),
+            ("nesting", self.nesting),
+            ("limit", self.limit),
+        ] {
+            if n > 0 {
+                reasons.insert(name.to_string(), n.into());
+            }
+        }
+        serde_json::json!({ "scripts": self.total(), "reasons": reasons })
+    }
+}
+
+/// [`run_initial_ast_dom_analysis_for_response`], plus the scripts it skipped.
+pub(crate) fn run_initial_ast_dom_analysis_with_skips(
+    response_text: &str,
+    content_type: &str,
+    target_url: &str,
+    target_method: &str,
+    posture: PageSecurityPosture,
+) -> (Vec<crate::scanning::result::Result>, AstSkips) {
     // An unmarked body: the markup only contributes element facts (form ids).
     let (js_blocks, script_element_ids, page_markup) =
         if crate::utils::is_xml_content_type(content_type) {
@@ -1322,20 +1387,22 @@ pub(crate) fn run_initial_ast_dom_analysis_for_response(
                 response_text,
                 &document,
             ) {
-                return Vec::new();
+                return (Vec::new(), AstSkips::default());
             }
             let (js_blocks, script_ids) = extract_js_and_script_ids_from_xml_document(document);
             (js_blocks, script_ids, Default::default())
         } else {
             if !crate::utils::response_has_markup_document(content_type, response_text) {
-                return Vec::new();
+                return (Vec::new(), AstSkips::default());
             }
             extract_js_script_ids_and_reflected_markup(response_text)
         };
     // Shared across blocks: a per-block clone is O(blocks x ids).
     let (script_element_ids, page_markup) = (Arc::new(script_element_ids), Arc::new(page_markup));
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();
+    let mut skips = AstSkips::default();
     for js_code in js_blocks {
+        skips.record(&js_code);
         let findings = analyze_javascript_for_dom_xss_with_html_context(
             &js_code,
             &script_element_ids,
@@ -1376,7 +1443,7 @@ pub(crate) fn run_initial_ast_dom_analysis_for_response(
             }));
         }
     }
-    out
+    (out, skips)
 }
 
 #[cfg(test)]
