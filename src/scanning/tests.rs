@@ -2598,6 +2598,21 @@ async fn test_fetch_ext_js_skips_oversized_body() {
     );
 }
 
+/// Scripts past the per-page fetch cap are never read, so they are counted.
+#[tokio::test]
+async fn test_fetch_ext_js_counts_scripts_past_the_file_cap() {
+    let addr = start_ext_js_server("var ok = 1;").await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let tags: String = (0..crate::scanning::ast_dom_phase::MAX_EXTERNAL_JS_FILES + 2)
+        .map(|i| format!(r#"<script src="http://{addr}/app.js?n={i}"></script>"#))
+        .collect();
+    let html = format!("<html><body>{tags}</body></html>");
+    let (_, _, skips) =
+        fetch_and_analyze_external_js(&client, &target, &html, &ext_js_scan_args(true)).await;
+    assert_eq!((skips.limit, skips.size), (2, 0));
+}
+
 /// exclude_url matching the script URL → script skipped, empty result.
 #[tokio::test]
 async fn test_fetch_ext_js_exclude_url_skips_script() {

@@ -1331,6 +1331,8 @@ pub(crate) struct AstSkips {
     pub size: usize,
     /// Nested deeper than the parser is allowed to recurse.
     pub nesting: usize,
+    /// External scripts past the per-page fetch cap, never fetched.
+    pub limit: usize,
 }
 
 impl AstSkips {
@@ -1346,14 +1348,20 @@ impl AstSkips {
     pub(crate) fn add(&mut self, other: AstSkips) {
         self.size += other.size;
         self.nesting += other.nesting;
+        self.limit += other.limit;
     }
     pub(crate) fn total(&self) -> usize {
-        self.size + self.nesting
+        self.size + self.nesting + self.limit
     }
-    /// `{"scripts": n, "reasons": {"size": a, "nesting": b}}`, zero reasons left out.
+    /// `{"scripts": n, "reasons": {"size": a, "nesting": b, "limit": c}}`,
+    /// zero reasons left out.
     pub(crate) fn to_json(self) -> serde_json::Value {
         let mut reasons = serde_json::Map::new();
-        for (name, n) in [("size", self.size), ("nesting", self.nesting)] {
+        for (name, n) in [
+            ("size", self.size),
+            ("nesting", self.nesting),
+            ("limit", self.limit),
+        ] {
             if n > 0 {
                 reasons.insert(name.to_string(), n.into());
             }

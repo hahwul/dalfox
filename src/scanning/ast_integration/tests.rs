@@ -1911,7 +1911,8 @@ fn initial_pass_counts_scripts_it_could_not_read() {
     assert_eq!(
         AstSkips {
             size: 2,
-            nesting: 0
+            nesting: 0,
+            limit: 0,
         }
         .to_json(),
         serde_json::json!({"scripts": 2, "reasons": {"size": 2}}),

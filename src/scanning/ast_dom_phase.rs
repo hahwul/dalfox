@@ -350,6 +350,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
     let mut results: Vec<crate::scanning::result::Result> = Vec::new();
 
     // extract_same_origin_script_srcs already deduplicates; just cap the count.
+    skips.limit = script_urls.len().saturating_sub(MAX_EXTERNAL_JS_FILES);
     for script_url in script_urls.into_iter().take(MAX_EXTERNAL_JS_FILES) {
         let url_str = script_url.as_str().to_owned();
 

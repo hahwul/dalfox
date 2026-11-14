@@ -5042,6 +5042,7 @@ async fn ast_skipped_scripts_surface_in_the_meta_envelope() {
         crate::scanning::ast_integration::AstSkips {
             size: 2,
             nesting: 1,
+            limit: 0,
         },
     );
     let (out, outcome) =

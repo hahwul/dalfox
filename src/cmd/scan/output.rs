@@ -945,10 +945,11 @@ pub(crate) async fn render_results(
             log_warn(
                 args,
                 &format!(
-                    "AST: \x1b[33m{}\x1b[0m script(s) were not analyzed ({} over the size cap, {} nested too deeply) — DOM-XSS coverage of those pages is partial",
+                    "AST: \x1b[33m{}\x1b[0m script(s) were not analyzed ({} over the size cap, {} nested too deeply, {} past the external-script cap) — DOM-XSS coverage of those pages is partial",
                     ast_skipped_total.total(),
                     ast_skipped_total.size,
-                    ast_skipped_total.nesting
+                    ast_skipped_total.nesting,
+                    ast_skipped_total.limit
                 ),
             );
         }
