@@ -565,7 +565,7 @@ impl<'a> DomXssVisitor<'a> {
                     if let BindingPattern::BindingIdentifier(id) = &elem {
                         let name = id.name.to_string();
                         self.forget_url_lead(&name);
-                        self.tainted_vars.insert(name.clone());
+                        self.taint_var(name.clone());
                         if let Some(ref src) = source {
                             self.var_aliases.insert(name, src.clone());
                         }
@@ -1081,7 +1081,7 @@ impl<'a> DomXssVisitor<'a> {
         for name in names {
             self.page_url_objects.remove(name.as_str());
             self.forget_url_lead(&name);
-            self.tainted_vars.insert(name.clone());
+            self.taint_var(name.clone());
             self.var_aliases.insert(name, source.to_string());
         }
     }
@@ -1219,9 +1219,17 @@ impl<'a> DomXssVisitor<'a> {
     /// the enclosing object, which outlives the callback.
     pub(super) fn rollback_fields_keeping_this(&mut self, checkpoint: scoped_state::Checkpoint) {
         let own = self.this_path("");
-        let kept: Vec<(String, String)> = self
-            .field_taints
-            .keys_added_since(&checkpoint)
+        let added = self.field_taints.keys_added_since(&checkpoint);
+        // A field written here on an object tainted only through another
+        // field: dropping the write must not leave the object reading clean
+        // (an unmarked object escapes whole instead, see `walk_function_scope`).
+        for key in &added {
+            let root = key.split('.').next().unwrap_or_default();
+            if !key.starts_with(&own) && self.field_only_taint.remove(root) {
+                self.global_taints.insert(root.to_string());
+            }
+        }
+        let kept: Vec<(String, String)> = added
             .into_iter()
             .filter(|key| key.starts_with(&own))
             .filter_map(|key| {

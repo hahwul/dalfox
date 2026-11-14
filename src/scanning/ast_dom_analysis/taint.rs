@@ -270,8 +270,9 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
 
-            // Method call on tainted object (e.g., tainted.slice())
-            if self.is_tainted(&member.object) {
+            // Method call on tainted object (e.g., tainted.slice()) — not on
+            // one whose only taint is a field (`cfg.load()`).
+            if self.is_tainted(&member.object) && !self.is_field_only_tainted(&member.object) {
                 return (true, self.find_source_in_expr(&member.object));
             }
         }
@@ -292,7 +293,7 @@ impl<'a> DomXssVisitor<'a> {
                 return (true, Some(callee_str));
             }
 
-            if self.is_tainted(&member.object) {
+            if self.is_tainted(&member.object) && !self.is_field_only_tainted(&member.object) {
                 return (true, self.find_source_in_expr(&member.object));
             }
         }
@@ -725,6 +726,9 @@ impl<'a> DomXssVisitor<'a> {
             if self.is_source(full_path.as_str()) {
                 return true;
             }
+            if self.reads_untainted_field(member, &full_path) {
+                return false;
+            }
         }
         // `location.hash.length` is a number, which cannot carry markup. Gated
         // on the receiver being a known *string* source: an object-typed taint
@@ -782,6 +786,41 @@ impl<'a> DomXssVisitor<'a> {
     /// far beyond any real-world code, and (unlike a per-call depth argument)
     /// keeps counting across the `call_taint_and_source` helper this delegates to
     /// for call expressions.
+    /// Taint `name` as a whole value (see `field_only_taint`).
+    pub(super) fn taint_var(&mut self, name: String) -> bool {
+        self.field_only_taint.remove(name.as_str());
+        self.tainted_vars.insert(name)
+    }
+    /// `o.x` where `o` is tainted only through another field: clean, unless
+    /// `o.x` or a path above it (`o.a` for `o.a.b`) was itself written tainted.
+    fn reads_untainted_field(&self, member: &StaticMemberExpression<'a>, full_path: &str) -> bool {
+        let Some(root) = Self::member_root_identifier(member) else {
+            return false;
+        };
+        self.is_marked_field_only(root)
+            && !full_path
+                .match_indices('.')
+                .any(|(at, _)| self.field_taints.contains_key(&full_path[..at]))
+    }
+    fn is_field_only_tainted(&self, expr: &Expression<'a>) -> bool {
+        matches!(expr.without_parentheses(), Expression::Identifier(id) if self.is_marked_field_only(id.name.as_str()))
+    }
+    /// A name that escaped a body or a summary whole (`global_taints`) is
+    /// tainted whole whatever its mark says.
+    fn is_marked_field_only(&self, name: &str) -> bool {
+        self.field_only_taint.contains(name) && !self.global_taints.contains(name)
+    }
+    /// The identifier a `a.b.c` chain starts from.
+    fn member_root_identifier<'b>(member: &'b StaticMemberExpression<'a>) -> Option<&'b str> {
+        let mut object = &member.object;
+        loop {
+            match object {
+                Expression::Identifier(id) => return Some(id.name.as_str()),
+                Expression::StaticMemberExpression(inner) => object = &inner.object,
+                _ => return None,
+            }
+        }
+    }
     pub(super) fn is_tainted(&self, expr: &Expression) -> bool {
         let Some(_guard) = self.enter_recursion() else {
             return false;

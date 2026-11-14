@@ -474,7 +474,7 @@ impl<'a> DomXssVisitor<'a> {
 
     pub(super) fn retaint(&mut self, taken: Untainted) {
         for name in taken.vars {
-            self.tainted_vars.insert(name);
+            self.taint_var(name);
         }
         for name in taken.globals {
             self.global_taints.insert(name);

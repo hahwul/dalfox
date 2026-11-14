@@ -146,6 +146,7 @@ impl<'a> DomXssVisitor<'a> {
         // rolled back. Cloning it all made every hoisted declaration cost
         // O(live state) — O(N²) across a bundle of them.
         let saved_tainted = std::mem::take(&mut self.tainted_vars);
+        let saved_field_only = std::mem::take(&mut self.field_only_taint);
         let saved_aliases = std::mem::take(&mut self.var_aliases);
         let instance_classes_checkpoint = self.instance_classes.checkpoint();
         let bound_aliases_checkpoint = self.bound_function_aliases.checkpoint();
@@ -236,7 +237,7 @@ impl<'a> DomXssVisitor<'a> {
             self.tainted_vars.clear();
             self.var_aliases.clear();
             for name in names {
-                self.tainted_vars.insert(name.clone());
+                self.taint_var(name.clone());
                 self.var_aliases
                     .insert(name.clone(), format!("fn_param_{}", idx));
             }
@@ -359,7 +360,7 @@ impl<'a> DomXssVisitor<'a> {
             self.tainted_vars.clear();
             self.var_aliases.clear();
             for name in names {
-                self.tainted_vars.insert(name.clone());
+                self.taint_var(name.clone());
                 self.var_aliases
                     .insert(name.clone(), format!("fn_param_{idx}"));
                 self.url_leads
@@ -393,7 +394,7 @@ impl<'a> DomXssVisitor<'a> {
             let origins_checkpoint = self.message_origins.checkpoint();
             self.tainted_vars.clear();
             self.var_aliases.clear();
-            self.tainted_vars.insert(event.clone());
+            self.taint_var(event.clone());
             self.var_aliases
                 .insert(event.clone(), "fn_param_0".to_string());
             self.message_origins
@@ -409,6 +410,7 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         self.tainted_vars = saved_tainted;
+        self.field_only_taint = saved_field_only;
         self.var_aliases = saved_aliases;
         for (name, source) in tainted_globals {
             self.var_aliases.insert(name, source);

@@ -345,7 +345,7 @@ impl<'a> DomXssVisitor<'a> {
                     self.response_object_vars.insert(name.clone());
                 }
                 PromiseValueKind::Tainted(source) => {
-                    self.tainted_vars.insert(name.clone());
+                    self.taint_var(name.clone());
                     self.var_aliases.insert(name.clone(), source.clone());
                 }
                 PromiseValueKind::Unknown => {}

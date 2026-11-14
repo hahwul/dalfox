@@ -27,7 +27,7 @@ impl<'a> DomXssVisitor<'a> {
                 .insert(format!("{param_name}.origin"), vec![param_name.to_string()]);
         }
 
-        self.tainted_vars.insert(param_name.to_string());
+        self.taint_var(param_name.to_string());
         self.var_aliases
             .insert(param_name.to_string(), event_source.to_string());
         if matches!(event_source, "event.data" | "e.data") || event_source.ends_with(".message") {
