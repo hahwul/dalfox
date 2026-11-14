@@ -5785,3 +5785,32 @@ fn parse_stack_grows_with_the_script() {
     );
     assert!(analyze_stack_bytes(MAX_ANALYZE_SOURCE_BYTES) >= 1 << 30);
 }
+
+/// Big-stack parses share one byte budget: a second share that does not fit
+/// waits for the first to be released, and a parse nested in a parse thread
+/// never waits on its parent.
+#[test]
+fn parse_budget_bounds_concurrent_big_parses() {
+    let half = PARSE_BUDGET_BYTES / 2 + 1;
+    let first = ParseBudget::acquire(half);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        let _second = ParseBudget::acquire(half);
+        tx.send(()).ok();
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(200))
+            .is_err(),
+        "the second share must wait"
+    );
+    std::thread::spawn(|| {
+        IN_GUARDED_PARSE.set(true);
+        let _nested = ParseBudget::acquire(PARSE_BUDGET_BYTES);
+    })
+    .join()
+    .unwrap();
+    drop(first);
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .expect("released budget wakes the waiter");
+    waiter.join().unwrap();
+}

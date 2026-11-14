@@ -103,11 +103,13 @@ const ANALYZE_STACK_BYTES: usize = 256 * 1024 * 1024;
 /// that gets past [`source_nesting_exceeds_limit`] measured ~921 (openers
 /// whose closers sit in a string the scan does not skip), and its runs reset
 /// on bytes it does not classify (`/**/`, U+00A0, `\x0b`), which keeps a
-/// `+-+-…` or `a:a:…` chain at ~576. 2,048 covers the bare worst case, so the
-/// scan only spares the commit, never the process: 1 GiB at
-/// [`MAX_ANALYZE_SOURCE_BYTES`]. The reservation is virtual; a shallow
+/// `+-+-…` or `a:a:…` chain at ~576. 2,048 holds every shape the scan lets
+/// through with ~2.2× headroom (1 GiB at [`MAX_ANALYZE_SOURCE_BYTES`]), and
+/// the bare `((((…` with only ~1.1×, so keep the scan: it is what rejects
+/// the single-byte openers, and on a debug build (bare `(` ~3,600 bytes per
+/// level) the only thing that does. The reservation is virtual; a shallow
 /// script touches a few KB of it, a hostile one commits what it recurses
-/// into (≤ ~460 MiB at the cap).
+/// into (~500 MiB at the cap, see [`PARSE_BUDGET_BYTES`]).
 const STACK_BYTES_PER_SOURCE_BYTE: usize = 2048;
 
 /// The stack [`guarded_parse`] gives a `len`-byte script.
@@ -252,8 +254,9 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
 ///    depth. Oversized blocks are skipped (best-effort).
 /// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): skips the plain
 ///    deep shapes (`((((…`, `!!!!…`, `a:a:…`) before they commit hundreds of
-///    MiB of stack. It is a heuristic, not the bound.
-/// 3. **Length-scaled parse stack** ([`analyze_stack_bytes`]): the bound.
+///    MiB of stack. A heuristic that the bypasses below get past.
+/// 3. **Length-scaled parse stack** ([`analyze_stack_bytes`]): the bound for
+///    what gets past the scan.
 ///    Input above [`INLINE_PARSE_BYTES`] runs `parse` on a dedicated thread
 ///    whose stack holds the deepest parse that many bytes can drive.
 ///    `scope` keeps it synchronous and lets the closure borrow.
@@ -274,17 +277,68 @@ pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + S
     if source.len() <= INLINE_PARSE_BYTES {
         return Some(parse());
     }
+    let _budget = ParseBudget::acquire(source.len());
     std::thread::scope(|scope| {
         match std::thread::Builder::new()
             .stack_size(analyze_stack_bytes(source.len()))
-            .spawn_scoped(scope, parse)
-        {
+            .spawn_scoped(scope, || {
+                IN_GUARDED_PARSE.set(true);
+                parse()
+            }) {
             // A panic inside the parse (not a stack overflow, which would abort
             // the process) degrades to None rather than taking down the scan.
             Ok(h) => h.join().ok(),
             Err(_) => None,
         }
     })
+}
+
+/// Source bytes allowed in big-stack parses at once. A hostile script can
+/// commit ~921 stack bytes per source byte (see
+/// [`STACK_BYTES_PER_SOURCE_BYTE`]), so this caps what concurrent parses can
+/// commit together at ~1 GiB: without it, 20 parameters reflecting the same
+/// 512 KiB page took the scan to 7 GB RSS. A script larger than the budget
+/// still runs, alone.
+const PARSE_BUDGET_BYTES: usize = 1024 * 1024;
+
+static PARSE_BUDGET: (std::sync::Mutex<usize>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+
+thread_local! {
+    /// Set on a [`guarded_parse`] thread, so a parse nested inside one does
+    /// not wait for budget its parent holds.
+    static IN_GUARDED_PARSE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// A share of [`PARSE_BUDGET_BYTES`], held for one big-stack parse.
+struct ParseBudget(usize);
+
+impl ParseBudget {
+    fn acquire(len: usize) -> Self {
+        if IN_GUARDED_PARSE.get() {
+            return Self(0);
+        }
+        let want = len.min(PARSE_BUDGET_BYTES);
+        let (lock, freed) = &PARSE_BUDGET;
+        let mut in_use = lock.lock().unwrap_or_else(|e| e.into_inner());
+        while *in_use + want > PARSE_BUDGET_BYTES {
+            in_use = freed.wait(in_use).unwrap_or_else(|e| e.into_inner());
+        }
+        *in_use += want;
+        Self(want)
+    }
+}
+
+impl Drop for ParseBudget {
+    fn drop(&mut self) {
+        if self.0 == 0 {
+            return;
+        }
+        let (lock, freed) = &PARSE_BUDGET;
+        let mut in_use = lock.lock().unwrap_or_else(|e| e.into_inner());
+        *in_use -= self.0;
+        freed.notify_all();
+    }
 }
 
 /// Why [`guarded_parse`] refuses a script without parsing it.
