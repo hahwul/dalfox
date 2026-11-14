@@ -153,7 +153,7 @@ end
 INDEX = <<-HTML
   <!doctype html><title>dalfox hostile lab</title><h1>hostile lab</h1><ul>
   <li>/huge?q=            — very large streamed body, reflection near the start
-  <li>/deep-js?q=&shape=  — deeply nested JS: paren|bracket|ternary|member|helper|call
+  <li>/deep-js?q=&shape=  — deeply nested JS: paren|bracket|ternary|member|helper|call|unary|label|hidden|reset
   <li>/many-reflections?q= — the input echoed an enormous number of times
   <li>/slowloris?q=       — headers, then the body one byte at a time
   <li>/redirect-loop?q=   — endless redirect chain (&self=1 for a self-redirect)
@@ -201,6 +201,8 @@ private def ep_deep_js(io, req)
                 when "member"  then {"", ""} # handled below (suffix-only shape)
                 when "helper"  then {"", ""}
                 when "call"    then {"f(", ")"}
+                when "unary"   then {"+-", ""}
+                when "label"   then {"", ""} # statement labels, handled below
                 else                {"(", ")"}
                 end
 
@@ -210,6 +212,18 @@ private def ep_deep_js(io, req)
   chunk(io, "var s = \"#{q}\";\n")
 
   case shape
+  when "label"
+    # `a:a:a:…document.write(s)` labels each statement with the next.
+    repeat(io, "a:", depth)
+    chunk(io, "document.write(s);\n")
+  when "hidden", "reset"
+    # Shapes past the byte-level nesting scan: openers whose closers sit in a
+    # string (the scan counts them, the parser does not), and a `+-` run
+    # restarted by a comment the scan does not skip. `depth` counts units.
+    unit = shape == "hidden" ? "#{"(" * 199}'#{")" * 199}'" : "#{"+-" * 100}/**/"
+    chunk(io, "var sink = ")
+    repeat(io, unit, depth)
+    chunk(io, "s;\ndocument.write(sink);\n")
   when "member", "helper"
     # Suffix chains: `obj.a.a.a…` / `obj.a().a().a()…`. No nesting depth at all
     # by a naive counter, yet each link is another node to descend into.

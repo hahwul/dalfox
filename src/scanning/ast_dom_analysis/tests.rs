@@ -4106,6 +4106,31 @@ fn source_nesting_guard_flags_pathological_input_only() {
         "{}a",
         "typeof ".repeat(over)
     )));
+    for unit in ["+-", "+", "-", "+!", "- ", "a:", "a :"] {
+        assert!(
+            source_nesting_exceeds_limit(&format!("{}x", unit.repeat(over))),
+            "{unit:?} run"
+        );
+    }
+    // Labels, object keys, ternaries and `+`/`-` that do not chain: clean.
+    assert!(!source_nesting_exceeds_limit(
+        &"a: for(;;) break a; x = {k: v, j: 1}; y = c ? d : e; z = a - -b + +c; ".repeat(over)
+    ));
+}
+
+/// A unary run and a label run at the size cap are skipped before the parse
+/// commits ~300 MiB of stack for them (they aborted the scan when the stack
+/// was a flat 256 MiB). The full-size bypass shapes, which only the
+/// length-scaled stack holds, run in `scripts/hostile_scan.cr`: on a debug
+/// build oxc's frames outgrow that stack.
+#[test]
+fn analyze_survives_dense_chains_at_the_size_cap() {
+    let units = MAX_ANALYZE_SOURCE_BYTES / 2 - 8;
+    for unit in ["+-", "a:"] {
+        let src = format!("{}x", unit.repeat(units));
+        assert_eq!(parse_skip_reason(&src), Some(ParseSkipReason::Nesting));
+        assert!(AstDomAnalyzer::new().analyze(&src).unwrap().is_empty());
+    }
 }
 
 #[test]
@@ -5749,4 +5774,43 @@ fn decoded_literal_not_matching_the_sent_value_stays_clean() {
             .expect("parses");
         assert!(found.is_empty(), "{code} -> {found:?}");
     }
+}
+
+#[test]
+fn parse_stack_grows_with_the_script() {
+    assert_eq!(analyze_stack_bytes(0), ANALYZE_STACK_BYTES);
+    assert_eq!(
+        analyze_stack_bytes(MAX_ANALYZE_SOURCE_BYTES),
+        MAX_ANALYZE_SOURCE_BYTES * STACK_BYTES_PER_SOURCE_BYTE
+    );
+    assert!(analyze_stack_bytes(MAX_ANALYZE_SOURCE_BYTES) >= 1 << 30);
+}
+
+/// Big-stack parses share one byte budget: a second share that does not fit
+/// waits for the first to be released, and a parse nested in a parse thread
+/// never waits on its parent.
+#[test]
+fn parse_budget_bounds_concurrent_big_parses() {
+    let half = PARSE_BUDGET_BYTES / 2 + 1;
+    let first = ParseBudget::acquire(half);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        let _second = ParseBudget::acquire(half);
+        tx.send(()).ok();
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(200))
+            .is_err(),
+        "the second share must wait"
+    );
+    std::thread::spawn(|| {
+        IN_GUARDED_PARSE.set(true);
+        let _nested = ParseBudget::acquire(PARSE_BUDGET_BYTES);
+    })
+    .join()
+    .unwrap();
+    drop(first);
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .expect("released budget wakes the waiter");
+    waiter.join().unwrap();
 }

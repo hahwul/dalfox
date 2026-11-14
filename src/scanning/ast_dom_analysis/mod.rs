@@ -85,37 +85,45 @@ const MAX_AST_VISIT_DEPTH: u32 = 256;
 const MAX_AST_WORK_STEPS: u64 = 10_000_000;
 
 /// Upper bound on the size of a single JavaScript block handed to [`analyze`].
-/// oxc's recursive-descent parser has no depth guard, and some constructs the
-/// pre-parse [`source_nesting_exceeds_limit`] scan can't cheaply bound — long
-/// right-leaning statement/assignment chains (`if(a)if(b)…`, `x=y=z=…`,
-/// `for(;;)for(;;)…`) where each level costs ≥2 source bytes — recurse once per
-/// level *inside* `.parse()`. Because every such level consumes at least one
-/// source byte, capping the input length bounds the achievable parser depth;
-/// combined with [`ANALYZE_STACK_BYTES`] this guarantees the parser can't
-/// overflow. Scripts larger than this skip AST analysis (best-effort); the cap
-/// sits far above any realistic inline `<script>` while staying well under the
-/// point where a maximally-dense chain could exhaust the analysis stack.
+/// oxc's recursive-descent parser has no depth guard, and every nesting level
+/// consumes at least one source byte, so capping the input length bounds the
+/// achievable parser depth; the parse stack grows with the length (see
+/// [`STACK_BYTES_PER_SOURCE_BYTE`]), so the parser can't overflow. Scripts
+/// larger than this skip AST analysis (best-effort).
 const MAX_ANALYZE_SOURCE_BYTES: usize = 512 * 1024;
 
-/// Stack size for the dedicated thread that runs the parse + walk. The *walk* is
-/// separately bounded to [`MAX_AST_VISIT_DEPTH`] frames by the shared recursion
-/// guard, so the deepest consumer of this stack is the **parser**: the densest
-/// legal-after-pre-parse-guard input is a ~2-byte-per-level assignment/label
-/// chain within [`MAX_ANALYZE_SOURCE_BYTES`], i.e. ~256k parser frames at
-/// ~600 B/frame ≈ 150 MiB, which this absorbs with ~1.7× headroom. The
-/// reservation is virtual (lazily committed), so the real RSS cost on the common
-/// shallow script is only the few KB of stack actually touched.
+/// Smallest stack for the dedicated thread that runs the parse + walk. The
+/// *walk* is bounded to [`MAX_AST_VISIT_DEPTH`] frames by the shared
+/// recursion guard; this floor holds those frames on any build.
 const ANALYZE_STACK_BYTES: usize = 256 * 1024 * 1024;
 
-/// Below this size [`analyze`] parses inline instead of spawning an
-/// [`ANALYZE_STACK_BYTES`] thread. After the pre-parse guard rejects the
-/// 1-byte-per-level chains, every surviving parser-recursion level costs ≥2
-/// source bytes (`=y`, `a:`, `if(a)`, …), so a script this small can reach at
-/// most ~1k parser frames — comfortably within a normal worker stack — and the
-/// visitor walk is depth-capped to [`MAX_AST_VISIT_DEPTH`] regardless of stack.
-/// The vast majority of inline `<script>` blocks land here and skip the
-/// thread-spawn cost; larger blocks pay for the big stack they might need.
-const INLINE_PARSE_BYTES: usize = 2 * 1024;
+/// Parse stack per source byte, so the parser cannot overflow whatever the
+/// pre-parse scan misses. oxc's deepest frame per byte of input (release
+/// build, oxc 0.133) is ~1,840 bytes, for a bare `((((…`; the densest input
+/// that gets past [`source_nesting_exceeds_limit`] measured ~921 (openers
+/// whose closers sit in a string the scan does not skip), and its runs reset
+/// on bytes it does not classify (`/**/`, U+00A0, `\x0b`), which keeps a
+/// `+-+-…` or `a:a:…` chain at ~576. 2,048 holds every shape the scan lets
+/// through with ~2.2× headroom (1 GiB at [`MAX_ANALYZE_SOURCE_BYTES`]), and
+/// the bare `((((…` with only ~1.1×, so keep the scan: it is what rejects
+/// the single-byte openers, and on a debug build (bare `(` ~3,600 bytes per
+/// level) the only thing that does. The reservation is virtual; a shallow
+/// script touches a few KB of it, a hostile one commits what it recurses
+/// into (~500 MiB at the cap, see [`PARSE_BUDGET_BYTES`]).
+const STACK_BYTES_PER_SOURCE_BYTE: usize = 2048;
+
+/// The stack [`guarded_parse`] gives a `len`-byte script.
+fn analyze_stack_bytes(len: usize) -> usize {
+    ANALYZE_STACK_BYTES.max(len.saturating_mul(STACK_BYTES_PER_SOURCE_BYTE))
+}
+
+/// Below this size [`analyze`] parses inline instead of spawning a
+/// big-stack thread: at most this many parser levels at ~1,840 bytes each
+/// (~470 KB), well within a worker thread's 2 MiB even on a debug build, and
+/// the visitor walk is depth-capped to [`MAX_AST_VISIT_DEPTH`] regardless.
+/// Short inline `<script>` blocks skip the thread-spawn cost; larger blocks
+/// pay for the stack they might need.
+const INLINE_PARSE_BYTES: usize = 256;
 
 /// Maximum source-level nesting depth accepted before parsing. oxc's
 /// recursive-descent parser has **no** internal depth/stack guard (only a 4 GiB
@@ -129,19 +137,23 @@ const INLINE_PARSE_BYTES: usize = 2 * 1024;
 const MAX_SOURCE_NESTING_DEPTH: usize = 200;
 
 /// Conservatively reject source whose structural nesting could overflow oxc's
-/// recursive-descent parser. Scans once, counting two independent things that
-/// each drive parser recursion:
+/// recursive-descent parser. Scans once, counting three independent things
+/// that each drive parser recursion:
 ///
 /// * bracket nesting depth — `(`/`[`/`{` raise it, `)`/`]`/`}` lower it;
 /// * the length of a run of consecutive prefix-unary operators — the single
-///   chars `!`/`~` and the word operators `typeof`/`void`/`delete`/`new`/
-///   `await`/`yield`, each of which the parser descends into recursively.
+///   chars `!`/`~`/`+`/`-` and the word operators `typeof`/`void`/`delete`/
+///   `new`/`await`/`yield`, each of which the parser descends into
+///   recursively;
+/// * the length of a run of statement labels (`a:b:c:…`), each labelling
+///   the next.
 ///
-/// The scan is intentionally *not* string/comment aware: counting brackets that
-/// happen to sit inside a string literal can only *over*-estimate nesting, so it
-/// never lets a genuinely dangerous input through — at worst it skips analysis
-/// of a script that crams 200+ literal brackets into a string, which is itself
-/// pathological. Returns `true` when either measure exceeds
+/// The scan is *not* string/comment aware, so it is a heuristic: closers in a
+/// string lower the count while the parser keeps nesting, and a byte the scan
+/// does not classify (`/**/`, U+00A0) resets a run the parser continues. The
+/// length-scaled stack ([`analyze_stack_bytes`]) is what keeps those from
+/// overflowing; this scan keeps the plain shapes from committing that stack. A comment or string holding a 200+ character run of `-`
+/// or `+` is skipped the same way. Returns `true` when any measure exceeds
 /// [`MAX_SOURCE_NESTING_DEPTH`].
 fn source_nesting_exceeds_limit(source: &str) -> bool {
     const PREFIX_KEYWORDS: [&str; 6] = ["typeof", "void", "delete", "new", "await", "yield"];
@@ -149,6 +161,7 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut bracket_depth: usize = 0;
     let mut unary_run: usize = 0;
+    let mut label_run: usize = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
@@ -159,15 +172,20 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
                     return true;
                 }
                 unary_run = 0;
+                label_run = 0;
                 i += 1;
             }
             b')' | b']' | b'}' => {
                 bracket_depth = bracket_depth.saturating_sub(1);
                 unary_run = 0;
+                label_run = 0;
                 i += 1;
             }
-            b'!' | b'~' => {
+            // `+`/`-` too: `+-+-…x` and `++++…x` nest one level per byte,
+            // and a run broken by `!` (`+!+!…`) must still count as one.
+            b'!' | b'~' | b'+' | b'-' => {
                 unary_run += 1;
+                label_run = 0;
                 if unary_run > MAX_SOURCE_NESTING_DEPTH {
                     return true;
                 }
@@ -190,6 +208,22 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
                     }
                 }
                 let word = &source[start..i];
+                // `a:a:a:…` labels a statement with a labelled statement,
+                // two bytes per (large) parser frame.
+                let mut j = i;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if bytes.get(j) == Some(&b':') {
+                    label_run += 1;
+                    unary_run = 0;
+                    if label_run > MAX_SOURCE_NESTING_DEPTH {
+                        return true;
+                    }
+                    i = j + 1;
+                    continue;
+                }
+                label_run = 0;
                 if PREFIX_KEYWORDS.contains(&word) {
                     unary_run += 1;
                     if unary_run > MAX_SOURCE_NESTING_DEPTH {
@@ -201,6 +235,7 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
             }
             _ => {
                 unary_run = 0;
+                label_run = 0;
                 i += 1;
             }
         }
@@ -217,18 +252,18 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
 /// 1. **Length cap** ([`MAX_ANALYZE_SOURCE_BYTES`]): every nesting level
 ///    costs ≥1 source byte, so bounding length bounds the achievable parser
 ///    depth. Oversized blocks are skipped (best-effort).
-/// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): rejects the
-///    1-byte-per-level vectors (`((((…`, `!!!!…`) that would otherwise blow
-///    the budget the length cap alone allows.
-/// 3. **Large parse stack** ([`ANALYZE_STACK_BYTES`]): the surviving
-///    multi-byte chains (`if(a)if(b)…`, `x=y=z=…`) still recurse in the
-///    parser, so input above [`INLINE_PARSE_BYTES`] runs `parse` on a
-///    dedicated big-stack thread. `scope` keeps it synchronous and lets the
-///    closure borrow.
+/// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): skips the plain
+///    deep shapes (`((((…`, `!!!!…`, `a:a:…`) before they commit hundreds of
+///    MiB of stack. A heuristic that the bypasses below get past.
+/// 3. **Length-scaled parse stack** ([`analyze_stack_bytes`]): the bound for
+///    what gets past the scan.
+///    Input above [`INLINE_PARSE_BYTES`] runs `parse` on a dedicated thread
+///    whose stack holds the deepest parse that many bytes can drive.
+///    `scope` keeps it synchronous and lets the closure borrow.
 ///
 /// Returns `None` when the input was skipped, the thread could not be spawned,
 /// or `parse` panicked. A spawn failure must NOT fall back to an inline parse:
-/// a guard-approved ~512 KiB chain can need tens of MiB of stack.
+/// a ~512 KiB script can need up to ~1 GiB of stack.
 pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + Send) -> Option<T> {
     if let Some(reason) = parse_skip_reason(source) {
         crate::dbg_log!(
@@ -242,17 +277,68 @@ pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + S
     if source.len() <= INLINE_PARSE_BYTES {
         return Some(parse());
     }
+    let _budget = ParseBudget::acquire(source.len());
     std::thread::scope(|scope| {
         match std::thread::Builder::new()
-            .stack_size(ANALYZE_STACK_BYTES)
-            .spawn_scoped(scope, parse)
-        {
+            .stack_size(analyze_stack_bytes(source.len()))
+            .spawn_scoped(scope, || {
+                IN_GUARDED_PARSE.set(true);
+                parse()
+            }) {
             // A panic inside the parse (not a stack overflow, which would abort
             // the process) degrades to None rather than taking down the scan.
             Ok(h) => h.join().ok(),
             Err(_) => None,
         }
     })
+}
+
+/// Source bytes allowed in big-stack parses at once. A hostile script can
+/// commit ~921 stack bytes per source byte (see
+/// [`STACK_BYTES_PER_SOURCE_BYTE`]), so this caps what concurrent parses can
+/// commit together at ~1 GiB: without it, 20 parameters reflecting the same
+/// 512 KiB page took the scan to 7 GB RSS. A script larger than the budget
+/// still runs, alone.
+const PARSE_BUDGET_BYTES: usize = 1024 * 1024;
+
+static PARSE_BUDGET: (std::sync::Mutex<usize>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+
+thread_local! {
+    /// Set on a [`guarded_parse`] thread, so a parse nested inside one does
+    /// not wait for budget its parent holds.
+    static IN_GUARDED_PARSE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// A share of [`PARSE_BUDGET_BYTES`], held for one big-stack parse.
+struct ParseBudget(usize);
+
+impl ParseBudget {
+    fn acquire(len: usize) -> Self {
+        if IN_GUARDED_PARSE.get() {
+            return Self(0);
+        }
+        let want = len.min(PARSE_BUDGET_BYTES);
+        let (lock, freed) = &PARSE_BUDGET;
+        let mut in_use = lock.lock().unwrap_or_else(|e| e.into_inner());
+        while *in_use + want > PARSE_BUDGET_BYTES {
+            in_use = freed.wait(in_use).unwrap_or_else(|e| e.into_inner());
+        }
+        *in_use += want;
+        Self(want)
+    }
+}
+
+impl Drop for ParseBudget {
+    fn drop(&mut self) {
+        if self.0 == 0 {
+            return;
+        }
+        let (lock, freed) = &PARSE_BUDGET;
+        let mut in_use = lock.lock().unwrap_or_else(|e| e.into_inner());
+        *in_use -= self.0;
+        freed.notify_all();
+    }
 }
 
 /// Why [`guarded_parse`] refuses a script without parsing it.
