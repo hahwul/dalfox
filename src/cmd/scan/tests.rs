@@ -4941,3 +4941,75 @@ async fn fail_on_high_gates_only_the_exit_code() {
         assert_eq!(exit, ScanOutcome::Error, "{name} under high");
     }
 }
+
+/// A host that honours preflight's `Range: bytes=0-8191` answers `206` with
+/// only that prefix; the landing-page consumers (AST pass, outdated-library
+/// and tech detection, `<meta>` CSP) must still get the whole page.
+#[tokio::test]
+async fn preflight_refetches_the_page_when_the_range_was_honoured() {
+    let page: &'static str = Box::leak(
+        format!(
+            "<html><body><p>{}</p><script>el.innerHTML = location.hash; // TAIL</script></body></html>",
+            "x".repeat(20_000)
+        )
+        .into_boxed_str(),
+    );
+    let app = Router::new().route(
+        "/",
+        get(move |headers: HeaderMap| async move {
+            let mut out = HeaderMap::new();
+            out.insert("content-type", HeaderValue::from_static("text/html"));
+            match headers.get("range") {
+                Some(_) => (axum::http::StatusCode::PARTIAL_CONTENT, out, &page[..8192]),
+                None => (axum::http::StatusCode::OK, out, page),
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let target = parse_target(&format!("http://{addr}/")).expect("valid target");
+    let mut args = default_scan_args();
+    args.skip_waf_probe = true;
+    let preflight = match preflight_content_type(&target, &args).await {
+        PreflightOutcome::WithContentType(r) => r,
+        _ => panic!("preflight should succeed"),
+    };
+    handle.abort();
+    let body = preflight.response_body.expect("body");
+    assert!(body.contains("// TAIL"), "got only {} bytes", body.len());
+}
+
+/// When the follow-up GET fails, preflight keeps the prefix it has rather
+/// than dropping the body.
+#[tokio::test]
+async fn preflight_keeps_the_prefix_when_the_full_page_fetch_fails() {
+    let app = Router::new().route(
+        "/",
+        get(|headers: HeaderMap| async move {
+            let mut out = HeaderMap::new();
+            out.insert("content-type", HeaderValue::from_static("text/html"));
+            match headers.get("range") {
+                Some(_) => (axum::http::StatusCode::PARTIAL_CONTENT, out, "<html>prefix"),
+                None => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, out, "boom"),
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let target = parse_target(&format!("http://{addr}/")).expect("valid target");
+    let mut args = default_scan_args();
+    args.skip_waf_probe = true;
+    let preflight = match preflight_content_type(&target, &args).await {
+        PreflightOutcome::WithContentType(r) => r,
+        _ => panic!("preflight should succeed"),
+    };
+    handle.abort();
+    assert_eq!(preflight.response_body.as_deref(), Some("<html>prefix"));
+}

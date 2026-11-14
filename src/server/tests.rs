@@ -6716,3 +6716,55 @@ async fn test_run_scan_job_populates_live_failure_counter() {
         "requests that never reached the target must land on the job's own counter"
     );
 }
+
+/// The job runner's preflight mirrors the CLI: a host that honours the 8 KiB
+/// `Range` answers 206, and the landing-page AST pass must still read the
+/// script past it.
+#[tokio::test]
+async fn test_run_scan_job_reads_the_page_past_a_honoured_range() {
+    let page: &'static str = Box::leak(
+        format!(
+            "<html><body><p>{}</p><script>document.getElementById('x').innerHTML = location.hash.slice(1);</script></body></html>",
+            "x".repeat(20_000)
+        )
+        .into_boxed_str(),
+    );
+    let app = Router::new().route(
+        "/",
+        axum::routing::get(move |headers: HeaderMap| async move {
+            let mut out = HeaderMap::new();
+            out.insert("content-type", HeaderValue::from_static("text/html"));
+            match headers.get("range") {
+                Some(_) => (StatusCode::PARTIAL_CONTENT, out, &page[..8192]),
+                None => (StatusCode::OK, out, page),
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "range-206".to_string();
+    state
+        .jobs
+        .lock()
+        .await
+        .insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    let opts = ScanOptions {
+        skip_mining: Some(true),
+        skip_discovery: Some(true),
+        ..ScanOptions::default()
+    };
+    run_scan_job(state.clone(), id.clone(), format!("http://{addr}/"), opts).await;
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job");
+    assert_eq!(job.status, JobStatus::Done, "{:?}", job.error_message);
+    let found = job.results.as_ref().map_or(0, |r| r.len());
+    assert!(found > 0, "the flow past the first 8 KiB must be reported");
+}
