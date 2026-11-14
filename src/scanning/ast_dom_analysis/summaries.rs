@@ -13,8 +13,13 @@ impl<'a> DomXssVisitor<'a> {
     /// Walk through statements
     pub(super) fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
         self.collect_function_declarations(stmts);
-        for stmt in stmts {
+        for (idx, stmt) in stmts.iter().enumerate() {
+            // Read after `stmts[idx - 1]` was walked, against the live state.
+            self.adjacent_index = idx
+                .checked_sub(1)
+                .and_then(|prev| self.adjacent_index_result(&stmts[prev], stmt));
             self.walk_statement(stmt);
+            self.adjacent_index = None;
         }
     }
     /// Collect function declarations before statement traversal so hoisted calls are recognized.

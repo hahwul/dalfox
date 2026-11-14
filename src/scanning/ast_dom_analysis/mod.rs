@@ -597,6 +597,9 @@ struct DomXssVisitor<'a> {
     /// Event names whose origin a guard checked, switching the name-based
     /// `event.data` source off for them.
     origin_checked: ScopedSet<String>,
+    /// Set only while walking the `if` right after `var i = LIST.indexOf(x)`
+    /// (see `guards::adjacent_index_result`).
+    adjacent_index: Option<(String, guards::GuardTarget)>,
     /// Name of the class whose body is being walked, so `this.onMessage`
     /// resolves to the `Class.onMessage` method summary.
     current_class: Option<String>,
@@ -973,6 +976,7 @@ impl<'a> DomXssVisitor<'a> {
             body_guarded_globals: Vec::new(),
             message_origins: Default::default(),
             origin_checked: Default::default(),
+            adjacent_index: None,
             current_class: None,
             recursion_depth: Rc::new(Cell::new(0)),
             sink_ctx: Cell::new(SinkCtx::Html),

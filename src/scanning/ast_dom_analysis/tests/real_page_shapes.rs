@@ -169,8 +169,39 @@ fn strict_origin_checks_vouch_for_message_data() {
         "var ALLOWED = ['https://a.example', 'https://b.example']; window.addEventListener('message', function (e) { if (!ALLOWED.includes(e.origin)) return; el.innerHTML = e.data; });",
         "function onMsg(e) { if (e.origin !== 'https://a.example') return; el.innerHTML = e.data; } window.addEventListener('message', onMsg);",
         "function receive(event) { if (event.origin !== 'https://a.example') { return; } el.innerHTML = event.data; }",
+        // The index held in a variable first (w3schools).
+        "window.addEventListener('message', function (m) { var w = ['https://a.example']; var i = w.indexOf(m.origin); if (i === -1) { return; } el.innerHTML = m.data; });",
+        "function u(d) { el.innerHTML = d; } window.addEventListener('message', function (m) { var w = ['https://a.example']; var i = w.indexOf(m.origin); if (i === -1) return; u(m.data); });",
+        "window.addEventListener('message', function (m) { var i; i = ['https://a.example'].indexOf(m.origin); if (i < 0) return; el.innerHTML = m.data; });",
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); if (!(i !== -1)) return; el.innerHTML = m.data; });",
     ]);
     assert_reported(&[
+        // A substring index through a variable proves nothing either.
+        "window.addEventListener('message', function (m) { var i = 'https://a.example'.indexOf(m.origin); if (i === -1) return; el.innerHTML = m.data; });",
+        // Anything between the index and its test (review of this change).
+        "var ALLOWED = ['https://a.example', '*']; window.addEventListener('message', function (e) { var i = ALLOWED.indexOf(e.origin); ALLOWED.forEach(function (o, k) { if (o === '*') i = k; }); if (i === -1) return; el.innerHTML = e.data; });",
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); (function () { i = 0; })(); if (i === -1) return; el.innerHTML = m.data; });",
+        "var cfg = {}; window.addEventListener('message', function (e) { var i = 0; if (cfg.strict) i = ['https://a.example'].indexOf(e.origin); if (i === -1) return; el.innerHTML = e.data; });",
+        "window.addEventListener('message', function (m) { if (m.data.t) { var i = ['https://a.example'].indexOf(m.origin); } if (i === -1) return; el.innerHTML = m.data; });",
+        "function f() { var x = location.hash.slice(1); var i = ['a', 'b'].indexOf(x); x = location.search; if (i !== -1) { el.innerHTML = x; } } f();",
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); [1].forEach(function (i) { if (i === -1) return; el.innerHTML = m.data; }); });",
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); i++; if (i === -1) return; el.innerHTML = m.data; });",
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); [i] = [0]; if (i === -1) return; el.innerHTML = m.data; });",
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); for (i of [0]) {} if (i === -1) return; el.innerHTML = m.data; });",
+        "window.addEventListener('message', function (m) { var i = 0; { let i = ['https://a.example'].indexOf(m.origin); } if (i === -1) return; el.innerHTML = m.data; });",
+        "window.addEventListener('message', function (e) { var i = ['https://a.example'].indexOf(e.origin); window.addEventListener('message', function (e) { if (i === -1) return; el.innerHTML = e.data; }); });",
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); if (i === -1) { if (i === -1) return; } el.innerHTML = m.data; });",
+        // The test's left side runs first and may rebind `i` or the subject.
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); if (!(i = 0, true) || i === -1) return; el.innerHTML = m.data; });",
+        "function f() { var x = location.hash.slice(1); var i = ['a', 'b'].indexOf(x); if (!(x = decodeURIComponent(location.search)) || i === -1) return; el.innerHTML = x; } f();",
+        // The index from a branch that did not run (needs both resets).
+        "window.addEventListener('message', function (m) { var i = 0; if (m.data.a) { i = ['https://a.example'].indexOf(m.origin); if (1) {} } else if (i !== -1) { el.innerHTML = m.data; } });",
+        // Rebound before the test.
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); i = 0; if (i === -1) return; el.innerHTML = m.data; });",
+        // Another function's `i`.
+        "window.addEventListener('message', function (m) { var i = ['https://a.example'].indexOf(m.origin); }); window.addEventListener('message', function (m) { if (i === -1) return; el.innerHTML = m.data; });",
+        // `onA`'s own check does not vouch for another handler.
+        "function onA(m) { var i = ['https://a.example'].indexOf(m.origin); if (i === -1) return; el.innerHTML = m.data; } window.addEventListener('message', function (m) { if (i === -1) return; el.innerHTML = m.data; });",
         "window.addEventListener('message', function (e) { if (e.origin.indexOf('a.example') === -1) return; el.innerHTML = e.data; });",
         "window.addEventListener('message', function (e) { if (!/a\\.example/.test(e.origin)) return; el.innerHTML = e.data; });",
         "window.addEventListener('message', function (e) { if (!e.origin.startsWith('https://a.example')) return; el.innerHTML = e.data; });",
