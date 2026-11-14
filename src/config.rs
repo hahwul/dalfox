@@ -127,6 +127,7 @@ pub struct ScanConfig {
     pub baseline: Option<String>,
     pub baseline_mode: Option<String>,
     pub min_confidence: Option<String>,
+    pub fail_on: Option<String>,
     pub no_color: Option<bool>,
     // TARGETS
     pub param: Option<Vec<String>>,
@@ -325,6 +326,7 @@ impl Config {
             apply_cfg!(opt_clone scan.baseline => args.baseline);
             apply_cfg!(opt_clone scan.baseline_mode => args.baseline_mode_arg);
             apply_cfg!(opt_clone scan.min_confidence => args.min_confidence);
+            apply_cfg!(opt_clone scan.fail_on => args.fail_on);
             apply_cfg!(flag scan.no_color => args.no_color);
             // Map debug conservatively: only set when CLI didn't enable it (global false)
             if let Some(v) = scan.debug
@@ -578,6 +580,7 @@ impl ScanConfig {
                 scan::MIN_CONFIDENCE_VALUES,
                 "scan.min_confidence",
             ),
+            (&mut self.fail_on, scan::FAIL_ON_VALUES, "scan.fail_on"),
             (
                 &mut self.custom_alert_type,
                 scan::CUSTOM_ALERT_TYPE_VALUES,
@@ -829,6 +832,7 @@ pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 # baseline = "baseline.json"  # CLI only (not applied by `dalfox server` / MCP); prior JSON/JSONL report, report only findings new since it
 # baseline_mode = "filter"    # filter (drop known findings) or annotate (keep them, mark each `new`)
 # min_confidence = "low"      # low (keep every finding) or high (drop low-confidence findings before output and exit code)
+# fail_on = "any"             # any (exit 1 on any finding) or high (exit 1 only on high-confidence findings; all are still reported)
 
 # TARGETS
 # param = ["id", "q:query", "auth:header"]

@@ -44,6 +44,7 @@ only_poc = []
 # baseline = "baseline.json"
 baseline_mode = "filter"
 min_confidence = "low"
+fail_on = "any"
 no_color = false
 
 # TARGETS
@@ -164,6 +165,7 @@ debug = false
 | `baseline` | string |  | Previous JSON/JSONL report to diff against; only findings new since it are reported ([Baselines](../../guide/output/#baselines-reporting-only-what-is-new)). CLI only; `dalfox server` and MCP ignore it |
 | `baseline_mode` | string | `"filter"` | `filter` drops known findings, `annotate` keeps them and marks each `new` |
 | `min_confidence` | string | `"low"` | `high` drops low-confidence findings before output and the exit code (`I` kept) |
+| `fail_on` | string | `"any"` | `high` exits `1` only on a `high`-graded finding; every finding is still reported |
 | `no_color` | bool | `false` | Disable ANSI colour |
 
 ### Targets

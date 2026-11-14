@@ -532,6 +532,11 @@ fn reporting_and_pacing_flags_do_not_change_the_hash() {
             state_file: Some("other.state".to_string()),
             ..Default::default()
         },
+        // Only the exit code; nothing about what was sent.
+        ScanArgs {
+            fail_on: Some("high".to_string()),
+            ..Default::default()
+        },
         ScanArgs {
             scan_timeout: 600,
             ..Default::default()

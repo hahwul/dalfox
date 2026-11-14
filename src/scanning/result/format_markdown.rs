@@ -177,6 +177,14 @@ impl Result {
                     c.get("dropped").and_then(|v| v.as_u64()).unwrap_or(0)
                 );
             }
+            if let Some(f) = &m.fail_on {
+                let _ = writeln!(
+                    out,
+                    "| **Fail On** | {} ({} finding(s) matched) |",
+                    md_cell(f.get("level").and_then(|v| v.as_str()).unwrap_or("?")),
+                    f.get("matched").and_then(|v| v.as_u64()).unwrap_or(0)
+                );
+            }
             // Only rendered when true — a "Complete: yes" row on every clean
             // report is noise, but its absence must never be what signals a
             // truncated run, so the true case is spelled out loudly.

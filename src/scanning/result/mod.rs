@@ -583,6 +583,11 @@ pub(crate) struct ScanMetadata {
     /// from one that found nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_confidence: Option<serde_json::Value>,
+    /// `--fail-on` summary (`level` and how many reported findings
+    /// `matched` it, i.e. decided the exit code). Present only when the flag
+    /// was set, so a report with findings and exit 0 explains itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fail_on: Option<serde_json::Value>,
     /// At least one target was not fully tested: its authenticated session
     /// died mid-scan (see `error_codes::SESSION_LOST`), or a significant share
     /// of this run's requests never reached the target at all.
@@ -674,6 +679,11 @@ impl Result {
             && let serde_json::Value::Object(ref mut map) = value
         {
             map.insert("min_confidence".to_string(), min_confidence.clone());
+        }
+        if let Some(fail_on) = &meta.fail_on
+            && let serde_json::Value::Object(ref mut map) = value
+        {
+            map.insert("fail_on".to_string(), fail_on.clone());
         }
         value
     }

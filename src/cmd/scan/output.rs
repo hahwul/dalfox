@@ -836,6 +836,12 @@ pub(crate) async fn render_results(
                 "dropped": confidence_dropped,
             })
         }),
+        fail_on: args.fail_on.as_ref().map(|level| {
+            serde_json::json!({
+                "level": level,
+                "matched": final_results.iter().filter(|r| args.fails_run(r)).count(),
+            })
+        }),
     };
 
     let output_content = if args.format == "json" {
@@ -1055,6 +1061,12 @@ pub(crate) async fn derive_outcome(
     requests: RequestTally,
     output_write_failed: bool,
 ) -> ScanOutcome {
+    // `--fail-on high` narrows what counts as a finding for the exit code:
+    // a run whose only findings are `R`s is "no finding" below, so it exits 0
+    // when clean and 2 when it was also cut short, never 1. With the default
+    // `any`, `failing` is simply "the report is non-empty".
+    let failing = final_results.iter().any(|r| args.fails_run(r));
+
     // A scan where every supplied target failed reachability checks
     // (DNS lookup failure, connection refused, content-type mismatch,
     // etc.) used to fall through to `ScanOutcome::Clean` here — same
@@ -1083,7 +1095,7 @@ pub(crate) async fn derive_outcome(
     // documents — would otherwise read a successful detection as an
     // infrastructure failure. `meta.incomplete` carries the incompleteness for
     // both codes.
-    if final_results.is_empty()
+    if !failing
         && super::session::aborts_on_loss(args)
         && !state.session_lost.lock().await.is_empty()
     {
@@ -1099,7 +1111,7 @@ pub(crate) async fn derive_outcome(
     // no findings for the same reason as the session-loss block: a run that
     // confirmed a `V` elsewhere should still exit 1, not 2 — `meta.incomplete`
     // and the per-target INTERNAL_ERROR entry carry the partial-ness either way.
-    if final_results.is_empty() {
+    if !failing {
         let skipped = state.skipped_targets.lock().await;
         if skipped
             .values()
@@ -1120,13 +1132,22 @@ pub(crate) async fn derive_outcome(
     // The result envelope already marks severe transport loss as incomplete.
     // Keep the CLI exit status consistent: with no finding, a run that failed
     // to deliver enough requests did not establish a clean result.
-    if final_results.is_empty() && requests.is_incomplete() {
+    if !failing && requests.is_incomplete() {
         return ScanOutcome::Error;
     }
 
-    if final_results.is_empty() {
-        ScanOutcome::Clean
-    } else {
+    // Only reachable under `--fail-on high` (with `any`, findings imply
+    // `failing`): the run had findings, none gating, and Ctrl-C, `--limit` or
+    // `--scan-timeout` stopped it. `--limit` counts every tier, so the first
+    // `R` can end the scan before the tests that would have found a `V`; 0
+    // would claim a clean result the run never established.
+    if !failing && !final_results.is_empty() && !state.interrupted_targets.lock().await.is_empty() {
+        return ScanOutcome::Error;
+    }
+
+    if failing {
         ScanOutcome::Findings
+    } else {
+        ScanOutcome::Clean
     }
 }

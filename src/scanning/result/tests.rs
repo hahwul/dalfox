@@ -794,6 +794,21 @@ fn test_results_to_markdown_with_meta_shows_min_confidence() {
     );
 }
 
+/// `--fail-on` gets a row like `--min-confidence`: a report exiting 0 while
+/// listing findings must say the gate was raised.
+#[test]
+fn test_results_to_markdown_with_meta_shows_fail_on() {
+    let mut meta = mk_meta();
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(!md.contains("Fail On"), "absent when the flag is unset");
+    meta.fail_on = Some(serde_json::json!({"level": "high", "matched": 0}));
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(
+        md.contains("| **Fail On** | high (0 finding(s) matched) |"),
+        "{md}"
+    );
+}
+
 #[test]
 fn test_results_to_toml_with_meta() {
     let result = Result::builder(FindingType::Verified)
