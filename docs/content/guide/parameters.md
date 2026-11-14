@@ -10,7 +10,7 @@ Finding XSS starts with finding the right parameter. Dalfox finds parameters in 
 ## The pipeline, briefly
 
 1. **Discovery:** Probe the inputs the request already carries: query values (and query parameter *names*), headers, cookies, path segments, and the fields of forms found on the page. URL-fragment keys are listed too (and can be named with `-p`), but a fragment never reaches the server, so the scan never fuzzes them.
-2. **Mining:** Probe the body parameters of `-d` (form, JSON, GraphQL variables, XML, multipart), then look for names the request doesn't carry: a dictionary wordlist and the `id`/`name` of `<input>` elements in the response.
+2. **Mining:** Probe the body parameters of `-d` (form, JSON, GraphQL variables, XML, multipart), then look for names the request doesn't carry: a dictionary wordlist, the `id`/`name` of `<input>` elements in the response, and the query keys its scripts reference (`?q=` in a URL string, `.get('q')` on `URLSearchParams`): inline scripts always, and the same-origin bundles too when `--analyze-external-js` fetches them (that pass is part of AST analysis, so `--skip-ast-analysis` turns bundle names off as well).
 3. **Active probing:** Probe each parameter to learn which special characters survive, and detect servers that URL-decode more than once.
 4. **Payload generation:** Build context-aware payload sets (HTML, JS, attribute, CSS). Before a parameter's payloads go out, a fast probe sends one sandwich-marker request (plus a numeric-only fallback for filters that strip letters). If nothing reflects, the heavy payload loops are skipped for that parameter unless `--deep-scan` is set. When active probing already saw the marker come back, the fast probe reuses that answer instead of sending its own request.
 5. **Reflection check:** Send the payload, then see whether it comes back.
@@ -117,7 +117,7 @@ To move faster or work around a fragile target, skip parts of the pipeline:
 | `--skip-discovery` | Entire discovery stage (query, header, cookie, path, form, fragment) |
 | `--skip-mining` | All wordlist/DOM mining |
 | `--skip-mining-dict` | Dictionary mining only |
-| `--skip-mining-dom` | Mining parameter names from `<input>` `id`/`name` attributes only |
+| `--skip-mining-dom` | Mining parameter names from the page (`<input>` `id`/`name`, query keys in its scripts) only |
 | `--skip-reflection-header` | The built-in common-header sweep. Headers you pass with `-H` are still probed |
 | `--skip-reflection-cookie` | Probing the cookies the request carries |
 | `--skip-reflection-path` | Path-segment reflection checks |

@@ -218,6 +218,12 @@ pub struct Target {
     /// flag makes body mining test them as `MultipartBody` fields instead of
     /// as an urlencoded body the endpoint would not parse.
     pub multipart: bool,
+    /// Parameter names the page's same-origin `<script src>` bundles
+    /// reference, recorded by the external-JS pass (`--analyze-external-js`)
+    /// while it has each body in hand. DOM mining probes them without fetching
+    /// a bundle again or keeping one in memory. Empty unless that pass ran
+    /// before mining.
+    pub bundle_param_names: Vec<String>,
 }
 
 impl Target {
@@ -288,6 +294,7 @@ impl Target {
             // caller explicitly opts into validation (`--insecure=false`).
             insecure: true,
             multipart: false,
+            bundle_param_names: vec![],
         }
     }
 

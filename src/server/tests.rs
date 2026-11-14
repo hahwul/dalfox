@@ -4604,6 +4604,91 @@ async fn test_run_scan_job_analyze_external_js_produces_external_js_findings() {
     );
 }
 
+/// Runner parity with the CLI: the external-JS pass records the bundle's
+/// names before `analyze_parameters`, so a reflected query name only the
+/// bundle carries is mined and scanned, and the bundle is fetched once.
+#[tokio::test]
+async fn test_run_scan_job_mines_bundle_names_without_refetch() {
+    use axum::extract::Query;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let bundle_hits = Arc::new(AtomicUsize::new(0));
+    let hits = bundle_hits.clone();
+    let app = Router::new()
+        .route(
+            "/",
+            any(|Query(q): Query<HashMap<String, String>>| async move {
+                let echoed = q.get("bundleOnly").cloned().unwrap_or_default();
+                (
+                    StatusCode::OK,
+                    [("content-type", "text/html; charset=utf-8")],
+                    format!(
+                        r#"<html><head><script src="/app.js"></script></head><body>{echoed}</body></html>"#
+                    ),
+                )
+            }),
+        )
+        .route(
+            "/app.js",
+            any(move || {
+                let hits = hits.clone();
+                async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/javascript")],
+                        r#"fetch("/api/items?bundleOnly=" + v);"#,
+                    )
+                }
+            }),
+        );
+
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind bundle-names test server");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "bundle-names-job".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+
+    let opts = ScanOptions {
+        analyze_external_js: Some(true),
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(1),
+        ..ScanOptions::default()
+    };
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        run_scan_job(state.clone(), id.clone(), format!("http://{}/", addr), opts),
+    )
+    .await;
+    assert!(run.is_ok(), "run_scan_job must complete in time");
+
+    assert_eq!(
+        bundle_hits.load(Ordering::SeqCst),
+        1,
+        "bundle fetched more than once"
+    );
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job should remain");
+    assert_eq!(job.status, JobStatus::Done);
+    let results = job.results.as_ref().expect("results must be set");
+    assert!(
+        results.iter().any(|f| f.param == "bundleOnly"),
+        "the bundle-only name must be mined and scanned; findings: {results:?}"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // handlers.rs — ?analyze_external_js=true is parsed and forwarded to
 // ScanOptions, not rejected with a 400.

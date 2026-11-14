@@ -606,8 +606,8 @@ pub struct ScanArgs {
     pub skip_mining_dict: bool,
 
     #[clap(help_heading = "PARAMETER MINING")]
-    /// Skip mining parameter names from HTML inputs (does not disable `[A]`
-    /// findings; see --skip-ast-analysis)
+    /// Skip mining parameter names from HTML inputs and page scripts (does
+    /// not disable `[A]` findings; see --skip-ast-analysis)
     #[arg(long)]
     pub skip_mining_dom: bool,
 

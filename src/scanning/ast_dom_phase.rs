@@ -309,16 +309,24 @@ pub(crate) async fn accumulate_findings(
 /// (preflight) stage so it fires even for SPAs that have no server-side
 /// parameter reflection (where the per-param probe loop never executes).
 ///
-/// Returns an empty `Vec` when `--analyze-external-js` is not set.
+/// Also returns the parameter names the bundles reference (deduped, in script
+/// order), read while each body is in hand so DOM mining can probe them
+/// without a second fetch; the caller stores them in
+/// `Target::bundle_param_names`. Empty when mining will not use them.
+///
+/// Returns two empty `Vec`s when `--analyze-external-js` is not set.
 pub(crate) async fn fetch_and_analyze_external_js(
     client: &reqwest::Client,
     target: &Target,
     html: &str,
     scan_args: &ScanArgs,
-) -> Vec<crate::scanning::result::Result> {
+) -> (Vec<crate::scanning::result::Result>, Vec<String>) {
     if !scan_args.analyze_external_js {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
+    let want_names = !scan_args.skip_mining && !scan_args.skip_mining_dom;
+    let mut param_names: Vec<String> = Vec::new();
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     let script_urls =
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
@@ -343,6 +351,16 @@ pub(crate) async fn fetch_and_analyze_external_js(
         let Some(body) = fetch_external_js(client, target, script_url, scan_args).await else {
             continue;
         };
+        if want_names {
+            for name in crate::parameter_analysis::mining::js_param_candidates(&body) {
+                if param_names.len() >= crate::parameter_analysis::mining::MAX_STORED_BUNDLE_NAMES {
+                    break;
+                }
+                if seen_names.insert(name.clone()) {
+                    param_names.push(name);
+                }
+            }
+        }
 
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
@@ -390,7 +408,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
         }
     }
 
-    results
+    (results, param_names)
 }
 /// GET one external script, `None` when it fails or exceeds
 /// [`MAX_EXTERNAL_JS_BYTES`].
