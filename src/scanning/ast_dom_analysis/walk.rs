@@ -249,6 +249,10 @@ impl<'a> DomXssVisitor<'a> {
             self.forget_url_lead(name);
         }
         walk(self);
+        // What the block's own binding stood for ends with the block.
+        for name in names {
+            self.global_aliases.remove(name.as_str());
+        }
         for (name, global) in hidden {
             self.global_aliases.insert(name, global);
         }
@@ -874,9 +878,6 @@ impl<'a> DomXssVisitor<'a> {
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         let shadow_params_checkpoint = self.shadow_params.checkpoint();
         let value_locals_checkpoint = self.value_locals.checkpoint();
-        for name in Self::value_local_names(statements) {
-            self.value_locals.insert(name);
-        }
         let url_lead_scope = self.url_leads_enter(&own_names);
         let global_aliases_checkpoint = self.global_aliases.checkpoint();
         for name in &own_names {
@@ -893,8 +894,13 @@ impl<'a> DomXssVisitor<'a> {
         }
         for name in &declared {
             self.shadow_params.remove(name.as_str());
+            // Its own declaration of an outer value local's name is whatever
+            // it binds here (`var N = window.N`), not that value.
+            self.value_locals.remove(name.as_str());
         }
-
+        for name in Self::value_local_names(statements) {
+            self.value_locals.insert(name);
+        }
         for name in std::mem::take(&mut self.iife_passthrough) {
             self.shadow_params.remove(name.as_str());
         }
@@ -1021,8 +1027,17 @@ impl<'a> DomXssVisitor<'a> {
             .iter()
             .map(|name| (name.clone(), self.take_binding_state(name)))
             .collect();
+        // A value local the block rebinds to a function is one again after it.
+        let value_locals: Vec<String> = names
+            .iter()
+            .filter(|name| self.value_locals.contains(name.as_str()))
+            .cloned()
+            .collect();
         // …and the global object an outer `var d = document` stood for.
         self.with_block_bindings(&names, |v| v.walk_statements(statements));
+        for name in value_locals {
+            self.value_locals.insert(name);
+        }
         for (name, state) in outer {
             self.take_binding_state(&name);
             if state.tainted {
@@ -1059,7 +1074,8 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     /// Names a body's own top level binds to a value that is not a function
-    /// it defines there: a destructuring target, a call's result, a literal
+    /// it defines there: a destructuring target (or its ES5 form, an element
+    /// read by index), a call's result, a literal
     /// (`let [open, setOpen] = useState(false)`, `var i = lookup(a, b)`).
     /// Summaries are keyed by bare name, and a minified bundle has some
     /// other `i` that is a function; a call through this binding is not a
@@ -1088,6 +1104,11 @@ impl<'a> DomXssVisitor<'a> {
                                     Expression::StaticMemberExpression(member)
                                         if member.property.name == "bind"
                                 )
+                            }
+                            // `O = P[1]`: what ES5 output makes of
+                            // `[L, O] = useState()`.
+                            Expression::ComputedMemberExpression(member) => {
+                                matches!(member.expression, Expression::NumericLiteral(_))
                             }
                             init => {
                                 init.is_literal()

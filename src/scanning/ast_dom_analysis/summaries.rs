@@ -223,6 +223,9 @@ impl<'a> DomXssVisitor<'a> {
             self.shadow_params.remove(name.as_str());
         }
         let value_locals_checkpoint = self.value_locals.checkpoint();
+        for name in &declared {
+            self.value_locals.remove(name.as_str());
+        }
         for name in Self::value_local_names(body_stmts) {
             self.value_locals.insert(name);
         }

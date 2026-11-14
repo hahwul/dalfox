@@ -1151,7 +1151,10 @@ impl<'a> DomXssVisitor<'a> {
     /// [`shadow_params`](Self::shadow_params)).
     fn summary(&self, key: &str) -> Option<&FunctionSummary> {
         let root = key.split('.').next().unwrap_or(key);
-        if self.shadow_params.contains(root) || (key == root && self.value_locals.contains(key)) {
+        // `new N(x)` looks up `N.constructor`: still a call through `N`.
+        let called = key.strip_suffix(".constructor").unwrap_or(key);
+        if self.shadow_params.contains(root) || (called == root && self.value_locals.contains(root))
+        {
             return None;
         }
         self.function_summaries.get(key)
