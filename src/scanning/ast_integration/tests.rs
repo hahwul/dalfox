@@ -28,6 +28,7 @@ fn analyze_javascript_for_dom_xss(
         &Default::default(),
         &Default::default(),
         false,
+        &mut Default::default(),
     )
 }
 
@@ -1832,7 +1833,13 @@ fn reflected_markup_flow_is_found_and_graded_reachable() {
         let (ids, markup) = (Arc::new(ids), Arc::new(markup));
         js.iter()
             .flat_map(|code| {
-                analyze_javascript_for_dom_xss_with_html_context(code, &ids, &markup, false)
+                analyze_javascript_for_dom_xss_with_html_context(
+                    &code.code,
+                    &ids,
+                    &markup,
+                    false,
+                    &mut Default::default(),
+                )
             })
             .map(|(v, _, _)| v)
             .collect::<Vec<_>>()
@@ -1931,4 +1938,113 @@ fn trust_bypass_sinks_get_a_payload_for_their_binding() {
     for sink in ["bypassSecurityTrustHtml", "trustAsHtml"] {
         assert!(poc(sink).starts_with("#<img "), "{sink}");
     }
+}
+
+/// The landing page's blocks are analyzed alone but in document order, each
+/// with the globals the earlier ones left tainted: scripts first, then the
+/// inline handlers that run after them.
+#[test]
+fn initial_pass_follows_a_global_across_script_blocks() {
+    let flows = |html: &str| {
+        run_initial_ast_dom_analysis_with_skips(
+            html,
+            "text/html",
+            "http://h/",
+            "GET",
+            PageSecurityPosture::default(),
+        )
+        .0
+        .len()
+    };
+    assert_eq!(
+        flows(
+            "<div id=x></div><script>var q = location.hash.slice(1);</script>\
+             <script>document.getElementById('x').innerHTML = q;</script>"
+        ),
+        1
+    );
+    assert_eq!(
+        flows(
+            "<script>var q = location.hash.slice(1);</script>\
+             <button onclick=\"document.body.innerHTML = q\">go</button>"
+        ),
+        1
+    );
+    // Rebound in between, and read before it is set.
+    assert_eq!(
+        flows(
+            "<script>var q = location.hash.slice(1);</script><script>q = 'fixed';</script>\
+             <script>document.body.innerHTML = q;</script>"
+        ),
+        0
+    );
+    assert_eq!(
+        flows(
+            "<script>document.body.innerHTML = q;</script>\
+             <script>var q = location.hash.slice(1);</script>"
+        ),
+        0
+    );
+    // A handler's or a module's bindings are its own: they are not handed on,
+    // and a handler's `event` is not the page's.
+    for html in [
+        "<script>var t='<b>hi</b>';</script>\
+         <a onclick=\"var t=location.hash.slice(1); track(t)\">a</a>\
+         <a onclick=\"document.body.innerHTML=t\">b</a>",
+        "<script>var event=location.hash.slice(1);</script>\
+         <button onclick=\"document.body.innerHTML=event.type\">x</button>",
+        "<script type=\"module\">const q=location.hash.slice(1);</script>\
+         <script>document.body.innerHTML=q;</script>",
+        "<script>var q=location.hash.slice(1);</script>\
+         <script type=\"module\">const q='safe';document.body.innerHTML=q;</script>",
+        // A script repeated further down ran again there; what it did to the
+        // globals is not known, so nothing is carried past it.
+        "<script>var q='';</script><script>q=location.hash.slice(1);show(q)</script>\
+         <script>var q='';</script><script>document.body.innerHTML=q;</script>",
+    ] {
+        assert_eq!(flows(html), 0, "{html}");
+    }
+    // A small repeated script is walked again for its effect, so an ad
+    // slot's one-liner between the source and the sink changes nothing. Its
+    // findings are the first copy's.
+    let ad = "<script>(adsbygoogle=window.adsbygoogle||[]).push({});</script>";
+    let page = |repeats: usize, filler: &str| {
+        format!(
+            "<script>var q=location.hash.slice(1);</script>{}\
+             <script>document.body.innerHTML=q;</script>",
+            filler.repeat(repeats)
+        )
+    };
+    assert_eq!(flows(&page(3, ad)), 1);
+    assert_eq!(
+        flows(
+            "<script>document.body.innerHTML=location.hash;</script>\
+               <script>document.body.innerHTML=location.hash;</script>"
+        ),
+        1
+    );
+    // Past the repeats walked per page, or for a large one, the effect is
+    // unknown and the page forgets.
+    assert_eq!(flows(&page(40, ad)), 0);
+    let big = format!("<script>track('{}');</script>", "x".repeat(3000));
+    assert_eq!(flows(&page(2, &big)), 0);
+    // A classic copy of a module's text is its own script.
+    assert_eq!(
+        flows(
+            "<script type=\"module\">var q=location.hash.slice(1);</script>\
+             <script>var q=location.hash.slice(1);</script>\
+             <script>document.body.innerHTML=q;</script>"
+        ),
+        1
+    );
+    // One handler clearing the global does not hide it from the next: each
+    // reads what the scripts left.
+    assert_eq!(
+        flows(
+            "<script>var q=location.hash.slice(1);</script>\
+             <button onclick=\"q=''\">clear</button>\
+             <button onclick=\"document.body.innerHTML=q\">show</button>"
+        ),
+        1
+    );
 }

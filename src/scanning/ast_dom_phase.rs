@@ -53,6 +53,10 @@ pub(crate) async fn run_ast_dom_analysis(
     let (js_blocks, script_element_ids, mut reflected_markup) = if xml_response {
         let (js_blocks, script_ids) =
             crate::scanning::ast_integration::extract_js_and_script_ids_from_xml(response_text);
+        let js_blocks = js_blocks
+            .into_iter()
+            .map(crate::scanning::ast_integration::JsBlock::own)
+            .collect();
         (js_blocks, script_ids, Default::default())
     } else {
         crate::scanning::ast_integration::extract_js_script_ids_and_reflected_markup(response_text)
@@ -74,7 +78,11 @@ pub(crate) async fn run_ast_dom_analysis(
     // A fetched script also carries its URL and the query keys holding the
     // parameter.
     type ScriptOrigin = Option<(String, HashSet<String>)>;
-    let mut blocks: Vec<(String, &Arc<_>, ScriptOrigin)> = js_blocks
+    let mut blocks: Vec<(
+        crate::scanning::ast_integration::JsBlock,
+        &Arc<_>,
+        ScriptOrigin,
+    )> = js_blocks
         .into_iter()
         .map(|js| (js, &reflected_markup, None))
         .collect();
@@ -95,18 +103,38 @@ pub(crate) async fn run_ast_dom_analysis(
             if let Some(ExternalJs::Body(body)) =
                 fetch_external_js(client, target, url, scan_args).await
             {
-                blocks.push((body, &script_markup, Some((url_str, keys))));
+                // Not in document order with the inline blocks: it starts
+                // from no carried globals and hands none on.
+                let block = crate::scanning::ast_integration::JsBlock::own(body);
+                blocks.push((block, &script_markup, Some((url_str, keys))));
             }
         }
     }
-    for (js_code, markup, script_url) in blocks {
+    // The response's classic scripts share one global scope, in this order.
+    let mut page_globals = crate::scanning::ast_dom_analysis::CarriedGlobals::new();
+    for (block, markup, script_url) in blocks {
+        let mut own_globals = Default::default();
+        let globals = if script_url.is_some() {
+            &mut own_globals
+        } else {
+            match block.globals(&mut page_globals, &mut own_globals) {
+                Some(globals) => globals,
+                None => continue,
+            }
+        };
+        let repeat = block.is_repeat();
+        let js_code = block.code;
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &js_code,
                 &script_element_ids,
                 markup,
                 posture.trusted_types_enforced,
+                globals,
             );
+        if repeat {
+            continue;
+        }
         // Normalized once per block (not per finding), and only once a
         // finding survives the dedup below — the bootstrap check is pure, so
         // running it after the `ast_seen` skip changes nothing but the cost.
@@ -385,6 +413,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 &script_element_ids,
                 &Default::default(),
                 trusted_types_enforced,
+                &mut Default::default(),
             );
 
         // Normalized once per script, not once per finding.
