@@ -21,15 +21,11 @@ use std::sync::atomic::AtomicBool;
 
 use tokio::sync::Mutex;
 
-use super::{AbortOnDrop, JobProgress, JobStatus, cap_reflection_params, run_within_scan_budget};
+use super::{AbortOnDrop, JobProgress, JobStatus, run_within_scan_budget};
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::analyze_parameters;
+use crate::parameter_analysis::{MAX_DISCOVERED_PARAMS, analyze_parameters, cap_reflection_params};
 use crate::scanning::result::{Result as ScanResult, SanitizedResult};
 use crate::target_parser::{Target, parse_target};
-
-/// Ceiling on parameters carried into the scan phase, named in the warning
-/// below. Defined one level up in `job`; the REST server only re-exports it.
-use super::MAX_DISCOVERED_PARAMS;
 
 /// Build the `Target` a job scans from its `ScanArgs`.
 ///

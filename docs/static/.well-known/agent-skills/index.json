@@ -6,7 +6,7 @@
       "type": "skill-md",
       "description": "Use when scanning a URL or parameter for XSS (reflected, DOM, stored, blind), enumerating reflected parameters, or when the user explicitly mentions \"dalfox\" or \"XSS scan\". Runs as CLI (`dalfox scan`) or MCP server (6 tools). Authoritative workflows for dalfox v3 (Rust). Not for non-XSS vulnerabilities.",
       "url": "/.well-known/agent-skills/dalfox/SKILL.md",
-      "digest": "sha256:f1dfe9a13dd3dade8e7d1ca8f86555e9f0495daf2492d96e297fdbd2645a8aaf"
+      "digest": "sha256:ba04de0ba29f7a9327134384d5e908b5692027e758978ad8a8ae375b67edc4f8"
     }
   ]
 }

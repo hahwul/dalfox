@@ -8,6 +8,8 @@
    - Otherwise `$HOME/.config/dalfox/config.toml` (preferred) or `config.json`
 3. If no file exists at the default location, dalfox **creates** a `config.toml` with a heavily commented template containing all keys at their defaults.
 
+New config files are created with mode `0600` on Unix because configs can contain cookies, headers, proxy credentials, and OAST tokens. Existing file permissions are left unchanged.
+
 There is **no automatic project-local** `.dalfox/config.toml` discovery in the current design (unlike some other tools). Use `--config ./dalfox-scan.toml` or commit a config in the repo and point at it.
 
 ## Precedence Rule (critical invariant)

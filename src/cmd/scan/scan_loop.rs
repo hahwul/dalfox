@@ -608,12 +608,13 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     // payload vectors that `run_scanning` materializes for every
                     // parameter. A large page can expose tens of thousands of
                     // distinct form/query fields before the worker limit helps.
-                    let dropped_params = crate::job::cap_reflection_params(&mut target);
+                    let dropped_params =
+                        crate::parameter_analysis::cap_reflection_params(&mut target);
                     if dropped_params > 0 && !args_clone.silence {
                         crate::ceprintln!(
                             "{}: discovered params capped to {} (dropped {})",
                             crate::utils::log::log_prefix("33", "WARN"),
-                            crate::job::MAX_DISCOVERED_PARAMS,
+                            crate::parameter_analysis::MAX_DISCOVERED_PARAMS,
                             dropped_params
                         );
                     }

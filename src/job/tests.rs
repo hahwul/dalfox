@@ -1491,23 +1491,6 @@ fn async_jobs_cap_findings_and_say_so() {
 }
 
 #[test]
-fn cap_reflection_params_bounds_payload_job_inputs() {
-    let mut target = crate::target_parser::parse_target("http://example.test/").unwrap();
-    target.reflection_params = (0..=super::MAX_DISCOVERED_PARAMS)
-        .map(|i| {
-            crate::parameter_analysis::Param::new(
-                format!("p{i}"),
-                "",
-                crate::parameter_analysis::Location::Query,
-            )
-        })
-        .collect();
-
-    assert_eq!(super::cap_reflection_params(&mut target), 1);
-    assert_eq!(target.reflection_params.len(), super::MAX_DISCOVERED_PARAMS);
-}
-
-#[test]
 fn parameter_cap_warning_uses_the_shared_error_code() {
     let messages = std::sync::Mutex::new(Vec::<String>::new());
     let warn = |message: &str| {
@@ -1526,7 +1509,7 @@ fn parameter_cap_warning_uses_the_shared_error_code() {
         [format!(
             "{}: discovered params capped to {} (dropped 7)",
             crate::cmd::error_codes::TRUNCATED_PARAM_CAP,
-            super::MAX_DISCOVERED_PARAMS
+            crate::parameter_analysis::MAX_DISCOVERED_PARAMS
         )]
     );
 }

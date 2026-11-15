@@ -2019,7 +2019,7 @@ async fn scan_host_group_caps_parameter_fanout_and_records_retryable_state() {
     let state_file_handle =
         Arc::new(super::state_file::StateFile::open(&state_file, &args).expect("open state file"));
     let mut target = parse_target("http://example.test/").expect("valid target");
-    target.reflection_params = (0..=crate::job::MAX_DISCOVERED_PARAMS)
+    target.reflection_params = (0..=crate::parameter_analysis::MAX_DISCOVERED_PARAMS)
         .map(|i| Param::new(format!("fragment{i}"), "FUZZ", Location::Fragment))
         .collect();
     let key = target.state_key();
