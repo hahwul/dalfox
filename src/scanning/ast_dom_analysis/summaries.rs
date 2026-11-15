@@ -10,6 +10,7 @@ use super::*;
 type Report = (u32, u32, String);
 
 const MAX_URL_LEAD_PARAMS: usize = 32;
+pub(super) const MAX_DECLARATION_SUMMARIES: usize = 4096;
 
 impl<'a> DomXssVisitor<'a> {
     /// Suppression facts require a stable bare callable and unshifted arguments.
@@ -95,7 +96,7 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Walk through statements
     pub(super) fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
-        self.collect_function_declarations(stmts);
+        let displaced = self.collect_function_declarations(stmts);
         for (idx, stmt) in stmts.iter().enumerate() {
             // Read after `stmts[idx - 1]` was walked, against the live state.
             self.adjacent_index = idx
@@ -104,9 +105,27 @@ impl<'a> DomXssVisitor<'a> {
             self.walk_statement(stmt);
             self.adjacent_index = None;
         }
+        // The names these statements declared stand for the other functions
+        // again; their own summaries are kept for the next walk of them.
+        for (name, other) in displaced.into_iter().rev() {
+            if let Some(own) = self.function_summaries.insert(name, other) {
+                if self.declaration_summaries.len() >= MAX_DECLARATION_SUMMARIES {
+                    self.declaration_summaries.clear();
+                }
+                self.declaration_summaries.insert(own.params_span, own);
+            }
+        }
     }
-    /// Collect function declarations before statement traversal so hoisted calls are recognized.
-    pub(super) fn collect_function_declarations(&mut self, stmts: &[Statement<'a>]) {
+    /// Collect function declarations before statement traversal so hoisted
+    /// calls are recognized. Returns the summaries of *other* functions of
+    /// the same names, set aside while these statements are walked: a
+    /// minifier calls a helper `o` in every scope, and inside a scope `o` is
+    /// the one declared there.
+    pub(super) fn collect_function_declarations(
+        &mut self,
+        stmts: &[Statement<'a>],
+    ) -> Vec<(String, FunctionSummary)> {
+        let mut displaced = Vec::new();
         for stmt in stmts {
             let func_decl = match stmt {
                 Statement::FunctionDeclaration(func_decl) => func_decl,
@@ -137,8 +156,24 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 _ => continue,
             };
+            // shortcut: absent names retain legacy IIFE exports and Annex B lookup; remove after explicit export/scope resolution.
+            if let Some(id) = &func_decl.id
+                && self
+                    .function_summaries
+                    .get(id.name.as_str())
+                    .is_some_and(|known| known.params_span != func_decl.params.span)
+                && let Some(other) = self.function_summaries.remove(id.name.as_str())
+            {
+                displaced.push((id.name.to_string(), other));
+                if let Some(own) = self.declaration_summaries.remove(&func_decl.params.span) {
+                    self.value_locals.remove(id.name.as_str());
+                    self.function_summaries.insert(id.name.to_string(), own);
+                    continue;
+                }
+            }
             self.register_function_declaration(func_decl);
         }
+        displaced
     }
     /// `(W, render, fn)` of `W.prototype.render = function () { … }`.
     pub(super) fn prototype_method<'b>(
@@ -185,6 +220,9 @@ impl<'a> DomXssVisitor<'a> {
         body_stmts: &[Statement<'a>],
         concise: bool,
     ) {
+        let Some(_guard) = self.enter_recursion() else {
+            return;
+        };
         if self.return_callable_roots.len() >= 1024 {
             self.note_return_write(String::new());
         } else {
