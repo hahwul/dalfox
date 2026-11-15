@@ -103,6 +103,9 @@ impl<'a> DomXssVisitor<'a> {
         concise: bool,
     ) {
         self.arity_known.insert(formal_params.span);
+        // The scope being walked binds this name to a function after all
+        // (`var t = 0; if (x) { const t = function (h) { … } }`).
+        self.value_locals.remove(function_name.as_str());
         if let Some(existing) = self.function_summaries.get_mut(&function_name) {
             // Another function under the same name (minified bundles reuse
             // `e`/`t`): a call that leaves an argument out may be either.
@@ -218,6 +221,13 @@ impl<'a> DomXssVisitor<'a> {
         }
         for name in &declared {
             self.shadow_params.remove(name.as_str());
+        }
+        let value_locals_checkpoint = self.value_locals.checkpoint();
+        for name in &declared {
+            self.value_locals.remove(name.as_str());
+        }
+        for name in Self::value_local_names(body_stmts) {
+            self.value_locals.insert(name);
         }
         let is_outer = |path: &String| {
             let root = path.split(['.', '[']).next().unwrap_or(path);
@@ -432,6 +442,7 @@ impl<'a> DomXssVisitor<'a> {
         self.local_names.rollback(local_names_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
         self.shadow_params.rollback(shadow_params_checkpoint);
+        self.value_locals.rollback(value_locals_checkpoint);
         self.global_aliases.rollback(global_aliases_checkpoint);
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
