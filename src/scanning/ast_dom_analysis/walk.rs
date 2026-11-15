@@ -16,6 +16,9 @@ impl<'a> DomXssVisitor<'a> {
     /// analysis stack) can't overflow the walk.
     pub(super) fn walk_statement(&mut self, stmt: &Statement<'a>) {
         let Some(_guard) = self.enter_recursion() else {
+            if self.collecting_return_url_lead.get() {
+                self.return_url_lead = Some(UrlLead::Open);
+            }
             return;
         };
         match stmt {
@@ -175,6 +178,7 @@ impl<'a> DomXssVisitor<'a> {
                 }
             },
             Statement::ReturnStatement(return_stmt) => {
+                let epoch = self.url_lead_write_epoch;
                 if let Some(argument) = &return_stmt.argument {
                     if self.collecting_tainted_returns && self.is_tainted(argument) {
                         let source = self
@@ -183,6 +187,11 @@ impl<'a> DomXssVisitor<'a> {
                         self.tainted_return_sources.push(source);
                     }
                     self.walk_expression(argument);
+                }
+                if self.collecting_return_url_lead.get() && epoch != self.url_lead_write_epoch {
+                    self.return_url_lead = Some(UrlLead::Open);
+                } else {
+                    self.collect_return_url_lead(return_stmt.argument.as_ref());
                 }
             }
             Statement::SwitchStatement(switch_stmt) => {
@@ -623,10 +632,37 @@ impl<'a> DomXssVisitor<'a> {
     /// descending past [`MAX_AST_VISIT_DEPTH`].
     pub(super) fn walk_expression(&mut self, expr: &Expression<'a>) {
         let Some(_guard) = self.enter_recursion() else {
+            if self.collecting_return_url_lead.get() {
+                self.return_url_lead = Some(UrlLead::Open);
+            }
             return;
         };
         match expr {
             Expression::AssignmentExpression(assign) => {
+                self.url_lead_write_epoch = self.url_lead_write_epoch.wrapping_add(1);
+                let root = match &assign.left {
+                    AssignmentTarget::AssignmentTargetIdentifier(id) => Some(id.name.to_string()),
+                    AssignmentTarget::StaticMemberExpression(member) => {
+                        if self.global_alias_of(&member.object) == Some("window") {
+                            Some(member.property.name.to_string())
+                        } else {
+                            self.get_expr_string(&member.object)
+                        }
+                    }
+                    AssignmentTarget::ComputedMemberExpression(member) => {
+                        if self.global_alias_of(&member.object) == Some("window") {
+                            self.eval_static_string_expr(&member.expression)
+                        } else {
+                            self.get_expr_string(&member.object)
+                        }
+                    }
+                    _ => None,
+                };
+                // An untracked destructuring write may replace any callable.
+                self.note_return_write(
+                    root.map(|root| root.split('.').next().unwrap_or(&root).to_string())
+                        .unwrap_or_default(),
+                );
                 self.walk_assignment_expression(assign);
             }
             Expression::CallExpression(call) => {
@@ -940,9 +976,13 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        let collecting_return_url_lead = self.collecting_return_url_lead.get();
+        self.collecting_return_url_lead.set(false);
         let body_frame = self.enter_body();
         self.walk_statements(statements);
         self.leave_body(body_frame);
+        self.collecting_return_url_lead
+            .set(collecting_return_url_lead);
 
         // A name the body tainted that it neither declared nor took as a
         // parameter is an *outer* binding: `function () { g = location.hash; }`

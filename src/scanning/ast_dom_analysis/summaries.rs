@@ -9,6 +9,8 @@ use super::*;
 /// A reported sink, as `(line, column, sink)`.
 type Report = (u32, u32, String);
 
+const MAX_URL_LEAD_PARAMS: usize = 32;
+
 impl<'a> DomXssVisitor<'a> {
     /// Walk through statements
     pub(super) fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
@@ -102,6 +104,17 @@ impl<'a> DomXssVisitor<'a> {
         body_stmts: &[Statement<'a>],
         concise: bool,
     ) {
+        if self.return_callable_roots.len() >= 1024 {
+            self.note_return_write(String::new());
+        } else {
+            self.return_callable_roots.insert(
+                function_name
+                    .split('.')
+                    .next()
+                    .unwrap_or(&function_name)
+                    .to_string(),
+            );
+        }
         self.arity_known.insert(formal_params.span);
         // The scope being walked binds this name to a function after all
         // (`var t = 0; if (x) { const t = function (h) { … } }`).
@@ -111,6 +124,9 @@ impl<'a> DomXssVisitor<'a> {
             // `e`/`t`): a call that leaves an argument out may be either.
             if existing.params_span != formal_params.span {
                 existing.tainted_param_defaults.clear();
+                existing.return_lead_ambiguous = true;
+                existing.return_url_lead = None;
+                existing.pinned_param_return_leads.clear();
             }
             return;
         }
@@ -165,6 +181,9 @@ impl<'a> DomXssVisitor<'a> {
         let idb_stores_checkpoint = self.idb_object_store_vars.checkpoint();
         let image_vars_checkpoint = self.element_tag_vars.checkpoint();
         let saved_vuln_len = self.vulnerabilities.len();
+        let saved_collecting_return_url_lead = self.collecting_return_url_lead.get();
+        let saved_return_url_lead = self.return_url_lead.take();
+        self.collecting_return_url_lead.set(false);
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
 
@@ -419,6 +438,45 @@ impl<'a> DomXssVisitor<'a> {
             self.field_taints.rollback(field_taints_checkpoint);
         }
 
+        // A string lead says nothing about fields extracted from an object
+        // or a rest array. Only simple parameter slots preserve a URL lead.
+        summary.return_lead_ambiguous = self
+            .function_summaries
+            .get(&function_name)
+            .is_some_and(|existing| existing.return_lead_ambiguous);
+        if !summary.return_lead_ambiguous
+            && params.len() <= MAX_URL_LEAD_PARAMS
+            && formal_params.rest.is_none()
+            && formal_params
+                .items
+                .iter()
+                .all(|param| matches!(param.pattern, BindingPattern::BindingIdentifier(_)))
+            && (!summary.tainted_param_returns.is_empty()
+                || summary.return_without_tainted_params.is_some())
+        {
+            summary.return_url_lead = Some(self.summary_return_url_lead(
+                formal_params,
+                body_stmts,
+                concise,
+                &params,
+                None,
+            ));
+            if summary.return_url_lead == Some(UrlLead::Open) {
+                for idx in summary.tainted_param_returns.keys() {
+                    let lead = self.summary_return_url_lead(
+                        formal_params,
+                        body_stmts,
+                        concise,
+                        &params,
+                        Some(*idx),
+                    );
+                    if lead != UrlLead::Open {
+                        summary.pinned_param_return_leads.insert(*idx, lead);
+                    }
+                }
+            }
+        }
+
         self.tainted_vars = saved_tainted;
         self.field_only_taint = saved_field_only;
         self.var_aliases = saved_aliases;
@@ -445,11 +503,91 @@ impl<'a> DomXssVisitor<'a> {
         self.value_locals.rollback(value_locals_checkpoint);
         self.global_aliases.rollback(global_aliases_checkpoint);
         self.vulnerabilities.truncate(saved_vuln_len);
+        self.collecting_return_url_lead
+            .set(saved_collecting_return_url_lead);
+        self.return_url_lead = saved_return_url_lead;
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;
 
         self.function_summaries.insert(function_name, summary);
     }
+    /// Prove a return lead against all parameters at once, so pinning one
+    /// argument cannot hide a different argument that supplies the start.
+    fn summary_return_url_lead(
+        &mut self,
+        formal_params: &FormalParameters<'a>,
+        body_stmts: &[Statement<'a>],
+        concise: bool,
+        params: &[String],
+        pinned: Option<usize>,
+    ) -> UrlLead {
+        if self.work_steps.get() >= self.work_budget {
+            return UrlLead::Open;
+        }
+        let tainted = std::mem::take(&mut self.tainted_vars);
+        let aliases = std::mem::take(&mut self.var_aliases);
+        let field_only = std::mem::take(&mut self.field_only_taint);
+        let url_objects = std::mem::take(&mut self.url_object_sources);
+        let global_aliases = std::mem::take(&mut self.global_aliases);
+        // A captured variable may be rebound after the function is defined.
+        let leads = std::mem::take(&mut self.url_leads);
+        let kills = std::mem::take(&mut self.url_lead_kills);
+        let fields = self.field_taints.checkpoint();
+        let globals = self.global_taints.checkpoint();
+        let pages = std::mem::take(&mut self.page_url_objects);
+        let classes = self.instance_classes.checkpoint();
+        let bound = self.bound_function_aliases.checkpoint();
+        let responses = self.response_object_vars.checkpoint();
+        let css = self.css_custom_property_sources.checkpoint();
+        let requests = self.idb_request_vars.checkpoint();
+        let stores = self.idb_object_store_vars.checkpoint();
+        let elements = self.element_tag_vars.checkpoint();
+        for (idx, name) in params.iter().enumerate() {
+            self.taint_var(name.clone());
+            self.var_aliases
+                .insert(name.clone(), format!("fn_param_{idx}"));
+            if pinned == Some(idx) {
+                self.url_leads
+                    .insert(name.clone(), (UrlLead::Passive, true));
+            }
+        }
+        let before = self.vulnerabilities.len();
+        let outer_collecting = self.collecting_return_url_lead.get();
+        let outer_lead = self.return_url_lead.take();
+        self.collecting_return_url_lead.set(true);
+        let outer_pass = self.in_return_lead_pass;
+        self.in_return_lead_pass = true;
+        let epoch = self.url_lead_write_epoch;
+        self.summary_body_walk(formal_params, body_stmts, concise);
+        let lead = if concise && epoch != self.url_lead_write_epoch {
+            UrlLead::Open
+        } else {
+            self.return_url_lead.unwrap_or(UrlLead::Open)
+        };
+        self.in_return_lead_pass = outer_pass;
+        self.collecting_return_url_lead.set(outer_collecting);
+        self.return_url_lead = outer_lead;
+        self.vulnerabilities.truncate(before);
+        self.global_aliases = global_aliases;
+        self.url_object_sources = url_objects;
+        self.field_only_taint = field_only;
+        self.element_tag_vars.rollback(elements);
+        self.idb_object_store_vars.rollback(stores);
+        self.idb_request_vars.rollback(requests);
+        self.css_custom_property_sources.rollback(css);
+        self.response_object_vars.rollback(responses);
+        self.bound_function_aliases.rollback(bound);
+        self.instance_classes.rollback(classes);
+        self.page_url_objects = pages;
+        self.global_taints.rollback(globals);
+        self.field_taints.rollback(fields);
+        self.url_leads = leads;
+        self.url_lead_kills = kills;
+        self.tainted_vars = tainted;
+        self.var_aliases = aliases;
+        lead
+    }
+
     /// One hypothetical walk of a summarised function's body.
     fn summary_body_walk(
         &mut self,
@@ -471,6 +609,7 @@ impl<'a> DomXssVisitor<'a> {
         let Some(Statement::ExpressionStatement(stmt)) = body_stmts.first() else {
             return;
         };
+        self.collect_return_url_lead(Some(&stmt.expression));
         if self.is_tainted(&stmt.expression) {
             let source = self
                 .find_source_in_expr(&stmt.expression)
