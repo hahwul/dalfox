@@ -6213,18 +6213,17 @@ async fn test_terminal_webhook_failure_log_redacts_path_and_query() {
     let path = temp_log_path("callback-failure-redaction");
     state.log_file = Some(path.to_string_lossy().into_owned());
 
-    // Reserve then release a loopback port so reqwest gets a deterministic
-    // connection-refused error without reaching an external service.
-    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .await
-        .expect("reserve loopback port");
-    let port = listener.local_addr().expect("local addr").port();
-    drop(listener);
-    let callback = format!("http://127.0.0.1:{port}/private/hook?token=secret-value");
+    // Port zero is never a listening destination. Disable Reqwest's ambient
+    // proxy settings so this always fails against loopback without external I/O.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("build proxy-free client");
+    let callback = "http://127.0.0.1:0/private/hook?token=secret-value";
 
     send_terminal_webhook(
         &state,
-        Some(callback),
+        Some(callback.to_string()),
         "redaction-test",
         "http://example.test/",
         TerminalOutcome {
@@ -6233,7 +6232,7 @@ async fn test_terminal_webhook_failure_log_redacts_path_and_query() {
             error_message: Some("target unavailable"),
             warnings: &[],
         },
-        None,
+        Some(client),
     )
     .await;
 
@@ -6241,10 +6240,7 @@ async fn test_terminal_webhook_failure_log_redacts_path_and_query() {
     let _ = std::fs::remove_file(path);
     assert!(logged.contains("[CALLBACK]"), "{logged}");
     assert!(logged.contains("failed"), "{logged}");
-    assert!(
-        logged.contains(&format!("http://127.0.0.1:{port}")),
-        "{logged}"
-    );
+    assert!(logged.contains("http://127.0.0.1:0"), "{logged}");
     assert!(
         !logged.contains("/private/hook"),
         "callback path leaked: {logged}"
