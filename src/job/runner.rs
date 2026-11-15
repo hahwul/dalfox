@@ -354,6 +354,20 @@ fn oob_drain_wait_counts_against_scan_timeout() {
     );
 }
 
+/// Report a bounded parameter list through the interface's warning channel.
+/// Kept separate so the stable application code and dropped-count format are
+/// covered without running hundreds of scan workers in a unit test.
+pub(crate) fn warn_if_param_cap_reached(dropped: usize, warn: &(dyn Fn(&str) + Send + Sync)) {
+    if dropped > 0 {
+        warn(&format!(
+            "{}: discovered params capped to {} (dropped {})",
+            crate::cmd::error_codes::TRUNCATED_PARAM_CAP,
+            MAX_DISCOVERED_PARAMS,
+            dropped
+        ));
+    }
+}
+
 /// Run one job's scan to completion and report what it left behind.
 ///
 /// `warn` receives operator-facing warnings so each interface can route them
@@ -862,13 +876,7 @@ pub(crate) async fn execute_scan(
                     // expose thousands of params, and scanning spawns O(params ×
                     // payloads) workers. Truncate with a warning past the cap.
                     let dropped = cap_reflection_params(target);
-                    if dropped > 0 {
-                        warn(&format!(
-                            "{}: discovered params capped to {} (dropped {})",
-                            crate::cmd::error_codes::TRUNCATED_PARAM_CAP,
-                            MAX_DISCOVERED_PARAMS, dropped
-                        ));
-                    }
+                    warn_if_param_cap_reached(dropped, &warn);
 
                     // Count only the params the HTTP scan phase will actually
                     // test (Fragment params are client-side only and spawn no

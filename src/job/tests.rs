@@ -1508,6 +1508,30 @@ fn cap_reflection_params_bounds_payload_job_inputs() {
 }
 
 #[test]
+fn parameter_cap_warning_uses_the_shared_error_code() {
+    let messages = std::sync::Mutex::new(Vec::<String>::new());
+    let warn = |message: &str| {
+        messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(message.to_string());
+    };
+
+    super::runner::warn_if_param_cap_reached(0, &warn);
+    assert!(messages.lock().unwrap().is_empty());
+
+    super::runner::warn_if_param_cap_reached(7, &warn);
+    assert_eq!(
+        messages.lock().unwrap().as_slice(),
+        [format!(
+            "{}: discovered params capped to {} (dropped 7)",
+            crate::cmd::error_codes::TRUNCATED_PARAM_CAP,
+            super::MAX_DISCOVERED_PARAMS
+        )]
+    );
+}
+
+#[test]
 fn settle_reachability_failure_respects_a_concurrent_cancel() {
     let run = runner::ScanRun {
         results: Default::default(),

@@ -6200,6 +6200,59 @@ fn test_callback_log_origin_redacts_userinfo_path_and_query() {
         ),
         "https://hooks.example:8443"
     );
+    assert_eq!(
+        super::job_runner::callback_log_origin("http://[invalid"),
+        "<invalid callback URL>"
+    );
+}
+
+#[tokio::test]
+async fn test_terminal_webhook_failure_log_redacts_path_and_query() {
+    crate::ensure_crypto_provider();
+    let mut state = make_state(None, None, false, false, "cb");
+    let path = temp_log_path("callback-failure-redaction");
+    state.log_file = Some(path.to_string_lossy().into_owned());
+
+    // Reserve then release a loopback port so reqwest gets a deterministic
+    // connection-refused error without reaching an external service.
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("reserve loopback port");
+    let port = listener.local_addr().expect("local addr").port();
+    drop(listener);
+    let callback = format!("http://127.0.0.1:{port}/private/hook?token=secret-value");
+
+    send_terminal_webhook(
+        &state,
+        Some(callback),
+        "redaction-test",
+        "http://example.test/",
+        TerminalOutcome {
+            status_label: "error",
+            results: &[],
+            error_message: Some("target unavailable"),
+            warnings: &[],
+        },
+        None,
+    )
+    .await;
+
+    let logged = std::fs::read_to_string(&path).expect("callback failure logged");
+    let _ = std::fs::remove_file(path);
+    assert!(logged.contains("[CALLBACK]"), "{logged}");
+    assert!(logged.contains("failed"), "{logged}");
+    assert!(
+        logged.contains(&format!("http://127.0.0.1:{port}")),
+        "{logged}"
+    );
+    assert!(
+        !logged.contains("/private/hook"),
+        "callback path leaked: {logged}"
+    );
+    assert!(
+        !logged.contains("secret-value"),
+        "callback query leaked: {logged}"
+    );
 }
 
 /// The boundary check and the dispatcher must agree on what counts as an
