@@ -1490,6 +1490,60 @@ fn async_jobs_cap_findings_and_say_so() {
     );
 }
 
+#[test]
+fn cap_reflection_params_bounds_payload_job_inputs() {
+    let mut target = crate::target_parser::parse_target("http://example.test/").unwrap();
+    target.reflection_params = (0..=super::MAX_DISCOVERED_PARAMS)
+        .map(|i| {
+            crate::parameter_analysis::Param::new(
+                format!("p{i}"),
+                "",
+                crate::parameter_analysis::Location::Query,
+            )
+        })
+        .collect();
+
+    assert_eq!(super::cap_reflection_params(&mut target), 1);
+    assert_eq!(target.reflection_params.len(), super::MAX_DISCOVERED_PARAMS);
+}
+
+#[test]
+fn settle_reachability_failure_respects_a_concurrent_cancel() {
+    let run = runner::ScanRun {
+        results: Default::default(),
+        reachability_failed: true,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+        findings_capped: false,
+        warnings: Vec::new(),
+        min_confidence: None,
+    };
+
+    let mut unreachable = Job::new_queued("http://t/".into());
+    unreachable.status = JobStatus::Running;
+    assert_eq!(
+        run.settle(&mut unreachable, Arc::new(Vec::new()), 0, false),
+        JobStatus::Error
+    );
+    let message = unreachable_error_message();
+    assert_eq!(unreachable.error_message.as_deref(), Some(message.as_str()));
+
+    // Cancellation can land after execute_scan returns but before the runner
+    // settles the outcome. The terminal state already stored on the job wins.
+    let mut cancelled = Job::new_queued("http://t/".into());
+    cancelled.status = JobStatus::Running;
+    assert!(cancelled.cancel());
+    assert_eq!(
+        run.settle(&mut cancelled, Arc::new(Vec::new()), 0, false),
+        JobStatus::Cancelled
+    );
+    assert!(cancelled.results.is_some());
+    assert!(cancelled.finished_at_ms.is_some());
+}
+
 /// `preflight_dalfox` deliberately accepts a *subset* of the scan options: it
 /// sends no payloads, so most of them describe nothing it does. REST has no
 /// such tool — `POST /preflight` deserializes the same `ScanRequest` as

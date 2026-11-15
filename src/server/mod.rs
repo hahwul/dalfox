@@ -38,7 +38,7 @@ pub(crate) use crate::cmd::scan::ScanArgs;
 pub(crate) use crate::job::{
     Job, JobProgress, JobStatus, MAX_CONCURRENT_PREFLIGHT, ProgressPayload, WorkerLease,
     effective_rate_limit, effective_scan_timeout, has_http_scheme,
-    purge_expired_jobs as purge_jobs_map, split_cookie_pairs, unreachable_error_message,
+    purge_expired_jobs as purge_jobs_map, split_cookie_pairs,
 };
 pub(crate) use crate::scanning::result::SanitizedResult;
 pub(crate) use crate::target_parser::parse_target;

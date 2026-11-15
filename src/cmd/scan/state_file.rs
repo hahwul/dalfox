@@ -31,9 +31,9 @@
 //!   lose and are recorded immediately, as is everything under
 //!   `--stream-findings`, which prints them as they are found.
 //! - **Only `completed` is skipped.** `cancelled` (SIGINT / `--scan-timeout`,
-//!   dead session, or severe transport loss) and `error` (preflight skip)
-//!   targets are retried on the next run, because how much of them was actually
-//!   covered is unknown.
+//!   dead session, severe transport loss, or a per-target parameter cap) and
+//!   `error` (preflight skip) targets are retried on the next run, because how
+//!   much of them was actually covered is unknown.
 //! - **A configuration change starts fresh.** The header carries a hash of the
 //!   scan-affecting configuration; when it does not match, the prior results
 //!   are not comparable, so the file is reset rather than silently skipping
@@ -63,8 +63,9 @@ pub(crate) const MAX_STATE_FILE_BYTES: u64 = 256 << 20;
 pub(crate) enum TargetOutcome {
     /// Scanned to the end. The only outcome a later run skips.
     Completed,
-    /// Cut short — Ctrl-C, `--scan-timeout`, a dead session, or severe
-    /// transport loss — so coverage is unknown and the target is retried.
+    /// Cut short — Ctrl-C, `--scan-timeout`, a dead session, severe transport
+    /// loss, or a per-target parameter cap — so coverage is unknown and the
+    /// target is retried.
     Cancelled,
     /// Never scanned: dropped during preflight (unreachable, content-type
     /// mismatch, per-host cap). Also retried.

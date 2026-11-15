@@ -164,8 +164,8 @@ impl ScanRun {
 
     /// Record this run's results and final status on `job`, returning the
     /// status stored. A cancel that already landed stays; otherwise the run's
-    /// cancel flag (also tripped by `scan_timeout`) → `Cancelled`, a worker
-    /// panic or lost session → `Error`, else `Done`.
+    /// cancel flag (also tripped by `scan_timeout`) → `Cancelled`, a
+    /// reachability failure, worker panic or lost session → `Error`, else `Done`.
     ///
     /// Why an incomplete run is incomplete goes into `error_message`, prefixed
     /// with the shared error code where one exists so a poller can match on it
@@ -184,7 +184,7 @@ impl ScanRun {
         if job.status != JobStatus::Cancelled {
             job.status = if self.was_cancelled {
                 JobStatus::Cancelled
-            } else if self.panicked || self.lost_session() {
+            } else if self.reachability_failed || self.panicked || self.lost_session() {
                 JobStatus::Error
             } else {
                 JobStatus::Done
@@ -209,7 +209,9 @@ impl ScanRun {
         }
         // Session loss, a worker panic and a timeout are mutually exclusive in
         // practice (a timeout trips the cancel flag, so `panicked` is false).
-        let note = if self.lost_session() {
+        let note = if self.reachability_failed {
+            Some(super::unreachable_error_message())
+        } else if self.lost_session() {
             Some(format!(
                 "{}: {}",
                 crate::cmd::error_codes::SESSION_LOST,
@@ -862,7 +864,8 @@ pub(crate) async fn execute_scan(
                     let dropped = cap_reflection_params(target);
                     if dropped > 0 {
                         warn(&format!(
-                            "discovered params capped to {} (dropped {})",
+                            "{}: discovered params capped to {} (dropped {})",
+                            crate::cmd::error_codes::TRUNCATED_PARAM_CAP,
                             MAX_DISCOVERED_PARAMS, dropped
                         ));
                     }

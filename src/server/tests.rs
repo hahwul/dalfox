@@ -6155,7 +6155,14 @@ fn test_validate_scan_options_rejects_unusable_proxy() {
 /// already been thrown away at submission time.
 #[test]
 fn test_validate_scan_options_rejects_non_http_callback_url() {
-    for bad in ["file:///etc/passwd", "ftp://x/cb", "example.com/cb"] {
+    for bad in [
+        "file:///etc/passwd",
+        "ftp://x/cb",
+        "example.com/cb",
+        "http:hooks.example/cb",
+        "http://",
+        "https://",
+    ] {
         let mut opts = ScanOptions {
             callback_url: Some(bad.to_string()),
             ..ScanOptions::default()
@@ -6183,6 +6190,16 @@ fn test_validate_scan_options_rejects_non_http_callback_url() {
         assert!(validate_scan_options(&mut opts).is_ok());
         assert_eq!(opts.callback_url, None);
     }
+}
+
+#[test]
+fn test_callback_log_origin_redacts_userinfo_path_and_query() {
+    assert_eq!(
+        super::job_runner::callback_log_origin(
+            "https://user:secret@hooks.example:8443/path?token=secret#fragment"
+        ),
+        "https://hooks.example:8443"
+    );
 }
 
 /// The boundary check and the dispatcher must agree on what counts as an

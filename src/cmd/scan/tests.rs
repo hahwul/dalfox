@@ -1958,6 +1958,52 @@ async fn test_render_results_stopped_early_targets_are_not_clean() {
 }
 
 #[tokio::test]
+async fn test_parameter_cap_marks_empty_scan_incomplete() {
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let path = temp_out_path("param_cap_incomplete");
+    args.output = Some(path.clone());
+    let url = "https://wide.example/".to_string();
+    let state = make_scan_state(Vec::new());
+    state.interrupted_targets.lock().await.insert(
+        url.clone(),
+        Some(crate::cmd::error_codes::TRUNCATED_PARAM_CAP),
+    );
+
+    let targets = refs(std::slice::from_ref(&url));
+    let (results, output_write_failed) = render_results(
+        &args,
+        &state,
+        &targets,
+        std::time::Duration::from_millis(1),
+        crate::cmd::scan::output::RequestTally::default(),
+        false,
+        None,
+    )
+    .await;
+    let content = std::fs::read_to_string(&path).expect("output file written");
+    let _ = std::fs::remove_file(&path);
+    let report: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+    let outcome = super::output::derive_outcome(
+        &args,
+        &targets,
+        &state,
+        &results,
+        crate::cmd::scan::output::RequestTally::default(),
+        output_write_failed,
+    )
+    .await;
+
+    assert_eq!(outcome, ScanOutcome::Error);
+    assert_eq!(report["meta"]["incomplete"], true);
+    assert_eq!(report["meta"]["target_summary"][0]["status"], "incomplete");
+    assert_eq!(
+        report["meta"]["target_summary"][0]["error_code"],
+        crate::cmd::error_codes::TRUNCATED_PARAM_CAP
+    );
+}
+
+#[tokio::test]
 async fn test_render_results_attributes_stamped_findings_to_their_origin() {
     // Query-less siblings in one directory (a HAR / POST list): the URL
     // heuristic credits a finding to every sibling; the stamped origin to one.
