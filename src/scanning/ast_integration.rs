@@ -44,12 +44,12 @@ fn script_element_ids_from_document(document: &Html) -> HashSet<String> {
 pub(crate) fn extract_js_script_ids_and_reflected_markup(
     html: &str,
 ) -> (
-    Vec<String>,
+    Vec<JsBlock>,
     HashSet<String>,
     crate::scanning::ast_dom_analysis::PageMarkup,
 ) {
     let document = crate::utils::html::parse_document_bounded(html);
-    let js_blocks = js_blocks_from_document(&document);
+    let js_blocks = js_blocks_with_scope(&document);
     let script_ids = script_element_ids_from_document(&document);
     let markup = reflected_markup_from_document(&document, html);
     (js_blocks, script_ids, markup)
@@ -284,13 +284,93 @@ fn xml_script_type_is_javascript(script_type: &str) -> bool {
     script_type.is_empty() || is_js_mime_essence(&script_type)
 }
 
+/// How a JS block of a page relates to the page's global scope.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum JsScope {
+    /// A classic `<script>`: its top-level bindings are the page's globals.
+    Shared,
+    /// A module, an inline handler or a `javascript:` URL: it reads the
+    /// page's globals, and its own bindings stay its own.
+    Own,
+    /// Where a classic `<script>` repeats an earlier body (listed once, by
+    /// its first copy). It ran again here: a small one keeps its `code` and
+    /// is walked again for what it does to the globals, its findings being
+    /// the first copy's; past [`MAX_REPEAT_WALKS`] or [`MAX_REPEAT_BYTES`]
+    /// `code` is empty and the effect is unknown.
+    Repeat,
+}
+
+/// One JS block of a page (see [`js_blocks_with_scope`]).
+#[derive(Debug)]
+pub(crate) struct JsBlock {
+    pub(crate) code: String,
+    pub(crate) scope: JsScope,
+}
+
+impl JsBlock {
+    /// A block of a document whose scripts are not followed across blocks.
+    pub(crate) fn own(code: String) -> Self {
+        Self {
+            code,
+            scope: JsScope::Own,
+        }
+    }
+
+    /// Whether this block's findings are another block's (see
+    /// [`JsScope::Repeat`]).
+    pub(crate) fn is_repeat(&self) -> bool {
+        self.scope == JsScope::Repeat
+    }
+
+    /// The globals this block is analyzed with: the page's for a classic
+    /// script, a copy for a block with a scope of its own. `None` when there
+    /// is nothing to analyze: a repeat whose effect is unknown, which makes
+    /// the page forget what it carried.
+    pub(crate) fn globals<'g>(
+        &self,
+        page: &'g mut crate::scanning::ast_dom_analysis::CarriedGlobals,
+        own: &'g mut crate::scanning::ast_dom_analysis::CarriedGlobals,
+    ) -> Option<&'g mut crate::scanning::ast_dom_analysis::CarriedGlobals> {
+        match self.scope {
+            JsScope::Shared => Some(page),
+            JsScope::Own => {
+                *own = page.for_own_scope();
+                Some(own)
+            }
+            JsScope::Repeat if self.code.is_empty() => {
+                page.forget();
+                None
+            }
+            JsScope::Repeat => Some(page),
+        }
+    }
+}
+
+/// The repeats of a page's scripts walked again for their effect on the
+/// globals, and the largest one that is. The page chooses how often it
+/// repeats a script (an ad slot's one-liner, dozens of times).
+const MAX_REPEAT_WALKS: usize = 32;
+const MAX_REPEAT_BYTES: usize = 2 * 1024;
+
 /// Extract JS blocks (inline `<script>` bodies, `on*` handler bodies, and
 /// `javascript:` href bodies) from an already-parsed document, so callers can
 /// share a single parse.
 pub(crate) fn js_blocks_from_document(document: &Html) -> Vec<String> {
+    js_blocks_with_scope(document)
+        .into_iter()
+        .filter(|block| block.scope != JsScope::Repeat)
+        .map(|block| block.code)
+        .collect()
+}
+
+/// [`js_blocks_from_document`] with each block's [`JsScope`]: scripts in
+/// document order, then the handlers and `javascript:` URLs, which run after
+/// them.
+pub(crate) fn js_blocks_with_scope(document: &Html) -> Vec<JsBlock> {
     use std::collections::HashSet;
     let mut js_code = Vec::new();
     let mut seen = HashSet::new();
+    let mut repeat_walks = 0;
 
     // Extract from <script> tags
     {
@@ -306,8 +386,32 @@ pub(crate) fn js_blocks_from_document(document: &Html) -> Vec<String> {
                 acc.push_str(t);
                 acc
             });
-            if !text.trim().is_empty() && seen.insert(text.trim().to_string()) {
-                js_code.push(text);
+            if text.trim().is_empty() {
+                continue;
+            }
+            let module = element
+                .value()
+                .attr("type")
+                .is_some_and(|ty| ty.trim().eq_ignore_ascii_case("module"));
+            let first = seen.insert(text.trim().to_string());
+            if module {
+                if first {
+                    js_code.push(JsBlock::own(text));
+                }
+            } else if first {
+                js_code.push(JsBlock {
+                    code: text,
+                    scope: JsScope::Shared,
+                });
+            } else {
+                // A repeat of a classic body, or the classic copy of a
+                // module's text.
+                let walk = text.len() <= MAX_REPEAT_BYTES && repeat_walks < MAX_REPEAT_WALKS;
+                repeat_walks += usize::from(walk);
+                js_code.push(JsBlock {
+                    code: if walk { text } else { String::new() },
+                    scope: JsScope::Repeat,
+                });
             }
         }
     }
@@ -327,7 +431,7 @@ pub(crate) fn js_blocks_from_document(document: &Html) -> Vec<String> {
                     // Inline handler body as JS snippet
                     let snippet = v.trim().to_string();
                     if seen.insert(snippet.clone()) {
-                        js_code.push(snippet);
+                        js_code.push(JsBlock::own(snippet));
                     }
                 } else if lname == "href" {
                     let vv = v.trim();
@@ -339,7 +443,7 @@ pub(crate) fn js_blocks_from_document(document: &Html) -> Vec<String> {
                         if !js.is_empty() {
                             let snippet = js.to_string();
                             if seen.insert(snippet.clone()) {
-                                js_code.push(snippet);
+                                js_code.push(JsBlock::own(snippet));
                             }
                         }
                     }
@@ -1192,6 +1296,7 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     script_element_ids: &Arc<HashSet<String>>,
     reflected_markup: &Arc<crate::scanning::ast_dom_analysis::PageMarkup>,
     trusted_types_enforced: bool,
+    globals: &mut crate::scanning::ast_dom_analysis::CarriedGlobals,
 ) -> Vec<(
     crate::scanning::ast_dom_analysis::DomXssVulnerability,
     String,
@@ -1202,7 +1307,7 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
         .with_reflected_markup(Arc::clone(reflected_markup))
         .with_trusted_types_enforced(trusted_types_enforced);
 
-    match analyzer.analyze(js_code) {
+    match analyzer.analyze_after(js_code, globals) {
         Ok(vulnerabilities) => {
             let mut findings = Vec::new();
             for vuln in vulnerabilities {
@@ -1390,6 +1495,7 @@ pub(crate) fn run_initial_ast_dom_analysis_with_skips(
                 return (Vec::new(), AstSkips::default());
             }
             let (js_blocks, script_ids) = extract_js_and_script_ids_from_xml_document(document);
+            let js_blocks = js_blocks.into_iter().map(JsBlock::own).collect();
             (js_blocks, script_ids, Default::default())
         } else {
             if !crate::utils::response_has_markup_document(content_type, response_text) {
@@ -1401,14 +1507,26 @@ pub(crate) fn run_initial_ast_dom_analysis_with_skips(
     let (script_element_ids, page_markup) = (Arc::new(script_element_ids), Arc::new(page_markup));
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();
     let mut skips = AstSkips::default();
-    for js_code in js_blocks {
-        skips.record(&js_code);
+    // The page's classic scripts share one global scope, in this order.
+    let mut page_globals = crate::scanning::ast_dom_analysis::CarriedGlobals::new();
+    for block in js_blocks {
+        let mut own_globals = Default::default();
+        let Some(globals) = block.globals(&mut page_globals, &mut own_globals) else {
+            continue;
+        };
+        let repeat = block.is_repeat();
+        let js_code = block.code;
         let findings = analyze_javascript_for_dom_xss_with_html_context(
             &js_code,
             &script_element_ids,
             &page_markup,
             posture.trusted_types_enforced,
+            globals,
         );
+        if repeat {
+            continue;
+        }
+        skips.record(&js_code);
         // Normalized once per block, not once per finding.
         let mut normalized_js: Option<String> = None;
         for (vuln, payload, description) in findings {

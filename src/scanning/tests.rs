@@ -2328,6 +2328,37 @@ async fn test_run_ast_dom_analysis_skips_light_verify_once_cancelled() {
     );
 }
 
+/// A reflected response's inline blocks share one global scope, like the
+/// landing page's: a source read in one block reaches a sink in the next.
+#[tokio::test]
+async fn test_run_ast_dom_analysis_follows_a_global_across_script_blocks() {
+    let page = "<html><body><div id=\"out\"></div>\
+        <script>var q = location.hash.slice(1);</script>\
+        <script>document.getElementById('out').innerHTML = q;</script></body></html>"
+        .to_string();
+    let (addr, _hits) = spawn_counting_page(page.clone()).await;
+    let target = parse_target(&format!("http://{addr}/?q=a")).expect("parse_target");
+    let param = Param::new("q".to_string(), "a".to_string(), Location::Query);
+    let client = target.build_client_or_default();
+    let mut seen = HashSet::new();
+
+    let results = run_ast_dom_analysis(
+        &client,
+        &target,
+        &param,
+        &page,
+        "m",
+        false,
+        &mut seen,
+        None,
+        &ScanArgs::default(),
+    )
+    .await;
+
+    assert_eq!(results.len(), 1, "{results:#?}");
+    assert!(results[0].evidence.contains("location.hash"));
+}
+
 #[tokio::test]
 async fn test_run_ast_dom_analysis_poc_url_uses_param_pre_encoding() {
     // The reflection / DOM phases build the PoC from the as-sent payload; the

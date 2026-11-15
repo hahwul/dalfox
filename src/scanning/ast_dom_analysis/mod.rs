@@ -43,6 +43,8 @@ use url_lead::UrlLead;
 mod async_flow;
 mod bindings;
 mod bound_calls;
+mod carried;
+pub(crate) use carried::CarriedGlobals;
 mod events;
 mod guards;
 mod reflected_markup;
@@ -1212,14 +1214,30 @@ impl AstDomAnalyzer {
     /// comes from the scanned page, so the parse runs behind [`guarded_parse`];
     /// a skipped or failed parse yields no findings.
     pub fn analyze(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
-        guarded_parse(source_code, || self.analyze_on_stack(source_code))
+        self.analyze_after(source_code, &mut CarriedGlobals::new())
+    }
+
+    /// [`Self::analyze`] for one script of a page's sequence: `globals` holds
+    /// what the scripts before it left tainted, and comes back as what this
+    /// one leaves. A script that is skipped or does not parse never runs, so
+    /// it leaves `globals` as it found them.
+    pub(crate) fn analyze_after(
+        &self,
+        source_code: &str,
+        globals: &mut CarriedGlobals,
+    ) -> Result<Vec<DomXssVulnerability>, String> {
+        guarded_parse(source_code, || self.analyze_on_stack(source_code, globals))
             .unwrap_or_else(|| Ok(Vec::new()))
     }
 
     /// Parse `source_code` and run the DOM-XSS walk, returning the findings.
     /// Factored out of [`analyze`] so it can run on a dedicated large-stack
     /// thread.
-    fn analyze_on_stack(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
+    fn analyze_on_stack(
+        &self,
+        source_code: &str,
+        globals: &mut CarriedGlobals,
+    ) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();
 
         // Module first, so `import`/`export`/top-level `await` bundles keep
@@ -1246,7 +1264,7 @@ impl AstDomAnalyzer {
             trusted_types_enforced: self.trusted_types_enforced,
             ..DomXssVisitor::new(source_code)
         };
-        visitor.walk_statements(&ret.program.body);
+        visitor.walk_script_after(&ret.program.body, globals);
         if visitor.work_steps.get() >= visitor.work_budget {
             crate::dbg_log!(
                 "[ast] DOM-XSS analysis of a {}-byte script stopped at its {}-step work budget; {} finding(s) kept",
