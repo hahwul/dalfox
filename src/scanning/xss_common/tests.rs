@@ -410,15 +410,15 @@ fn test_generate_adaptive_payloads_raw_only_drops_encoded_variants() {
 // --- load_custom_payloads ---
 
 fn tmp_payload_file(name: &str, content: &str) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
+    // A counter, not the clock: `SystemTime` ticks once a microsecond, and
+    // tests that start together and pass the same name shared one file.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut p = std::env::temp_dir();
     p.push(format!(
         "dalfox-custom-payload-{}-{}-{}.txt",
         std::process::id(),
-        nanos,
+        seq,
         name
     ));
     std::fs::write(&p, content).expect("write temp payload file");

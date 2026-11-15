@@ -580,15 +580,15 @@ fn build_blind_templates_falls_back_to_builtin_without_path() {
 }
 
 fn tmp_template_file(name: &str, contents: &str) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
+    // A counter, not the clock: `SystemTime` ticks once a microsecond, and
+    // tests that start together and pass the same name shared one file.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut p = std::env::temp_dir();
     p.push(format!(
         "dalfox-blind-tmpl-{}-{}-{}",
         std::process::id(),
-        nanos,
+        seq,
         name
     ));
     std::fs::write(&p, contents).expect("write temp template");

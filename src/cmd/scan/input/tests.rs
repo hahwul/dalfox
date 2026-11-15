@@ -27,15 +27,15 @@ fn args_from(argv: &[&str]) -> ScanArgs {
 
 /// Write `contents` to a uniquely named temp file and return its path.
 fn tmp_file(name: &str, contents: &str) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
+    // A counter, not the clock: `SystemTime` ticks once a microsecond, and
+    // tests that start together and pass the same name shared one file.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut p = std::env::temp_dir();
     p.push(format!(
         "dalfox-input-test-{}-{}-{}",
         std::process::id(),
-        nanos,
+        seq,
         name
     ));
     std::fs::write(&p, contents).expect("write temp file");
