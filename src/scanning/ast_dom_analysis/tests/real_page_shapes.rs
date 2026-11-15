@@ -1669,3 +1669,102 @@ fn a_selector_prefix_reaches_a_helpers_jquery_constructor() {
         "function u(x,t){$(t).addClass('x')} u(...[0,location.hash.slice(1)],'#'+location.hash.slice(1));",
     ]);
 }
+
+#[test]
+fn a_declaration_summary_uses_its_own_scope() {
+    assert_clean(&[
+        "function outer(){function show(x){el.innerHTML=x}} function main(){function show(x){el.textContent=x} show(location.hash.slice(1))} main();",
+        "function main(){function show(x){el.innerHTML=x} function show(x){el.textContent=x} show(location.hash.slice(1))} main();",
+        "function outer(){function show(x){el.innerHTML=x}} function main(){show(location.hash.slice(1));function show(x){el.textContent=x}} main();",
+    ]);
+    assert_reported(&[
+        "function outer(){function show(x){el.textContent=x}} function main(){function show(x){el.innerHTML=x} show(location.hash.slice(1))} main();",
+        "function main(){function show(x){el.textContent=x} function show(x){el.innerHTML=x} show(location.hash.slice(1))} main();",
+        "var Foo=(function(){function Foo(h){el.innerHTML=h}return Foo}());new Foo(location.hash.slice(1));",
+        "function outer(){function show(x){el.textContent=x}} function main(){show(location.hash.slice(1));function show(x){el.innerHTML=x}} main();",
+        "function show(x=location.hash.slice(1)){el.innerHTML=x} function main(){function show(x){el.textContent=x} show('fixed')} main(); show();",
+    ]);
+}
+
+#[test]
+fn a_declaration_summary_restores_the_outer_function() {
+    let js = "function show(x){el.innerHTML=x} function main(){function show(x){el.textContent=x} show(location.hash.slice(1))} main(); show(location.hash.slice(1));";
+    assert_eq!(flows(js), ["location.hash -> innerHTML"]);
+}
+
+#[test]
+fn a_declaration_summary_cache_is_bounded() {
+    let limit = super::super::summaries::MAX_DECLARATION_SUMMARIES;
+    let js = (0..limit + 2)
+        .map(|i| format!("function f{i}(){{function x(a){{return a}}x('fixed')}}"))
+        .collect::<String>();
+    let count = guarded_parse(&js, || {
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, &js, SourceType::default()).parse();
+        assert!(parsed.errors.is_empty());
+        let mut stopped = DomXssVisitor::new(&js);
+        stopped.work_budget = 0;
+        stopped.walk_statements(&parsed.program.body);
+        assert!(stopped.function_summaries.is_empty());
+        let mut visitor = DomXssVisitor::new(&js);
+        visitor.walk_statements(&parsed.program.body);
+        visitor.declaration_summaries.len()
+    })
+    .expect("bounded source parses");
+    assert!(count > 0 && count <= limit, "cache size: {count}");
+}
+
+#[test]
+fn a_declaration_summary_restores_recursive_placeholders() {
+    let js = "function f(h){el.innerHTML=h} function outer(){function f(h){if(h)f(h);else el.textContent=h} f(location.hash.slice(1))} outer();f(location.hash.slice(1));";
+    assert_eq!(flows(js), ["location.hash -> innerHTML"]);
+}
+
+#[test]
+fn nested_same_named_declarations_respect_the_work_budget() {
+    let depth = 256;
+    let js = format!(
+        "{}el.innerHTML=location.hash;{}",
+        "function f(){".repeat(depth),
+        "}".repeat(depth)
+    );
+    assert!(AstDomAnalyzer::new().analyze(&js).is_ok());
+}
+
+#[test]
+fn colliding_declarations_bound_inference_without_skipping_direct_sources() {
+    assert_clean(&[
+        "function outer(){function show(x){el.innerHTML=x}} function main(){function show(x){const y=x;el.textContent=y} show(location.hash.slice(1))} main();",
+        "function outer(){function id(x){el.innerHTML=x}} function main(){function id(x){return normalize(x)} function normalize(x){return 0} id(location.hash.slice(1))} main();",
+    ]);
+    assert_reported(&[
+        "function outer(){function show(x){el.textContent=x}} function main(){function show(x){log();el.innerHTML=location.hash} show('fixed')} main();",
+        "function outer(){function id(x){return 'fixed'}} function main(){function id(x){return x} el.innerHTML=id(location.hash)} main();",
+        "function outer(){function id(x){return x}} function main(){function id(x){return 'fixed'} id('fixed')} main();el.innerHTML=id(location.hash);",
+    ]);
+}
+
+#[test]
+fn unsupported_colliding_declarations_have_no_suppression_facts() {
+    let js =
+        "function show(x){return '/'+x} function main(){function show(x){return transform(x)}}";
+    guarded_parse(js, || {
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, js, SourceType::default()).parse();
+        assert!(parsed.errors.is_empty());
+        let mut visitor = DomXssVisitor::new(js);
+        visitor.walk_statements(&parsed.program.body);
+        let Statement::FunctionDeclaration(main) = &parsed.program.body[1] else {
+            panic!("main")
+        };
+        let body = &main.body.as_ref().expect("main body").statements;
+        let displaced = visitor.collect_function_declarations(body);
+        assert_eq!(displaced.len(), 1);
+        let own = visitor.summary("show").expect("scoped unknown summary");
+        assert!(own.return_lead_ambiguous);
+        assert!(own.return_url_lead.is_none());
+        assert!(own.pinned_param_return_leads.is_empty());
+        assert!(own.selector_param.is_none());
+    })
+    .expect("bounded source parses");
+}
