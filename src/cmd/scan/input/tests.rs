@@ -237,7 +237,7 @@ async fn out_of_scope_domain_is_excluded() {
 
 #[tokio::test]
 async fn out_of_scope_file_domains_are_excluded() {
-    let p = tmp_file("oos", "evil.example\n# skip me\n\n");
+    let p = tmp_file("oos", "\u{feff}evil.example\n# skip me\n\n");
     let args = args_from(&[
         "-i",
         "url",

@@ -841,7 +841,13 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
     let data = raw_http_body(raw).map(str::to_string);
 
     // 4) Build URL
-    let url = if uri.starts_with("http://") || uri.starts_with("https://") {
+    let absolute_http_uri = uri
+        .get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
+        || uri
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
+    let url = if absolute_http_uri {
         // absolute-form URI in request line
         Url::parse(uri)?
     } else {

@@ -12,7 +12,7 @@ Dalfox picks one config directory:
 
 It does not fall through to the second directory when the first holds no file. Inside the chosen directory it reads `config.toml`, or `config.json` when there is no `config.toml`. If neither exists, it writes a commented-out `config.toml` template there and runs with built-in defaults. This happens on the first run of any subcommand except `completion` and `man`, not only `scan`.
 
-Override with `--config <path>`. TOML and JSON are both accepted: a `.json` path is parsed as JSON first, anything else as TOML first, and the other format is tried if that fails. A `--config` path that does not exist is created from a default template (JSON for a `.json` path) and the run uses built-in defaults, with a notice on stderr. Config files are capped at 1 MiB.
+Override with `--config <path>`. TOML and JSON are both accepted: a `.json` path is parsed as JSON first, anything else as TOML first, and the other format is tried if that fails. A `--config` path that does not exist is created from a default template (JSON for a `.json` path) and the run uses built-in defaults, with a notice on stderr. New config files are created with mode `0600` on Unix; existing file permissions are left as set. Config files are capped at 1 MiB.
 
 Everything lives under the `[scan]` table and mirrors the `dalfox scan` flag names (snake-cased). The one rename is `--blind` / `-b`, whose key is `blind_callback_url`; the global `--debug` flag is the `debug` key.
 

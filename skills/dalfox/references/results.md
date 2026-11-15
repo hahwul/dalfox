@@ -271,6 +271,9 @@ See `src/cmd/mod.rs` for the canonical list. Common ones:
 - `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`
 - `CONTENT_TYPE_MISMATCH`
 - `TRUNCATED_PER_HOST_CAP`
+- `TRUNCATED_PARAM_CAP` — the 512-parameter safety cap left some parameters
+  untested; CLI output marks the target incomplete, while server/MCP jobs expose
+  the code in their warnings
 - `INJECT_MARKER_NOT_FOUND` — `--inject-marker` is in no supported position
   of the target (query, form/multipart body, top-level JSON string, header or
   cookie value), so nothing was sent (`skipped`)
@@ -281,7 +284,7 @@ See `src/cmd/mod.rs` for the canonical list. Common ones:
 - `SCAN_TIMEOUT` — `--scan-timeout` cut this target short (reported as
   `incomplete`, or `findings` if something was found first)
 
-In JSON output the per-target summary contains `error_code` when the target was skipped, its session was lost, or `--scan-timeout` cut it short (`SCAN_TIMEOUT`, which can sit on a `findings` target: its findings are real, coverage is partial).
+In JSON output the per-target summary contains `error_code` when the target was skipped, its session was lost, the parameter cap truncated coverage, or `--scan-timeout` cut it short (`SCAN_TIMEOUT`, which can sit on a `findings` target: its findings are real, coverage is partial).
 
 `meta.targets_unparsable` (present only when non-zero) counts target-list lines
 that could not be parsed, plus OpenAPI / Postman operations that could not be

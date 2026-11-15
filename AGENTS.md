@@ -78,6 +78,8 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 2. Preserve config precedence semantics.
 - Config application for scan path uses `Config::apply_to_scan_args_if_default`.
 - CLI should win over config.
+- Newly created config files use mode `0600` on Unix because they can hold cookies,
+  headers, proxy credentials, and OAST tokens; existing permissions stay as configured.
 - When adding fields, update both:
   - struct fields in `ScanConfig`
   - mapping in `apply_to_scan_args_if_default`
@@ -93,6 +95,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 
 4. Respect concurrency boundaries.
 - Scan pipeline uses worker and semaphore limits (`workers`, `max_concurrent_targets`, `max_targets_per_host`).
+- Reflection scanning is capped at `MAX_DISCOVERED_PARAMS` (512) per target in the CLI, server, and MCP paths. If the cap drops parameters, surface `TRUNCATED_PARAM_CAP`; CLI targets remain incomplete and retryable through `--state-file`.
 - Do not introduce unbounded async fan-out.
 
 5. Keep server and MCP behavior non-breaking.

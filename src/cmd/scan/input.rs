@@ -1381,7 +1381,7 @@ pub(crate) fn apply_out_of_scope_filter(
             ) {
                 Ok(contents) => {
                     for line in contents.lines() {
-                        let trimmed = line.trim();
+                        let trimmed = line.trim().trim_start_matches('\u{feff}').trim();
                         if !trimmed.is_empty() && !trimmed.starts_with('#') {
                             oos_domains.push(trimmed.to_string());
                         }

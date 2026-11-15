@@ -691,6 +691,19 @@ impl std::fmt::Display for ConfigFileError {
 
 impl std::error::Error for ConfigFileError {}
 
+/// Create a new config without replacing a file that appeared concurrently.
+/// Configs can contain cookies, headers, proxy credentials, and OAST tokens.
+fn create_config_file(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
 /// Load configuration with the following behavior:
 /// - If $XDG_CONFIG_HOME is set and non-empty, use "$XDG_CONFIG_HOME/dalfox"
 /// - Otherwise, use "$HOME/.config/dalfox" (falling back to $USERPROFILE when
@@ -720,15 +733,22 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
         (load_existing(&json_path, true)?, json_path, false)
     } else {
         // Neither exists: create TOML by default
-        let mut f = fs::File::create(&toml_path)?;
-        f.write_all(DEFAULT_TOML_TEMPLATE.as_bytes())?;
-        f.sync_all()?;
-        // Load the template back as Config (will parse to defaults)
-        (
-            (toml::from_str(DEFAULT_TOML_TEMPLATE)?, Vec::new()),
-            toml_path,
-            true,
-        )
+        match create_config_file(&toml_path) {
+            Ok(mut f) => {
+                f.write_all(DEFAULT_TOML_TEMPLATE.as_bytes())?;
+                f.sync_all()?;
+                // Load the template back as Config (will parse to defaults)
+                (
+                    (toml::from_str(DEFAULT_TOML_TEMPLATE)?, Vec::new()),
+                    toml_path,
+                    true,
+                )
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                (load_existing(&toml_path, false)?, toml_path, false)
+            }
+            Err(e) => return Err(e.into()),
+        }
     };
     Ok(LoadResult {
         config,
@@ -757,18 +777,31 @@ pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
         } else {
             DEFAULT_TOML_TEMPLATE
         };
-        let _ = fs::write(p, template);
         let config = if is_json {
             serde_json::from_str(template)?
         } else {
             toml::from_str(template)?
         };
-        return Ok(LoadResult {
-            config,
-            path,
-            created: true,
-            unknown_keys: Vec::new(),
-        });
+        match create_config_file(p) {
+            Ok(mut f) => {
+                let _ = f.write_all(template.as_bytes());
+                return Ok(LoadResult {
+                    config,
+                    path,
+                    created: true,
+                    unknown_keys: Vec::new(),
+                });
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(_) => {
+                return Ok(LoadResult {
+                    config,
+                    path,
+                    created: true,
+                    unknown_keys: Vec::new(),
+                });
+            }
+        }
     }
     // Bound the read so `--config /dev/zero` (or any other non-regular file
     // that streams forever) can't hang dalfox indefinitely.

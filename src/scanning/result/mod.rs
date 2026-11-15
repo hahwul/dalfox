@@ -595,8 +595,9 @@ pub(crate) struct ScanMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ast_skipped: Option<serde_json::Value>,
     /// At least one target was not fully tested: its authenticated session
-    /// died mid-scan (see `error_codes::SESSION_LOST`), or a significant share
-    /// of this run's requests never reached the target at all.
+    /// died mid-scan (see `error_codes::SESSION_LOST`), its parameter set was
+    /// capped (`TRUNCATED_PARAM_CAP`), or a significant share of this run's
+    /// requests never reached the target at all.
     /// Hoisted out of `target_summary` so a consumer can answer "are these
     /// results trustworthy?" with one field read instead of a scan over every
     /// entry's status. `false` on a normal run.
