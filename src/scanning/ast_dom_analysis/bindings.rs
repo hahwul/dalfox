@@ -18,6 +18,8 @@ impl<'a> DomXssVisitor<'a> {
         init: &Expression<'a>,
     ) {
         let var_name = id.name.as_str();
+        self.note_webpack_rebinding(var_name);
+        self.forget_webpack_binding(var_name);
         if self.return_callable_roots.contains(var_name)
             && !matches!(
                 init,

@@ -283,6 +283,9 @@ impl<'a> DomXssVisitor<'a> {
         // rather than cloned; the state the walk only reads is journaled and
         // rolled back. Cloning it all made every hoisted declaration cost
         // O(live state) — O(N²) across a bundle of them.
+        let webpack_writes = self.enter_webpack_write_scope();
+        let saved_webpack_require = self.webpack_require.clone();
+        let saved_webpack_map = self.webpack_map_var.clone();
         let saved_tainted = std::mem::take(&mut self.tainted_vars);
         let saved_field_only = std::mem::take(&mut self.field_only_taint);
         let saved_aliases = std::mem::take(&mut self.var_aliases);
@@ -338,6 +341,22 @@ impl<'a> DomXssVisitor<'a> {
         Self::collect_declared_names(body_stmts, &mut declared);
         let mut locals: HashSet<String> = param_bindings.iter().flatten().cloned().collect();
         locals.extend(declared.iter().cloned());
+        if let Some(require) = self.webpack_factories.get(&formal_params.span) {
+            self.webpack_require = Some(require.clone());
+        } else if self
+            .webpack_require
+            .as_ref()
+            .is_some_and(|name| locals.contains(name))
+        {
+            self.webpack_require = None;
+        }
+        if self
+            .webpack_map_var
+            .as_ref()
+            .is_some_and(|name| locals.contains(name))
+        {
+            self.webpack_map_var = None;
+        }
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         let shadow_params_checkpoint = self.shadow_params.checkpoint();
@@ -375,6 +394,14 @@ impl<'a> DomXssVisitor<'a> {
         // A sink the body reaches with *no* parameter tainted (a free
         // `location.hash`, a tainted global) is not that parameter's flow, so
         // those are subtracted once the parameter-free pass below has run.
+        if self.webpack_binding_writes.is_some() {
+            for param in &formal_params.items {
+                self.probe_webpack_pattern_defaults(&param.pattern);
+                if let Some(default) = &param.initializer {
+                    self.walk_expression(default);
+                }
+            }
+        }
         let mut param_reports: Vec<(usize, Vec<Report>)> = Vec::new();
         for (idx, names) in param_bindings.iter().enumerate() {
             if names.is_empty() {
@@ -614,6 +641,33 @@ impl<'a> DomXssVisitor<'a> {
             summary.selector_param = Some(idx);
         }
 
+        if webpack_writes.is_some() {
+            let mut webpack_owned = param_bindings
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<HashSet<_>>();
+            for stmt in body_stmts {
+                match stmt {
+                    Statement::VariableDeclaration(d) => {
+                        for d in &d.declarations {
+                            let mut names = Vec::new();
+                            Self::collect_binding_pattern_names(&d.id, &mut names);
+                            webpack_owned.extend(names);
+                        }
+                    }
+                    Statement::FunctionDeclaration(f) => {
+                        webpack_owned.extend(f.id.iter().map(|id| id.name.to_string()))
+                    }
+                    _ => {}
+                }
+            }
+            self.leave_webpack_write_scope(webpack_writes, &webpack_owned);
+        } else {
+            self.webpack_binding_writes = None;
+        }
+        self.webpack_require = saved_webpack_require;
+        self.webpack_map_var = saved_webpack_map;
         self.tainted_vars = saved_tainted;
         self.field_only_taint = saved_field_only;
         self.var_aliases = saved_aliases;
@@ -732,12 +786,16 @@ impl<'a> DomXssVisitor<'a> {
         body_stmts: &[Statement<'a>],
         concise: bool,
     ) {
+        let outer_require = self.webpack_require.clone();
+        let outer_map = self.webpack_map_var.clone();
         let body_frame = self.enter_body();
         self.with_function_this(formal_params, |v| v.walk_statements(body_stmts));
         if concise {
             self.collect_concise_return(body_stmts);
         }
         self.leave_body(body_frame);
+        self.webpack_require = outer_require;
+        self.webpack_map_var = outer_map;
     }
     /// A concise arrow (`n => expr`) has no `return` statement — its body
     /// *is* the returned expression — so record it the way the `return` walk

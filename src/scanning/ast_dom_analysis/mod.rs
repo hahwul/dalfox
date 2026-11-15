@@ -566,6 +566,8 @@ struct DomXssVisitor<'a> {
     webpack_factories: HashMap<oxc_span::Span, String>,
     /// The `require` parameter of the webpack factory being walked.
     webpack_require: Option<String>,
+    webpack_disabled: bool,
+    webpack_binding_writes: Option<HashSet<String>>,
     /// The variable holding the module map in the scope being walked, which
     /// the runtime's `n.m = t` names its require function by.
     webpack_map_var: Option<String>,
@@ -1118,6 +1120,8 @@ impl<'a> DomXssVisitor<'a> {
             instance_classes: Default::default(),
             webpack_factories: HashMap::new(),
             webpack_require: None,
+            webpack_disabled: false,
+            webpack_binding_writes: None,
             webpack_map_var: None,
             webpack_maps_seen: HashMap::new(),
             webpack_module_spans: HashMap::new(),

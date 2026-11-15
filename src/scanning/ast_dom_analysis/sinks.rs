@@ -7,6 +7,7 @@ use super::*;
 impl<'a> DomXssVisitor<'a> {
     /// Walk through an assignment expression
     pub(super) fn walk_assignment_expression(&mut self, assign: &AssignmentExpression<'a>) {
+        self.note_webpack_assignment(&assign.left);
         self.note_webpack_runtime(assign);
         // The property written decides which sanitizers count (see `SinkCtx`).
         let sink = match &assign.left {

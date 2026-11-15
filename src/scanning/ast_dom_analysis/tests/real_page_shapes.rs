@@ -1407,3 +1407,142 @@ fn a_webpack_export_that_is_not_a_sink_stays_clean() {
            function go(n){var r=n(2);r.Z(location.hash.slice(1))} go(pick);"#,
     ]);
 }
+
+#[test]
+fn webpack_binding_and_getter_controls_stay_clean() {
+    assert_clean(&[
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(3);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o,Z:()=>p});function o(x){el.innerHTML=x}function p(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});var o=x=>{el.innerHTML=x};var o=x=>{el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){var x='fixed';el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{"a.b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},"a\u0001b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n("a\u0001b");r.Z(location.hash.slice(1))}}]);"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:(e,t,n)=>{n.d(t,{O:()=>o});var o=function r(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:(e,t,n)=>{Object.assign(t,{Z:x=>{el.textContent=x}});n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{t={};n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{t.Z=x=>{el.textContent=x};n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:({r},t,n)=>{n.d(t,{O:()=>o});function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:function(e,n,n){n.d(n,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:function r(e,t,n){n.d(t,{O:()=>o});function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{function n(id){return {Z:x=>{el.textContent=x}}}var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{Z:()=>o});[n=pick];var r=n(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{Z:()=>o});(n=pick)(3);var r=n(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function* o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});var o=function*(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:function*(e,t,n){n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:function o(){return o}});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:o=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}o=x=>{el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{Z:()=>o});var i=n(3);function o(i){i.Z('fixed')}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{if(ok){let n=pick;var r=n(2);r.Z(location.hash.slice(1))}}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d=()=>{};n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{n=pick;var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{n=id=>({Z:x=>{el.textContent=x}});var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{[pick].forEach(function(n){var r=n(2);r.Z(location.hash.slice(1))})}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var n=pick;var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};t=other;function n(id){return lookup(id)}n.m=t;var r=n(2);r.Z(location.hash.slice(1));"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function n(id){return lookup(id)}n.m=t;n=pick;var r=n(2);r.Z(location.hash.slice(1));"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(3);r.Z(location.hash.slice(1));}}]);"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function harmless(){pick.m=t} var r=pick(2);r.Z(location.hash.slice(1));"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};var harmless=function(){pick.m=t}; var r=pick(2);r.Z(location.hash.slice(1));"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:async()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{{const n=pick;var r=n(2);r.Z(location.hash.slice(1));}}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{list.forEach(function(n){var r=n(2);r.Z(location.hash.slice(1))});}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3),cfg={reset(){r=pick}};function o(x){cfg.reset();r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function f(x){el.innerHTML=x}function reset(){f=x=>0}reset();function o(x){f(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function reset({x=(r=pick)}={}){}function o(x){reset();r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{function n(){return{Z(x){}}}var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>other});function helper(x){el.innerHTML=x}function other(x){return x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function helper(x){el.textContent=x}function o(x){helper(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:(e,t,n)=>{n.d(t,{O:()=>o});var r=pick(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:function*(){return o}});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={"a.b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},"a\u0001b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n("a\u0001b");r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);(()=>{r=pick})();function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);var dummy=(r=pick);function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=pick(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);r=pick;function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};mods={};function req(){return{Z(x){}}}req.m=mods;var r=req(2);r.Z(location.hash.slice(1));"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{n=pick;var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(){}req.m=mods;req=pick;var r=req(2);r.Z(location.hash.slice(1));"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);var r=pick;function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"function req(){return{Z(x){}}}function helper(){var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};req.m=mods;}var r=req(2);r.Z(location.hash.slice(1));"####,
+    ]);
+}
+
+#[test]
+fn webpack_identity_controls_keep_real_flows() {
+    assert_reported(&[
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{{const n=pick;use(n)}var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);(0,r.Z)(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>other});function helper(x){el.textContent=x}function other(x){return x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function helper(x){el.innerHTML=x}function o(x){helper(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={"a.b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},"a\u0001b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n("a\u0001b");r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function harmless(){var r=1}function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function harmless(){for(var r of xs){}}function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(){}req.m=mods;var r=req(2);r.Z(location.hash.slice(1));"####,
+    ]);
+}
+
+#[test]
+fn webpack_module_registration_is_bounded() {
+    let modules = (0..=super::super::webpack::MAX_WEBPACK_MODULES)
+        .map(|i| format!("{i}:(e,t,n)=>{{n.d(t,{{Z:()=>o}});function o(x){{el.innerHTML=x}}}},"))
+        .collect::<String>();
+    assert_clean(&[&format!(
+        "var mods={{{modules}}};function req(i){{return mods[i]}}req.m=mods;var r=req(0);r.Z(location.hash.slice(1));"
+    )]);
+}
+
+#[test]
+fn webpack_export_summary_respects_its_own_require_shadow() {
+    assert_clean(&[
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function o(n,x){var r=n(3);r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(pick,location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){var n=pick,r=n(3);r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_reported(&[
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){var r=n(3);r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_rechecks_nested_helpers_with_the_factory_imports() {
+    assert_reported(&[
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function o(x){function inner(y){r.Z(y)}inner(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});n.d(t,{Z:()=>p});function o(x){el.textContent=x}function p(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o,...other});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_captured_runtime_rebinding_stays_unresolved() {
+    assert_clean(&[
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:(e,t,n)=>{n.d(t,{O:()=>o});var r=other;function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}}]);a.push([[2],{2:(e,t,n)=>{n.d(t,{Z:async()=>safe});function safe(x){el.textContent=x}}}]);a.push([[3],{1:(e,t,n)=>{n.d(t,{K:()=>noop});function noop(){}var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var o=function*(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function o(x,z=(r=pick)){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function reset(){n=pick}reset();var r=n(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});e.exports={Z:x=>{el.textContent=x}};function o(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_identifier_copying_is_bounded() {
+    let id = "a".repeat(super::super::webpack::MAX_WEBPACK_NAME_BYTES + 1);
+    assert_clean(&[&format!(
+        r#"var mods={{"{id}":(e,t,n)=>{{n.d(t,{{Z:()=>o}});function o(x){{el.innerHTML=x}}}},1:(e,t,n)=>{{var r=n("{id}");r.Z(location.hash.slice(1))}}}};"#
+    )]);
+}
+
+#[test]
+fn webpack_nested_declarations_use_only_their_module_scope() {
+    assert_clean(&[
+        r#"function other(){function inner(x){el.innerHTML=x}}var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){function inner(y){el.textContent=y}inner(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_reported(&[
+        r#"function other(){function inner(x){el.textContent=x}}var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){function inner(y){el.innerHTML=y}inner(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+}
