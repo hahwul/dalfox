@@ -42,6 +42,9 @@ pub(super) struct BodyFrame {
     branch_base: u32,
     guarded_globals: usize,
     origin_checked: scoped_state::Checkpoint,
+    /// A function the body declares un-shadows a value local of its name
+    /// (see `value_locals`) for the body, not for what encloses it.
+    value_locals: scoped_state::Checkpoint,
 }
 
 /// A regex that only matches whole strings over `[A-Za-z0-9_-]`: anchored at
@@ -509,6 +512,7 @@ impl<'a> DomXssVisitor<'a> {
             branch_base: self.branch_base,
             guarded_globals: self.body_guarded_globals.len(),
             origin_checked: self.origin_checked.checkpoint(),
+            value_locals: self.value_locals.checkpoint(),
         };
         self.branch_base = self.branch_depth;
         frame
@@ -517,6 +521,7 @@ impl<'a> DomXssVisitor<'a> {
     pub(super) fn leave_body(&mut self, frame: BodyFrame) {
         self.branch_base = frame.branch_base;
         self.origin_checked.rollback(frame.origin_checked);
+        self.value_locals.rollback(frame.value_locals);
         for name in self.body_guarded_globals.split_off(frame.guarded_globals) {
             self.global_taints.insert(name);
         }
