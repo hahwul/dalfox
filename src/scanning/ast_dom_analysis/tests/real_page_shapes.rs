@@ -1614,3 +1614,34 @@ fn webpack_binding_probe_restores_idb_markers() {
     })
     .expect("fixture parses");
 }
+
+#[test]
+fn timer_spreads_can_shift_code_and_callback_data_into_later_slots() {
+    assert_clean(&["setTimeout(()=>{},location.hash.slice(1));"]);
+    assert_reported(&[
+        "window.setTimeout(...[],location.hash.slice(1));",
+        "window.setTimeout(...[v=>{el.innerHTML=v},0],location.hash.slice(1));",
+        "window.setTimeout?.(...[],location.hash.slice(1));",
+    ]);
+}
+
+#[test]
+fn timer_globals_can_be_replaced_through_aliases_and_reflection() {
+    assert_reported(&[
+        "const replace=Object.assign;replace(window,{setTimeout(f,d){el.innerHTML=d}});window.setTimeout(()=>{},location.hash.slice(1));",
+        "Object.defineProperty(window,'setTimeout',{value:(f,d)=>{el.innerHTML=d}});window.setTimeout(()=>{},location.hash.slice(1));",
+        "Reflect.set(window,'setTimeout',(f,d)=>{el.innerHTML=d});window.setTimeout(()=>{},location.hash.slice(1));",
+        "const {window:w}=globalThis;w.setTimeout=(f,d)=>{el.innerHTML=d};window.setTimeout(()=>{},location.hash.slice(1));",
+        "var w=globalThis.window;w.setTimeout=(f,d)=>{el.innerHTML=d};window.setTimeout(()=>{},location.hash.slice(1));",
+        "top.setTimeout=(f,d)=>{el.innerHTML=d};top.setTimeout(()=>{},location.hash.slice(1));",
+    ]);
+}
+
+#[test]
+fn timer_delay_objects_can_execute_during_numeric_coercion() {
+    assert_clean(&["window.setTimeout(()=>{},{valueOf(){return 0}});"]);
+    assert_reported(&[
+        "var d={v:location.hash.slice(1),valueOf(){eval(this.v);return 0}};window.setTimeout(()=>{},d);",
+        "var d={v:location.hash.slice(1),[Symbol.toPrimitive](){eval(this.v);return 0}};window.setTimeout(()=>{},d);",
+    ]);
+}
