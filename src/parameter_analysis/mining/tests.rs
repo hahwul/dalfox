@@ -870,16 +870,15 @@ struct TempWordlist {
 
 impl TempWordlist {
     fn new(tag: &str, contents: &str) -> Self {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
+        // A counter, not the clock: tests of one module start in the same
+        // microsecond, and two that share a tag then shared a file, each
+        // overwriting the other's words and deleting it on drop.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
             "dalfox-test-{}-{}-{}.txt",
             tag,
             std::process::id(),
-            nanos
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::write(&path, contents).expect("write wordlist");
         Self { path }
