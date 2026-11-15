@@ -1548,3 +1548,69 @@ fn webpack_nested_declarations_use_only_their_module_scope() {
         r#"function other(){function inner(x){el.textContent=x}}var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){function inner(y){el.innerHTML=y}inner(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
     ]);
 }
+
+#[test]
+fn webpack_binding_probe_does_not_publish_findings() {
+    let js = r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var api={show(){window.open(location.hash.slice(1))}};function o(x){return x}}};"#;
+    assert_eq!(flows(js), ["location.hash -> window.open"]);
+    assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var api={show(){el.textContent=location.hash.slice(1)}};function o(x){return x}}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_captured_instance_classes() {
+    assert_clean(&[
+        "class K{Z(x){el.innerHTML=x}}var c={Z:x=>{el.textContent=x}};var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=new K}};function o(x){c.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+    assert_reported(&[
+        "class K{Z(x){el.innerHTML=x}}var c=new K;var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=other}};function o(x){c.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_captured_bound_aliases() {
+    assert_clean(&[
+        "function sink(x){el.innerHTML=x}function getSafe(){return x=>{el.textContent=x}}var c=getSafe();var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=sink.bind(null)}};function o(x){c(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+    assert_reported(&[
+        "function sink(x){el.innerHTML=x}var c=sink.bind(null);var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=other}};function o(x){c(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_css_property_sources() {
+    assert_clean(&[
+        "var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){el.style.setProperty('--probe',location.hash.slice(1))}};function o(){return getComputedStyle(el).getPropertyValue('--probe')}},1:(e,t,n)=>{var q=n(2);el.innerHTML=q.O()}};",
+    ]);
+    assert_reported(&[
+        "el.style.setProperty('--probe',location.hash.slice(1));var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){el.style.setProperty('--probe','fixed')}};function o(){return getComputedStyle(el).getPropertyValue('--probe')}},1:(e,t,n)=>{var q=n(2);el.innerHTML=q.O()}};",
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_idb_markers() {
+    let js = "var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var cfg={reset(){var savedRequest=0,savedStore=0;var localStore=tx.objectStore('notes');var localRequest=localStore.get('key')}};function o(x){return x}}};";
+    guarded_parse(js, || {
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, js, SourceType::default()).parse();
+        assert!(parsed.errors.is_empty());
+        let Statement::VariableDeclaration(declaration) = &parsed.program.body[0] else {
+            panic!("module map declaration");
+        };
+        let Some(Expression::ObjectExpression(map)) = &declaration.declarations[0].init else {
+            panic!("module map object");
+        };
+        let mut visitor = DomXssVisitor::new(js);
+        visitor.idb_request_vars.insert("savedRequest".to_string());
+        visitor
+            .idb_object_store_vars
+            .insert("savedStore".to_string());
+        assert!(visitor.register_webpack_modules(map));
+        assert!(visitor.idb_request_vars.contains("savedRequest"));
+        assert!(visitor.idb_object_store_vars.contains("savedStore"));
+        assert!(!visitor.idb_request_vars.contains("localRequest"));
+        assert!(!visitor.idb_object_store_vars.contains("localStore"));
+    })
+    .expect("fixture parses");
+}

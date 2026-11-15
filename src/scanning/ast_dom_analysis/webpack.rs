@@ -761,10 +761,16 @@ impl<'a> DomXssVisitor<'a> {
         let mut functions: Vec<_> = functions.into_iter().collect();
         functions.sort_by_key(|(_, (params, _, _))| params.span.start);
         // The probe observes writes even in captured helper bodies. Its
-        // assumed taints and aliases must not become the final environment.
+        // assumed taints, aliases, and reports must not become the final environment.
+        let probe_findings = self.vulnerabilities.len();
         let probe_globals = self.global_taints.checkpoint();
         let probe_fields = self.field_taints.checkpoint();
         let probe_aliases = self.var_aliases.checkpoint();
+        let probe_classes = self.instance_classes.checkpoint();
+        let probe_bound_aliases = self.bound_function_aliases.checkpoint();
+        let probe_css = self.css_custom_property_sources.checkpoint();
+        let probe_idb_requests = self.idb_request_vars.checkpoint();
+        let probe_idb_stores = self.idb_object_store_vars.checkpoint();
         let url_objects = std::mem::take(&mut self.url_object_sources);
         let search_sources = std::mem::take(&mut self.url_search_params_sources);
         let search_objects = std::mem::take(&mut self.url_search_params_objects);
@@ -784,12 +790,18 @@ impl<'a> DomXssVisitor<'a> {
             self.register_function_summary((*name).to_string(), params, body, *concise);
         }
         let writes = self.webpack_binding_writes.take().unwrap_or_default();
+        self.vulnerabilities.truncate(probe_findings);
         let unstable_runtime = writes.contains("") || writes.contains(factory.require)
             || factory.params.items.get(1).is_some_and(|p| matches!(&p.pattern, BindingPattern::BindingIdentifier(id) if writes.contains(id.name.as_str())));
         self.return_written_roots.clear();
         self.global_taints.rollback(probe_globals);
         self.field_taints.rollback(probe_fields);
         self.var_aliases.rollback(probe_aliases);
+        self.instance_classes.rollback(probe_classes);
+        self.bound_function_aliases.rollback(probe_bound_aliases);
+        self.css_custom_property_sources.rollback(probe_css);
+        self.idb_request_vars.rollback(probe_idb_requests);
+        self.idb_object_store_vars.rollback(probe_idb_stores);
         self.url_object_sources = url_objects;
         self.url_search_params_sources = search_sources;
         self.url_search_params_objects = search_objects;
