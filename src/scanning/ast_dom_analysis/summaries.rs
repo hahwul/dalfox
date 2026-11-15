@@ -447,10 +447,10 @@ impl<'a> DomXssVisitor<'a> {
         if !summary.return_lead_ambiguous
             && params.len() <= MAX_URL_LEAD_PARAMS
             && formal_params.rest.is_none()
-            && formal_params
-                .items
-                .iter()
-                .all(|param| matches!(param.pattern, BindingPattern::BindingIdentifier(_)))
+            && formal_params.items.iter().all(|param| {
+                param.initializer.is_none()
+                    && matches!(param.pattern, BindingPattern::BindingIdentifier(_))
+            })
             && (!summary.tainted_param_returns.is_empty()
                 || summary.return_without_tainted_params.is_some())
         {

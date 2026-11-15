@@ -1180,6 +1180,7 @@ fn a_function_return_does_not_borrow_another_scopes_url_start() {
         "function d(u){return '/'+u} var assign=Object.assign; assign?.(window,{d:u=>u}); location.href=d(location.hash.slice(1));",
         "function d(u){return '/'+u} var assign=Object.assign; assign(ok?window:window,{d:u=>u}); location.href=d(location.hash.slice(1));",
         "function d(u){return '/'+u} var assign=Object.assign; assign(this,{d:u=>u}); location.href=d(location.hash.slice(1));",
+        "function d(u,x=(u=u.slice(1))){return u} location.href=d(location.hash);",
         "function d(u){function nested(){return '/fixed'} return u} location.href=d(location.hash.slice(1));",
         "function d(u){var cfg={prefix:'javascript:eval(\"'};return cfg.prefix+'?'+u+'\")'} location.href=d(location.hash.slice(1));",
         "function d(u){return getPrefix()+'?'+u} location.href=d(location.hash.slice(1));",
