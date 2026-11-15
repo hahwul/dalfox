@@ -1520,6 +1520,8 @@ fn webpack_rechecks_nested_helpers_with_the_factory_imports() {
 #[test]
 fn webpack_captured_runtime_rebinding_stays_unresolved() {
     assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function f(x){el.innerHTML=x}function reset(){f=x=>{el.textContent=x}}function o(x){reset();f(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+        r####"var mods={4:(e,t,n)=>{n.d(t,{S:()=>O});function O(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{R:()=>read});function read(){return location.hash.slice(1)}},2:(e,t,n)=>{var r=n(3);function O(x){el.textContent=x}O(r.R())}};"####,
         r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:(e,t,n)=>{n.d(t,{O:()=>o});var r=other;function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
         r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}}]);a.push([[2],{2:(e,t,n)=>{n.d(t,{Z:async()=>safe});function safe(x){el.textContent=x}}}]);a.push([[3],{1:(e,t,n)=>{n.d(t,{K:()=>noop});function noop(){}var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
         r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var o=function*(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
