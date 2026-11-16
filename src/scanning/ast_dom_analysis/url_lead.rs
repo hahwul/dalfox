@@ -363,7 +363,27 @@ impl<'a> DomXssVisitor<'a> {
         if self.collecting_return_url_lead.get() {
             return UrlLead::Open;
         }
-        if let Some(summary) = self.stable_call_summary(call) {
+        if self.get_alias_for_callee_identifier(call).is_none()
+            && !call
+                .arguments
+                .iter()
+                .any(|arg| matches!(arg, Argument::SpreadElement(_)))
+            && !self.return_written_roots.contains("")
+            && self.get_expr_string(&call.callee).is_none_or(|key| {
+                !self
+                    .return_written_roots
+                    .contains(key.split('.').next().unwrap_or(&key))
+            })
+            && let Some(summary) = self
+                .get_summary_key_for_callee_expr(&call.callee)
+                .filter(|key| {
+                    !key.contains('.')
+                        && !self
+                            .return_written_roots
+                            .contains(key.split('.').next().unwrap_or(key))
+                })
+                .and_then(|key| self.summary(&key))
+        {
             let mut lead = summary.return_url_lead.unwrap_or(UrlLead::Open);
             for (idx, pinned_lead) in &summary.pinned_param_return_leads {
                 if call
@@ -381,12 +401,6 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
             return lead;
-        }
-        // An ineligible page function is still not the built-in of its name.
-        if let Expression::Identifier(id) = &call.callee
-            && self.summary(id.name.as_str()).is_some()
-        {
-            return UrlLead::Open;
         }
         // Legacy direct-expression rules; return proofs above do not rely
         // on decoding preserving a URL's start.

@@ -1206,96 +1206,6 @@ fn return_url_lead_inference_bounds_parameter_count() {
         "function d({params}){{return '/'+p0}} location.href=d(location.hash.slice(1));"
     )]);
 }
-
-#[test]
-fn a_selector_prefix_reaches_a_helpers_jquery_constructor() {
-    assert_clean(&[
-        "function u(t){$(t).addClass('x')} var e=new URLSearchParams(location.search).get('modal'); u('#'+e);",
-        "function u(t){return $(t)} u('#'+location.hash.slice(1));",
-        "const u=t=>$(t); u('.item-'+location.hash.slice(1));",
-        "function u(t){jQuery(t).addClass('x')} u('#'+location.hash.slice(1));",
-    ]);
-    assert_reported(&[
-        "function u(t){$(t).addClass('x')} u(location.hash.slice(1));",
-        "function String(u){return u.slice(1)} function outer(){function String(u){return u}} location.href=String(location.hash);",
-        "function outer($){function u(t){$(t).addClass('x')} u('#'+location.hash.slice(1))} outer(other);",
-        "var $=other; function u(t){$(t).addClass('x')} u('#'+location.hash.slice(1));",
-        "import $ from 'other'; function u(t){$(t).addClass('x')} u('#'+location.hash.slice(1));",
-        "function u(t){$(t).addClass('x')} $=other; u('#'+location.hash.slice(1));",
-        "function u(t){$(t).addClass('x')} u('<'+location.hash.slice(1));",
-        "function u(t){$(t.slice(1)).addClass('x')} u('#'+location.hash.slice(1));",
-        "function u(t){$(t).addClass($(t.slice(1)))} u('#'+location.hash.slice(1));",
-        "function u(t){$(t); el.innerHTML=t} u('#'+location.hash.slice(1));",
-        "function u(t){$(t).html(t)} u('#'+location.hash.slice(1));",
-        "function u(t,x=(t=t.slice(1))){$(t).addClass('x')} u('#'+location.hash.slice(1));",
-        "function u($,t){$(t).addClass('x')} u(other,'#'+location.hash.slice(1));",
-        "function u(t){$(t).addClass('x')} u=other; u('#'+location.hash.slice(1));",
-        "var api={u(t){$(t).addClass('x')}}; api.u('#'+location.hash.slice(1));",
-        "function u(x,t){$(t).addClass('x')} u(...[0,location.hash.slice(1)],'#'+location.hash.slice(1));",
-    ]);
-}
-
-#[test]
-fn a_declaration_summary_uses_its_own_scope() {
-    assert_clean(&[
-        "function outer(){function show(x){el.innerHTML=x}} function main(){function show(x){el.textContent=x} show(location.hash.slice(1))} main();",
-        "function main(){function show(x){el.innerHTML=x} function show(x){el.textContent=x} show(location.hash.slice(1))} main();",
-        "function outer(){function show(x){el.innerHTML=x}} function main(){show(location.hash.slice(1));function show(x){el.textContent=x}} main();",
-    ]);
-    assert_reported(&[
-        "function outer(){function show(x){el.textContent=x}} function main(){function show(x){el.innerHTML=x} show(location.hash.slice(1))} main();",
-        "function main(){function show(x){el.textContent=x} function show(x){el.innerHTML=x} show(location.hash.slice(1))} main();",
-        "var Foo=(function(){function Foo(h){el.innerHTML=h}return Foo}());new Foo(location.hash.slice(1));",
-        "function outer(){function show(x){el.textContent=x}} function main(){show(location.hash.slice(1));function show(x){el.innerHTML=x}} main();",
-        "function show(x=location.hash.slice(1)){el.innerHTML=x} function main(){function show(x){el.textContent=x} show('fixed')} main(); show();",
-    ]);
-}
-
-#[test]
-fn a_declaration_summary_restores_the_outer_function() {
-    let js = "function show(x){el.innerHTML=x} function main(){function show(x){el.textContent=x} show(location.hash.slice(1))} main(); show(location.hash.slice(1));";
-    assert_eq!(flows(js), ["location.hash -> innerHTML"]);
-}
-
-#[test]
-fn a_declaration_summary_cache_is_bounded() {
-    let limit = super::super::summaries::MAX_DECLARATION_SUMMARIES;
-    let js = (0..limit + 2)
-        .map(|i| format!("function f{i}(){{function x(a){{return a}}x('fixed')}}"))
-        .collect::<String>();
-    let count = guarded_parse(&js, || {
-        let allocator = Allocator::default();
-        let parsed = Parser::new(&allocator, &js, SourceType::default()).parse();
-        assert!(parsed.errors.is_empty());
-        let mut stopped = DomXssVisitor::new(&js);
-        stopped.work_budget = 0;
-        stopped.walk_statements(&parsed.program.body);
-        assert!(stopped.function_summaries.is_empty());
-        let mut visitor = DomXssVisitor::new(&js);
-        visitor.walk_statements(&parsed.program.body);
-        visitor.declaration_summaries.len()
-    })
-    .expect("bounded source parses");
-    assert!(count > 0 && count <= limit, "cache size: {count}");
-}
-
-#[test]
-fn a_declaration_summary_restores_recursive_placeholders() {
-    let js = "function f(h){el.innerHTML=h} function outer(){function f(h){if(h)f(h);else el.textContent=h} f(location.hash.slice(1))} outer();f(location.hash.slice(1));";
-    assert_eq!(flows(js), ["location.hash -> innerHTML"]);
-}
-
-#[test]
-fn nested_same_named_declarations_respect_the_work_budget() {
-    let depth = 256;
-    let js = format!(
-        "{}el.innerHTML=location.hash;{}",
-        "function f(){".repeat(depth),
-        "}".repeat(depth)
-    );
-    assert!(AstDomAnalyzer::new().analyze(&js).is_ok());
-}
-
 /// A webpack bundle: one module publishes a function with
 /// `n.d(t, {Z: …})`, another reads the module with `n(456)` and calls
 /// `r.Z(x)`. The callee is the function declared in module 456, whatever
@@ -1643,5 +1553,23 @@ fn timer_delay_objects_can_execute_during_numeric_coercion() {
     assert_reported(&[
         "var d={v:location.hash.slice(1),valueOf(){eval(this.v);return 0}};window.setTimeout(()=>{},d);",
         "var d={v:location.hash.slice(1),[Symbol.toPrimitive](){eval(this.v);return 0}};window.setTimeout(()=>{},d);",
+    ]);
+}
+
+#[test]
+fn webpack_member_rewrites_and_alias_escapes_stay_unresolved() {
+    assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(i){}req.m=mods;var alias;alias=mods;alias[2]=other;var r=req(2);r.Z(location.hash.slice(1));"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2),alias;alias=r;alias.Z=other;r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(i){}req.m=mods;mods[2]=(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}};var r=req(2);r.Z(location.hash.slice(1));"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(i){}req.m=mods;var alias=mods;alias[2]=(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}};var r=req(2);r.Z(location.hash.slice(1));"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z=x=>{el.textContent=x};r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r['Z']=x=>{el.textContent=x};r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2),alias=r;alias.Z=x=>{el.textContent=x};r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3),alias=r;function o(x){alias.Z=other;r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.O(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function o(x){var alias=r;alias.Z=other;r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_reported(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);var other={Z:x=>0};other.Z=x=>0;r.Z(location.hash.slice(1))}};"#,
     ]);
 }

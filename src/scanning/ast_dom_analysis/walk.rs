@@ -936,9 +936,16 @@ impl<'a> DomXssVisitor<'a> {
         // Inside a webpack factory its third parameter is `require`; a
         // nested function that binds the same name hides it.
         let outer_require = self.webpack_require.clone();
+        let outer_scope = self.webpack_scope;
         let outer_map_var = self.webpack_map_var.clone();
         if let Some(require) = self.webpack_factories.get(&params.span) {
             self.webpack_require = Some(require.clone());
+            self.webpack_scope = Some(oxc_span::Span::new(
+                params.span.start,
+                statements
+                    .last()
+                    .map_or(params.span.end, |stmt| stmt.span().end),
+            ));
         } else if outer_require
             .as_ref()
             .is_some_and(|name| own_names.contains(name))
@@ -1054,6 +1061,7 @@ impl<'a> DomXssVisitor<'a> {
 
         self.leave_webpack_write_scope(webpack_writes, &own_names);
         self.webpack_require = outer_require;
+        self.webpack_scope = outer_scope;
         self.webpack_map_var = outer_map_var;
         self.url_leads_exit(url_lead_scope, &locals);
         self.tainted_vars.rollback(tainted_checkpoint);

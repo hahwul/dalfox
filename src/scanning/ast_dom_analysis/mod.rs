@@ -397,8 +397,6 @@ pub struct DomXssVulnerability {
 #[derive(Default)]
 struct FunctionSummary {
     tainted_param_sinks: BTreeMap<usize, String>,
-    /// A single constructor call chain that passes this parameter to jQuery.
-    selector_param: Option<usize>,
     /// For a parameter whose sink above is a navigation: the sink an
     /// argument that cannot start with a script scheme (see `url_lead`)
     /// still reaches — the body cut its head off, or wrote it to
@@ -530,10 +528,6 @@ struct DomXssVisitor<'a> {
     sanitizers: &'static HashSet<&'static str>,
     /// Function summaries used for lightweight inter-procedural taint tracking
     function_summaries: HashMap<String, FunctionSummary>,
-    /// Summaries of declared functions whose name stands for another
-    /// function right now, by the span of their parameter list (see
-    /// `collect_function_declarations`).
-    declaration_summaries: HashMap<oxc_span::Span, FunctionSummary>,
     /// Parameters of the function whose parameter-free summary pass is
     /// running. `function onMessage(event) { sink(event.data) }` reads its
     /// *parameter* there, so that pass must not see the name-based
@@ -566,6 +560,8 @@ struct DomXssVisitor<'a> {
     webpack_factories: HashMap<oxc_span::Span, String>,
     /// The `require` parameter of the webpack factory being walked.
     webpack_require: Option<String>,
+    webpack_scope: Option<oxc_span::Span>,
+    webpack_export_pass: bool,
     webpack_disabled: bool,
     webpack_binding_writes: Option<HashSet<String>>,
     /// The variable holding the module map in the scope being walked, which
@@ -1111,7 +1107,6 @@ impl<'a> DomXssVisitor<'a> {
             sinks: &*STATIC_SINKS,
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
-            declaration_summaries: HashMap::new(),
             shadow_params: Default::default(),
             value_locals: Default::default(),
             plain_params: HashSet::new(),
@@ -1120,6 +1115,8 @@ impl<'a> DomXssVisitor<'a> {
             instance_classes: Default::default(),
             webpack_factories: HashMap::new(),
             webpack_require: None,
+            webpack_scope: None,
+            webpack_export_pass: false,
             webpack_disabled: false,
             webpack_binding_writes: None,
             webpack_map_var: None,
@@ -1339,45 +1336,10 @@ impl AstDomAnalyzer {
             &ret.program.body,
             &mut visitor.return_shadowed_globals,
         );
-        for stmt in &ret.program.body {
-            if let Statement::ImportDeclaration(import) = stmt {
-                for specifier in import.specifiers.iter().flatten() {
-                    let local = match specifier {
-                        ImportDeclarationSpecifier::ImportSpecifier(s) => &s.local,
-                        ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => &s.local,
-                        ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => &s.local,
-                    };
-                    if matches!(
-                        local.name.as_str(),
-                        "window"
-                            | "document"
-                            | "location"
-                            | "self"
-                            | "globalThis"
-                            | "top"
-                            | "parent"
-                            | "$"
-                            | "jQuery"
-                    ) {
-                        visitor
-                            .return_shadowed_globals
-                            .insert(local.name.to_string());
-                    }
-                }
-            }
-        }
         visitor.return_shadowed_globals.retain(|name| {
             matches!(
                 name.as_str(),
-                "window"
-                    | "document"
-                    | "location"
-                    | "self"
-                    | "globalThis"
-                    | "top"
-                    | "parent"
-                    | "$"
-                    | "jQuery"
+                "window" | "document" | "location" | "self" | "globalThis" | "top" | "parent"
             )
         });
         visitor.walk_script_after(&ret.program.body, globals);

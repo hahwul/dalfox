@@ -10,90 +10,8 @@ use super::*;
 type Report = (u32, u32, String);
 
 const MAX_URL_LEAD_PARAMS: usize = 32;
-pub(super) const MAX_DECLARATION_SUMMARIES: usize = 4096;
 
 impl<'a> DomXssVisitor<'a> {
-    /// Suppression facts require a stable bare callable and unshifted arguments.
-    pub(super) fn stable_call_summary(
-        &self,
-        call: &CallExpression<'a>,
-    ) -> Option<&FunctionSummary> {
-        if self.get_alias_for_callee_identifier(call).is_some()
-            || call
-                .arguments
-                .iter()
-                .any(|arg| matches!(arg, Argument::SpreadElement(_)))
-            || self.return_written_roots.contains("")
-            || self.get_expr_string(&call.callee).is_some_and(|key| {
-                self.return_written_roots
-                    .contains(key.split('.').next().unwrap_or(&key))
-            })
-        {
-            return None;
-        }
-        let key = self.get_summary_key_for_callee_expr(&call.callee)?;
-        if key.contains('.') || self.return_written_roots.contains(&key) {
-            return None;
-        }
-        self.summary(&key)
-            .filter(|summary| !summary.return_lead_ambiguous)
-    }
-
-    // shortcut: certify one call chain with static method arguments; larger helpers need scoped selector facts.
-    fn direct_selector_param(
-        &self,
-        formal_params: &FormalParameters<'a>,
-        body: &[Statement<'a>],
-        params: &[String],
-    ) -> Option<usize> {
-        if formal_params.rest.is_some()
-            || formal_params.items.iter().any(|param| {
-                param.initializer.is_some()
-                    || !matches!(param.pattern, BindingPattern::BindingIdentifier(_))
-            })
-        {
-            return None;
-        }
-        let mut expr = match body {
-            [Statement::ExpressionStatement(stmt)] => &stmt.expression,
-            [Statement::ReturnStatement(stmt)] => stmt.argument.as_ref()?,
-            _ => return None,
-        };
-        loop {
-            let _guard = self.enter_recursion()?;
-            let Expression::CallExpression(call) = expr.without_parentheses() else {
-                return None;
-            };
-            match call.callee.without_parentheses() {
-                Expression::Identifier(id) if matches!(id.name.as_str(), "$" | "jQuery") => {
-                    if params.iter().any(|param| param == id.name.as_str())
-                        || self.local_names.contains(id.name.as_str())
-                        || self.return_shadowed_globals.contains(id.name.as_str())
-                        || call.arguments.len() != 1
-                    {
-                        return None;
-                    }
-                    let Expression::Identifier(arg) =
-                        call.arguments[0].as_expression()?.without_parentheses()
-                    else {
-                        return None;
-                    };
-                    return params.iter().position(|param| param == arg.name.as_str());
-                }
-                Expression::StaticMemberExpression(member)
-                    if call.arguments.iter().all(|arg| {
-                        arg.as_expression()
-                            .and_then(|arg| self.eval_static_string_expr(arg))
-                            .is_some()
-                    }) =>
-                {
-                    expr = &member.object
-                }
-                _ => return None,
-            }
-        }
-    }
-
     /// Walk through statements
     pub(super) fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
         let displaced = self.collect_function_declarations(stmts);
@@ -105,27 +23,27 @@ impl<'a> DomXssVisitor<'a> {
             self.walk_statement(stmt);
             self.adjacent_index = None;
         }
-        // The names these statements declared stand for the other functions
-        // again; their own summaries are kept for the next walk of them.
         for (name, other) in displaced.into_iter().rev() {
-            if let Some(own) = self.function_summaries.insert(name, other) {
-                if self.declaration_summaries.len() >= MAX_DECLARATION_SUMMARIES {
-                    self.declaration_summaries.clear();
-                }
-                self.declaration_summaries.insert(own.params_span, own);
-            }
+            self.function_summaries.insert(name, other);
         }
     }
-    /// Collect function declarations before statement traversal so hoisted
-    /// calls are recognized. Returns the summaries of *other* functions of
-    /// the same names, set aside while these statements are walked: a
-    /// minifier calls a helper `o` in every scope, and inside a scope `o` is
-    /// the one declared there.
+    /// Collect function declarations before statement traversal so hoisted calls are recognized.
     pub(super) fn collect_function_declarations(
         &mut self,
         stmts: &[Statement<'a>],
     ) -> Vec<(String, FunctionSummary)> {
         let mut displaced = Vec::new();
+        let declarations_here: HashSet<_> = if self.webpack_scope.is_some() {
+            stmts
+                .iter()
+                .filter_map(|stmt| match stmt {
+                    Statement::FunctionDeclaration(f) => Some(f.params.span),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            HashSet::new()
+        };
         for stmt in stmts {
             let func_decl = match stmt {
                 Statement::FunctionDeclaration(func_decl) => func_decl,
@@ -156,18 +74,29 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 _ => continue,
             };
-            // shortcut: absent names retain legacy IIFE exports and Annex B lookup; remove after explicit export/scope resolution.
-            if let Some(id) = &func_decl.id
+            // Resolve module exports privately; foreign bare names remain unknown in ordinary walks.
+            if let Some(scope) = self.webpack_scope
+                && let Some(id) = &func_decl.id
                 && self
                     .function_summaries
                     .get(id.name.as_str())
-                    .is_some_and(|known| known.params_span != func_decl.params.span)
+                    .is_some_and(|known| {
+                        known.params_span != func_decl.params.span
+                            && (known.params_span.start < scope.start
+                                || known.params_span.end > scope.end
+                                || declarations_here.contains(&known.params_span))
+                    })
                 && let Some(other) = self.function_summaries.remove(id.name.as_str())
             {
                 displaced.push((id.name.to_string(), other));
-                if let Some(own) = self.declaration_summaries.remove(&func_decl.params.span) {
-                    self.value_locals.remove(id.name.as_str());
-                    self.function_summaries.insert(id.name.to_string(), own);
+                if !self.webpack_export_pass {
+                    self.function_summaries.insert(
+                        id.name.to_string(),
+                        FunctionSummary {
+                            params_span: func_decl.params.span,
+                            ..Default::default()
+                        },
+                    );
                     continue;
                 }
             }
@@ -285,6 +214,7 @@ impl<'a> DomXssVisitor<'a> {
         // O(live state) — O(N²) across a bundle of them.
         let webpack_writes = self.enter_webpack_write_scope();
         let saved_webpack_require = self.webpack_require.clone();
+        let saved_webpack_scope = self.webpack_scope;
         let saved_webpack_map = self.webpack_map_var.clone();
         let saved_tainted = std::mem::take(&mut self.tainted_vars);
         let saved_field_only = std::mem::take(&mut self.field_only_taint);
@@ -343,6 +273,12 @@ impl<'a> DomXssVisitor<'a> {
         locals.extend(declared.iter().cloned());
         if let Some(require) = self.webpack_factories.get(&formal_params.span) {
             self.webpack_require = Some(require.clone());
+            self.webpack_scope = Some(oxc_span::Span::new(
+                formal_params.span.start,
+                body_stmts
+                    .last()
+                    .map_or(formal_params.span.end, |stmt| stmt.span().end),
+            ));
         } else if self
             .webpack_require
             .as_ref()
@@ -623,24 +559,6 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
-        if let Some(idx) = self.direct_selector_param(formal_params, body_stmts, &params)
-            && summary
-                .tainted_param_sinks
-                .get(&idx)
-                .is_some_and(|sink| sink == "jQuery$")
-            && param_reports
-                .iter()
-                .find(|(param, _)| *param == idx)
-                .is_some_and(|(_, reports)| {
-                    reports
-                        .iter()
-                        .filter(|report| !free.contains(*report))
-                        .all(|(_, _, sink)| sink == "jQuery$")
-                })
-        {
-            summary.selector_param = Some(idx);
-        }
-
         if webpack_writes.is_some() {
             let mut webpack_owned = param_bindings
                 .iter()
@@ -667,6 +585,7 @@ impl<'a> DomXssVisitor<'a> {
             self.webpack_binding_writes = None;
         }
         self.webpack_require = saved_webpack_require;
+        self.webpack_scope = saved_webpack_scope;
         self.webpack_map_var = saved_webpack_map;
         self.tainted_vars = saved_tainted;
         self.field_only_taint = saved_field_only;

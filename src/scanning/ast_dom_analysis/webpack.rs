@@ -411,7 +411,32 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    /// An alias can replace a module or export through a name we do not track.
+    pub(super) fn note_webpack_alias_escape(&mut self, expr: &Expression<'a>) {
+        if let Expression::Identifier(id) = expr.without_parentheses() {
+            if self
+                .instance_classes
+                .get(id.name.as_str())
+                .is_some_and(|key| key.starts_with("\0wp:"))
+            {
+                self.instance_classes.remove(id.name.as_str());
+                self.note_webpack_rebinding(id.name.as_str());
+            }
+            if self.webpack_map_var.as_deref() == Some(id.name.as_str()) {
+                self.forget_webpack_binding(id.name.as_str());
+            }
+        }
+    }
+
     pub(super) fn note_webpack_assignment(&mut self, target: &AssignmentTarget<'a>) {
+        let object = match target {
+            AssignmentTarget::StaticMemberExpression(member) => Some(&member.object),
+            AssignmentTarget::ComputedMemberExpression(member) => Some(&member.object),
+            _ => None,
+        };
+        if let Some(object) = object {
+            self.note_webpack_alias_escape(object);
+        }
         match target {
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 self.note_webpack_rebinding(id.name.as_str())
@@ -733,7 +758,12 @@ impl<'a> DomXssVisitor<'a> {
                     .map(|value| (key, value))
             })
             .collect();
+        let outer_export_pass = self.webpack_export_pass;
+        self.webpack_export_pass = true;
         let outer_require = self.webpack_require.replace(factory.require.to_string());
+        let outer_scope = self
+            .webpack_scope
+            .replace(oxc_span::Span::new(factory.params_span.start, end));
         let outer_map = self.webpack_map_var.take();
         let outer_probe = self.webpack_binding_writes.take();
         let outer_writes = std::mem::take(&mut self.return_written_roots);
@@ -775,12 +805,19 @@ impl<'a> DomXssVisitor<'a> {
         let search_sources = std::mem::take(&mut self.url_search_params_sources);
         let search_objects = std::mem::take(&mut self.url_search_params_objects);
         self.webpack_binding_writes = Some(HashSet::new());
+        for (name, id) in &imports {
+            if !self.webpack_ambiguous_ids.contains(id) {
+                self.instance_classes
+                    .insert((*name).to_string(), module_key(id));
+            }
+        }
         for stmt in factory.statements {
             if let Statement::VariableDeclaration(declaration) = stmt {
                 for d in &declaration.declarations {
                     if let Some(init) = &d.init
                         && !init.is_function()
                     {
+                        self.note_webpack_alias_escape(init);
                         self.walk_expression(init);
                     }
                 }
@@ -810,8 +847,6 @@ impl<'a> DomXssVisitor<'a> {
         }
         self.function_summaries
             .retain(|key, summary| key.starts_with("\0wp:") || !in_factory(summary));
-        self.declaration_summaries
-            .retain(|span, _| span.start < factory.params_span.end || span.end > end);
         for (name, id) in &imports {
             if !unstable_runtime
                 && !writes.contains(*name)
@@ -882,7 +917,9 @@ impl<'a> DomXssVisitor<'a> {
         }
         self.return_written_roots = outer_writes;
         self.return_callable_roots = outer_callable_roots;
+        self.webpack_export_pass = outer_export_pass;
         self.webpack_require = outer_require;
+        self.webpack_scope = outer_scope;
         self.webpack_map_var = outer_map;
         self.element_tag_vars.rollback(elements);
         self.response_object_vars.rollback(responses);

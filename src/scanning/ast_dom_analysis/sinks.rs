@@ -7,6 +7,9 @@ use super::*;
 impl<'a> DomXssVisitor<'a> {
     /// Walk through an assignment expression
     pub(super) fn walk_assignment_expression(&mut self, assign: &AssignmentExpression<'a>) {
+        if matches!(assign.left, AssignmentTarget::AssignmentTargetIdentifier(_)) {
+            self.note_webpack_alias_escape(&assign.right);
+        }
         self.note_webpack_assignment(&assign.left);
         self.note_webpack_runtime(assign);
         // The property written decides which sanitizers count (see `SinkCtx`).
@@ -742,20 +745,6 @@ impl<'a> DomXssVisitor<'a> {
                 let (tainted, source_hint) =
                     self.resolve_param_argument_taint(call, alias_owned.as_ref(), idx);
                 if !tainted {
-                    continue;
-                }
-                if sink_name == "jQuery$"
-                    && !self.return_written_roots.contains("$")
-                    && !self.return_written_roots.contains("jQuery")
-                    && self
-                        .stable_call_summary(call)
-                        .is_some_and(|summary| summary.selector_param == Some(idx))
-                    && call
-                        .arguments
-                        .get(idx)
-                        .and_then(Argument::as_expression)
-                        .is_some_and(|arg| self.jquery_arg_forces_selector(arg))
-                {
                     continue;
                 }
                 // The helper navigates to its argument (`a.href = url`, the
