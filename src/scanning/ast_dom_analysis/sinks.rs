@@ -7,6 +7,11 @@ use super::*;
 impl<'a> DomXssVisitor<'a> {
     /// Walk through an assignment expression
     pub(super) fn walk_assignment_expression(&mut self, assign: &AssignmentExpression<'a>) {
+        if matches!(assign.left, AssignmentTarget::AssignmentTargetIdentifier(_)) {
+            self.note_webpack_alias_escape(&assign.right);
+        }
+        self.note_webpack_assignment(&assign.left);
+        self.note_webpack_runtime(assign);
         // The property written decides which sanitizers count (see `SinkCtx`).
         let sink = match &assign.left {
             AssignmentTarget::StaticMemberExpression(member) => {
@@ -1800,6 +1805,7 @@ impl<'a> DomXssVisitor<'a> {
                 self.walk_isolated_callback_body(&arrow.params, &arrow.body.statements, seeds);
             }
             Expression::ObjectExpression(object) => {
+                self.register_webpack_modules(object);
                 for property in &object.properties {
                     if let ObjectPropertyKind::ObjectProperty(property) = property {
                         self.report_dangerously_set_inner_html(property);

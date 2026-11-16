@@ -14,7 +14,7 @@ const MAX_URL_LEAD_PARAMS: usize = 32;
 impl<'a> DomXssVisitor<'a> {
     /// Walk through statements
     pub(super) fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
-        self.collect_function_declarations(stmts);
+        let displaced = self.collect_function_declarations(stmts);
         for (idx, stmt) in stmts.iter().enumerate() {
             // Read after `stmts[idx - 1]` was walked, against the live state.
             self.adjacent_index = idx
@@ -23,9 +23,27 @@ impl<'a> DomXssVisitor<'a> {
             self.walk_statement(stmt);
             self.adjacent_index = None;
         }
+        for (name, other) in displaced.into_iter().rev() {
+            self.function_summaries.insert(name, other);
+        }
     }
     /// Collect function declarations before statement traversal so hoisted calls are recognized.
-    pub(super) fn collect_function_declarations(&mut self, stmts: &[Statement<'a>]) {
+    pub(super) fn collect_function_declarations(
+        &mut self,
+        stmts: &[Statement<'a>],
+    ) -> Vec<(String, FunctionSummary)> {
+        let mut displaced = Vec::new();
+        let declarations_here: HashSet<_> = if self.webpack_scope.is_some() {
+            stmts
+                .iter()
+                .filter_map(|stmt| match stmt {
+                    Statement::FunctionDeclaration(f) => Some(f.params.span),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            HashSet::new()
+        };
         for stmt in stmts {
             let func_decl = match stmt {
                 Statement::FunctionDeclaration(func_decl) => func_decl,
@@ -56,8 +74,35 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 _ => continue,
             };
+            // Resolve module exports privately; foreign bare names remain unknown in ordinary walks.
+            if let Some(scope) = self.webpack_scope
+                && let Some(id) = &func_decl.id
+                && self
+                    .function_summaries
+                    .get(id.name.as_str())
+                    .is_some_and(|known| {
+                        known.params_span != func_decl.params.span
+                            && (known.params_span.start < scope.start
+                                || known.params_span.end > scope.end
+                                || declarations_here.contains(&known.params_span))
+                    })
+                && let Some(other) = self.function_summaries.remove(id.name.as_str())
+            {
+                displaced.push((id.name.to_string(), other));
+                if !self.webpack_export_pass {
+                    self.function_summaries.insert(
+                        id.name.to_string(),
+                        FunctionSummary {
+                            params_span: func_decl.params.span,
+                            ..Default::default()
+                        },
+                    );
+                    continue;
+                }
+            }
             self.register_function_declaration(func_decl);
         }
+        displaced
     }
     /// `(W, render, fn)` of `W.prototype.render = function () { … }`.
     pub(super) fn prototype_method<'b>(
@@ -104,6 +149,9 @@ impl<'a> DomXssVisitor<'a> {
         body_stmts: &[Statement<'a>],
         concise: bool,
     ) {
+        let Some(_guard) = self.enter_recursion() else {
+            return;
+        };
         if self.return_callable_roots.len() >= 1024 {
             self.note_return_write(String::new());
         } else {
@@ -164,6 +212,10 @@ impl<'a> DomXssVisitor<'a> {
         // rather than cloned; the state the walk only reads is journaled and
         // rolled back. Cloning it all made every hoisted declaration cost
         // O(live state) — O(N²) across a bundle of them.
+        let webpack_writes = self.enter_webpack_write_scope();
+        let saved_webpack_require = self.webpack_require.clone();
+        let saved_webpack_scope = self.webpack_scope;
+        let saved_webpack_map = self.webpack_map_var.clone();
         let saved_tainted = std::mem::take(&mut self.tainted_vars);
         let saved_field_only = std::mem::take(&mut self.field_only_taint);
         let saved_aliases = std::mem::take(&mut self.var_aliases);
@@ -219,6 +271,28 @@ impl<'a> DomXssVisitor<'a> {
         Self::collect_declared_names(body_stmts, &mut declared);
         let mut locals: HashSet<String> = param_bindings.iter().flatten().cloned().collect();
         locals.extend(declared.iter().cloned());
+        if let Some(require) = self.webpack_factories.get(&formal_params.span) {
+            self.webpack_require = Some(require.clone());
+            self.webpack_scope = Some(oxc_span::Span::new(
+                formal_params.span.start,
+                body_stmts
+                    .last()
+                    .map_or(formal_params.span.end, |stmt| stmt.span().end),
+            ));
+        } else if self
+            .webpack_require
+            .as_ref()
+            .is_some_and(|name| locals.contains(name))
+        {
+            self.webpack_require = None;
+        }
+        if self
+            .webpack_map_var
+            .as_ref()
+            .is_some_and(|name| locals.contains(name))
+        {
+            self.webpack_map_var = None;
+        }
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         let shadow_params_checkpoint = self.shadow_params.checkpoint();
@@ -256,6 +330,14 @@ impl<'a> DomXssVisitor<'a> {
         // A sink the body reaches with *no* parameter tainted (a free
         // `location.hash`, a tainted global) is not that parameter's flow, so
         // those are subtracted once the parameter-free pass below has run.
+        if self.webpack_binding_writes.is_some() {
+            for param in &formal_params.items {
+                self.probe_webpack_pattern_defaults(&param.pattern);
+                if let Some(default) = &param.initializer {
+                    self.walk_expression(default);
+                }
+            }
+        }
         let mut param_reports: Vec<(usize, Vec<Report>)> = Vec::new();
         for (idx, names) in param_bindings.iter().enumerate() {
             if names.is_empty() {
@@ -477,6 +559,34 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        if webpack_writes.is_some() {
+            let mut webpack_owned = param_bindings
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<HashSet<_>>();
+            for stmt in body_stmts {
+                match stmt {
+                    Statement::VariableDeclaration(d) => {
+                        for d in &d.declarations {
+                            let mut names = Vec::new();
+                            Self::collect_binding_pattern_names(&d.id, &mut names);
+                            webpack_owned.extend(names);
+                        }
+                    }
+                    Statement::FunctionDeclaration(f) => {
+                        webpack_owned.extend(f.id.iter().map(|id| id.name.to_string()))
+                    }
+                    _ => {}
+                }
+            }
+            self.leave_webpack_write_scope(webpack_writes, &webpack_owned);
+        } else {
+            self.webpack_binding_writes = None;
+        }
+        self.webpack_require = saved_webpack_require;
+        self.webpack_scope = saved_webpack_scope;
+        self.webpack_map_var = saved_webpack_map;
         self.tainted_vars = saved_tainted;
         self.field_only_taint = saved_field_only;
         self.var_aliases = saved_aliases;
@@ -600,12 +710,16 @@ impl<'a> DomXssVisitor<'a> {
         body_stmts: &[Statement<'a>],
         concise: bool,
     ) {
+        let outer_require = self.webpack_require.clone();
+        let outer_map = self.webpack_map_var.clone();
         let body_frame = self.enter_body();
         self.with_function_this(formal_params, |v| v.walk_statements(body_stmts));
         if concise {
             self.collect_concise_return(body_stmts);
         }
         self.leave_body(body_frame);
+        self.webpack_require = outer_require;
+        self.webpack_map_var = outer_map;
     }
     /// A concise arrow (`n => expr`) has no `return` statement — its body
     /// *is* the returned expression — so record it the way the `return` walk

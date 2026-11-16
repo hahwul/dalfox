@@ -18,6 +18,9 @@ impl<'a> DomXssVisitor<'a> {
         init: &Expression<'a>,
     ) {
         let var_name = id.name.as_str();
+        self.note_webpack_alias_escape(init);
+        self.note_webpack_rebinding(var_name);
+        self.forget_webpack_binding(var_name);
         if self.return_callable_roots.contains(var_name)
             && !matches!(
                 init,
@@ -58,6 +61,7 @@ impl<'a> DomXssVisitor<'a> {
         if let Expression::ObjectExpression(obj_expr) = init {
             self.register_object_literal_method_summaries(var_name, obj_expr);
         }
+        self.note_webpack_map_var(var_name, init);
         // Register summaries for class expressions assigned to variables.
         if let Expression::ClassExpression(class_expr) = init {
             self.register_class_method_summaries_for_name(var_name, class_expr);
@@ -87,6 +91,11 @@ impl<'a> DomXssVisitor<'a> {
             // now hand the tainted constructor argument back out, so a later
             // `m.body` resolves without re-deriving the construction.
             self.seed_instance_field_taints(var_name, class_id.name.as_str(), &new_expr.arguments);
+            assigned_instance_class = true;
+        } else if let Some(module) = self.webpack_import(init) {
+            // `var r = n(456)` in a webpack factory: `r.Z(x)` is module 456's
+            // export `Z`.
+            self.instance_classes.insert(var_name.to_string(), module);
             assigned_instance_class = true;
         }
         if !assigned_instance_class {

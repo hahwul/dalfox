@@ -1206,6 +1206,373 @@ fn return_url_lead_inference_bounds_parameter_count() {
         "function d({params}){{return '/'+p0}} location.href=d(location.hash.slice(1));"
     )]);
 }
+/// A webpack bundle: one module publishes a function with
+/// `n.d(t, {Z: …})`, another reads the module with `n(456)` and calls
+/// `r.Z(x)`. The callee is the function declared in module 456, whatever
+/// the same minified name means in the factory next door.
+#[test]
+fn a_call_across_webpack_modules_uses_the_exporting_modules_function() {
+    for js in [
+        // webpack 5, arrow factories and getters; the importer comes first.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[179],{
+            123:(e,t,n)=>{"use strict";var r=n(456);r.Z(location.hash.slice(1))},
+            456:(e,t,n)=>{"use strict";n.d(t,{Z:()=>o});function o(e){document.getElementById("x").innerHTML=e}}
+        }]);"#,
+        // Function factories, function getters, a comma callee.
+        r#"(window.webpackJsonp=window.webpackJsonp||[]).push([[0],{
+            456:function(e,t,n){"use strict";n.d(t,{Z:function(){return o}});function o(e){document.getElementById("x").innerHTML=e}},
+            123:function(e,t,n){"use strict";var r=n(456);(0,r.Z)(location.hash.slice(1))}
+        }]);"#,
+        // webpack 4's three-argument form, `n.r(t)` in the same statement.
+        r#"var __webpack_modules__={
+            "./src/view.js":function(e,t,n){"use strict";n.r(t),n.d(t,"render",function(){return o});var o=function(e){document.body.innerHTML=e}},
+            "./src/main.js":function(e,t,n){"use strict";var r=n("./src/view.js");r.render(location.hash.slice(1))}
+        };"#,
+        // Through a second module, and through the return value.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);document.body.innerHTML=r.a(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{a:()=>o});var i=n(3);function o(e){return i.b(e)}},
+            3:(e,t,n)=>{n.d(t,{b:()=>o});const o=e=>"<p>"+e+"</p>"}
+        }]);"#,
+        // Forwarded to a third module's sink.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);r.a(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{a:()=>o});var i=n(3);function o(e){i.b(e)}},
+            3:(e,t,n)=>{n.d(t,{b:()=>o});function o(e){document.body.innerHTML=e}}
+        }]);"#,
+        // The importer's own `o` is another function.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            1:(e,t,n)=>{var r=n(2);function o(e){return 1}r.Z(location.hash.slice(1))},
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}
+        }]);"#,
+    ] {
+        assert_eq!(flows(js), ["location.hash -> innerHTML"], "{js}");
+    }
+}
+
+/// webpack 5.112 `--mode production` output of a three-module app, runtime
+/// trimmed to what names the pieces: the entry module runs in the runtime's
+/// scope, where `n` is the require function the runtime publishes its module
+/// map on (`n.m = t`).
+#[test]
+fn a_webpack_entry_module_calls_through_the_runtimes_require() {
+    let runtime = r#"const e={};function n(o){const r=e[o];if(void 0!==r)return r.exports;const i=e[o]={exports:{}};return t[o](i,i.exports,n),i.exports}n.m=t,n.d=(t,e)=>{for(var o in e)n.o(e,o)&&!n.o(t,o)&&Object.defineProperty(t,o,{enumerable:!0,get:e[o]})},n.o=(t,e)=>Object.prototype.hasOwnProperty.call(t,e);"#;
+    let modules = r#"var t={865(t,e,n){function o(t){return new URLSearchParams(location.search).get(t)}n.d(e,{u:()=>o})},826(t,e,n){function o(t){document.getElementById("out").innerHTML=t}function i(t){document.getElementById("out").textContent=t}n.d(e,{X:()=>o,Y:()=>i})}};"#;
+    let bundle = |entry: &str| format!(r#"(()=>{{"use strict";{modules}{runtime}{entry}}})();"#);
+    assert_eq!(
+        flows(&bundle(
+            r#"var o=n(826),r=n(865);(0,o.X)(location.hash.slice(1)),document.getElementById("b").onclick=function(){(0,o.X)("<b>"+(0,r.u)("q")+"</b>")}"#
+        )),
+        ["location.hash -> innerHTML", "location.search -> innerHTML"]
+    );
+    // The same entry through the export that escapes, and through a `require`
+    // the runtime never published the map on.
+    assert_clean(&[
+        &bundle(r#"var o=n(826),r=n(865);(0,o.Y)(location.hash.slice(1)),(0,o.Y)((0,r.u)("q"))"#),
+        &format!(
+            r#"(()=>{{{modules}function n(o){{return lookup(o)}}n.m=other;var o=n(826);(0,o.X)(location.hash.slice(1))}})();"#
+        ),
+    ]);
+}
+
+/// What the export does decides, not the name: a module whose export does
+/// not reach a sink, an id two maps define, a `require` a nested function
+/// rebinds, and an object that is not a module map.
+#[test]
+fn a_webpack_export_that_is_not_a_sink_stays_clean() {
+    assert_clean(&[
+        // Module 2's `o` is harmless; module 3's `o` is the sink but is not
+        // what `r.Z` names.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){return e.length}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // The export escapes its argument.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.textContent=e}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // Another export of the same module is the sink.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Y:()=>i,Z:()=>o});function i(e){document.body.innerHTML=e}function o(e){return e}},
+            1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // Two maps define module 2 differently.
+        r#"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}}]);
+           b.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){return e}},
+                        1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"#,
+        // `n` inside the callback is its own parameter, not `require`.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            1:(e,t,n)=>{[lookup].forEach(function(n){var r=n(2);r.Z(location.hash.slice(1))})}
+        }]);"#,
+        // A call that is not `require`, though its argument is a module id.
+        r#"(self.webpackChunkapp=self.webpackChunkapp||[]).push([[1],{
+            2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}},
+            1:(e,t,n)=>{var r=pick(2);r.Z(location.hash.slice(1))}
+        }]);"#,
+        // An ordinary object of three-parameter functions.
+        r#"var handlers={2:function(e,t,n){n.d(t,{Z:()=>o});function o(e){document.body.innerHTML=e}}};
+           function go(n){var r=n(2);r.Z(location.hash.slice(1))} go(pick);"#,
+    ]);
+}
+
+#[test]
+fn webpack_binding_and_getter_controls_stay_clean() {
+    assert_clean(&[
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(3);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o,Z:()=>p});function o(x){el.innerHTML=x}function p(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});var o=x=>{el.innerHTML=x};var o=x=>{el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){var x='fixed';el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{"a.b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},"a\u0001b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n("a\u0001b");r.Z(location.hash.slice(1))}}]);"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:(e,t,n)=>{n.d(t,{O:()=>o});var o=function r(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:(e,t,n)=>{Object.assign(t,{Z:x=>{el.textContent=x}});n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{t={};n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{t.Z=x=>{el.textContent=x};n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:({r},t,n)=>{n.d(t,{O:()=>o});function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:function(e,n,n){n.d(n,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:function r(e,t,n){n.d(t,{O:()=>o});function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{function n(id){return {Z:x=>{el.textContent=x}}}var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{Z:()=>o});[n=pick];var r=n(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{Z:()=>o});(n=pick)(3);var r=n(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function* o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});var o=function*(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:function*(e,t,n){n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:function o(){return o}});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:o=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}o=x=>{el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{Z:()=>o});var i=n(3);function o(i){i.Z('fixed')}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{if(ok){let n=pick;var r=n(2);r.Z(location.hash.slice(1))}}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d=()=>{};n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{n=pick;var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{n=id=>({Z:x=>{el.textContent=x}});var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{[pick].forEach(function(n){var r=n(2);r.Z(location.hash.slice(1))})}}]);"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var n=pick;var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};t=other;function n(id){return lookup(id)}n.m=t;var r=n(2);r.Z(location.hash.slice(1));"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function n(id){return lookup(id)}n.m=t;n=pick;var r=n(2);r.Z(location.hash.slice(1));"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(3);r.Z(location.hash.slice(1));}}]);"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function harmless(){pick.m=t} var r=pick(2);r.Z(location.hash.slice(1));"####,
+        r####"var t={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};var harmless=function(){pick.m=t}; var r=pick(2);r.Z(location.hash.slice(1));"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:async()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{{const n=pick;var r=n(2);r.Z(location.hash.slice(1));}}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{list.forEach(function(n){var r=n(2);r.Z(location.hash.slice(1))});}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3),cfg={reset(){r=pick}};function o(x){cfg.reset();r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function f(x){el.innerHTML=x}function reset(){f=x=>0}reset();function o(x){f(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function reset({x=(r=pick)}={}){}function o(x){reset();r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{function n(){return{Z(x){}}}var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>other});function helper(x){el.innerHTML=x}function other(x){return x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function helper(x){el.textContent=x}function o(x){helper(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:(e,t,n)=>{n.d(t,{O:()=>o});var r=pick(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:function*(){return o}});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={"a.b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},"a\u0001b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},1:(e,t,n)=>{var r=n("a\u0001b");r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);(()=>{r=pick})();function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);var dummy=(r=pick);function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=pick(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);r=pick;function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};mods={};function req(){return{Z(x){}}}req.m=mods;var r=req(2);r.Z(location.hash.slice(1));"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{n=pick;var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(){}req.m=mods;req=pick;var r=req(2);r.Z(location.hash.slice(1));"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);var r=pick;function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"function req(){return{Z(x){}}}function helper(){var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};req.m=mods;}var r=req(2);r.Z(location.hash.slice(1));"####,
+    ]);
+}
+
+#[test]
+fn webpack_identity_controls_keep_real_flows() {
+    assert_reported(&[
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{{const n=pick;use(n)}var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);(0,r.Z)(location.hash.slice(1));}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>other});function helper(x){el.textContent=x}function other(x){return x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function helper(x){el.innerHTML=x}function o(x){helper(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={"a.b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}},"a\u0001b":(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n("a\u0001b");r.Z(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function harmless(){var r=1}function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function harmless(){for(var r of xs){}}function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"####,
+        r####"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(){}req.m=mods;var r=req(2);r.Z(location.hash.slice(1));"####,
+    ]);
+}
+
+#[test]
+fn webpack_module_registration_is_bounded() {
+    let modules = (0..=super::super::webpack::MAX_WEBPACK_MODULES)
+        .map(|i| format!("{i}:(e,t,n)=>{{n.d(t,{{Z:()=>o}});function o(x){{el.innerHTML=x}}}},"))
+        .collect::<String>();
+    assert_clean(&[&format!(
+        "var mods={{{modules}}};function req(i){{return mods[i]}}req.m=mods;var r=req(0);r.Z(location.hash.slice(1));"
+    )]);
+}
+
+#[test]
+fn webpack_export_summary_respects_its_own_require_shadow() {
+    assert_clean(&[
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function o(n,x){var r=n(3);r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(pick,location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){var n=pick,r=n(3);r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_reported(&[
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){var r=n(3);r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_rechecks_nested_helpers_with_the_factory_imports() {
+    assert_reported(&[
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function o(x){function inner(y){r.Z(y)}inner(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});n.d(t,{Z:()=>p});function o(x){el.textContent=x}function p(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o,...other});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_captured_runtime_rebinding_stays_unresolved() {
+    assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function f(x){el.innerHTML=x}function reset(){f=x=>{el.textContent=x}}function o(x){reset();f(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+        r####"var mods={4:(e,t,n)=>{n.d(t,{S:()=>O});function O(x){el.innerHTML=x}},3:(e,t,n)=>{n.d(t,{R:()=>read});function read(){return location.hash.slice(1)}},2:(e,t,n)=>{var r=n(3);function O(x){el.textContent=x}O(r.R())}};"####,
+        r####"var m1={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}};function n(i){}n.m=m1;var r=n(3);var m2={2:(e,t,n)=>{n.d(t,{O:()=>o});var r=other;function o(x){r.Z(x)}},1:(e,t,n)=>{var other=n(2);other.O(location.hash.slice(1))}};"####,
+        r####"a.push([[1],{2:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}}}]);a.push([[2],{2:(e,t,n)=>{n.d(t,{Z:async()=>safe});function safe(x){el.textContent=x}}}]);a.push([[3],{1:(e,t,n)=>{n.d(t,{K:()=>noop});function noop(){}var r=n(2);r.Z(location.hash.slice(1))}}]);"####,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var o=function*(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function o(x,z=(r=pick)){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});function reset(){n=pick}reset();var r=n(3);function o(x){r.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});e.exports={Z:x=>{el.textContent=x}};function o(x){el.innerHTML=x}},1:(e,t,n)=>{var q=n(2);q.Z(location.hash.slice(1))}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_identifier_copying_is_bounded() {
+    let id = "a".repeat(super::super::webpack::MAX_WEBPACK_NAME_BYTES + 1);
+    assert_clean(&[&format!(
+        r#"var mods={{"{id}":(e,t,n)=>{{n.d(t,{{Z:()=>o}});function o(x){{el.innerHTML=x}}}},1:(e,t,n)=>{{var r=n("{id}");r.Z(location.hash.slice(1))}}}};"#
+    )]);
+}
+
+#[test]
+fn webpack_nested_declarations_use_only_their_module_scope() {
+    assert_clean(&[
+        r#"function other(){function inner(x){el.innerHTML=x}}var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){function inner(y){el.textContent=y}inner(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_reported(&[
+        r#"function other(){function inner(x){el.textContent=x}}var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});function o(x){function inner(y){el.innerHTML=y}inner(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_does_not_publish_findings() {
+    let js = r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var api={show(){window.open(location.hash.slice(1))}};function o(x){return x}}};"#;
+    assert_eq!(flows(js), ["location.hash -> window.open"]);
+    assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var api={show(){el.textContent=location.hash.slice(1)}};function o(x){return x}}};"#,
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_captured_instance_classes() {
+    assert_clean(&[
+        "class K{Z(x){el.innerHTML=x}}var c={Z:x=>{el.textContent=x}};var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=new K}};function o(x){c.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+    assert_reported(&[
+        "class K{Z(x){el.innerHTML=x}}var c=new K;var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=other}};function o(x){c.Z(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_captured_bound_aliases() {
+    assert_clean(&[
+        "function sink(x){el.innerHTML=x}function getSafe(){return x=>{el.textContent=x}}var c=getSafe();var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=sink.bind(null)}};function o(x){c(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+    assert_reported(&[
+        "function sink(x){el.innerHTML=x}var c=sink.bind(null);var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){c=other}};function o(x){c(x)}},1:(e,t,n)=>{var q=n(2);q.O(location.hash.slice(1))}};",
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_css_property_sources() {
+    assert_clean(&[
+        "var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){el.style.setProperty('--probe',location.hash.slice(1))}};function o(){return getComputedStyle(el).getPropertyValue('--probe')}},1:(e,t,n)=>{var q=n(2);el.innerHTML=q.O()}};",
+    ]);
+    assert_reported(&[
+        "el.style.setProperty('--probe',location.hash.slice(1));var mods={2:(e,t,n)=>{n.d(t,{O:()=>o});var cfg={reset(){el.style.setProperty('--probe','fixed')}};function o(){return getComputedStyle(el).getPropertyValue('--probe')}},1:(e,t,n)=>{var q=n(2);el.innerHTML=q.O()}};",
+    ]);
+}
+
+#[test]
+fn webpack_binding_probe_restores_idb_markers() {
+    let js = "var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});var cfg={reset(){var savedRequest=0,savedStore=0;var localStore=tx.objectStore('notes');var localRequest=localStore.get('key')}};function o(x){return x}}};";
+    guarded_parse(js, || {
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, js, SourceType::default()).parse();
+        assert!(parsed.errors.is_empty());
+        let Statement::VariableDeclaration(declaration) = &parsed.program.body[0] else {
+            panic!("module map declaration");
+        };
+        let Some(Expression::ObjectExpression(map)) = &declaration.declarations[0].init else {
+            panic!("module map object");
+        };
+        let mut visitor = DomXssVisitor::new(js);
+        visitor.idb_request_vars.insert("savedRequest".to_string());
+        visitor
+            .idb_object_store_vars
+            .insert("savedStore".to_string());
+        assert!(visitor.register_webpack_modules(map));
+        assert!(visitor.idb_request_vars.contains("savedRequest"));
+        assert!(visitor.idb_object_store_vars.contains("savedStore"));
+        assert!(!visitor.idb_request_vars.contains("localRequest"));
+        assert!(!visitor.idb_object_store_vars.contains("localStore"));
+    })
+    .expect("fixture parses");
+}
+
+#[test]
+fn timer_spreads_can_shift_code_and_callback_data_into_later_slots() {
+    assert_clean(&["setTimeout(()=>{},location.hash.slice(1));"]);
+    assert_reported(&[
+        "window.setTimeout(...[],location.hash.slice(1));",
+        "window.setTimeout(...[v=>{el.innerHTML=v},0],location.hash.slice(1));",
+        "window.setTimeout?.(...[],location.hash.slice(1));",
+    ]);
+}
+
+#[test]
+fn timer_globals_can_be_replaced_through_aliases_and_reflection() {
+    assert_reported(&[
+        "const replace=Object.assign;replace(window,{setTimeout(f,d){el.innerHTML=d}});window.setTimeout(()=>{},location.hash.slice(1));",
+        "Object.defineProperty(window,'setTimeout',{value:(f,d)=>{el.innerHTML=d}});window.setTimeout(()=>{},location.hash.slice(1));",
+        "Reflect.set(window,'setTimeout',(f,d)=>{el.innerHTML=d});window.setTimeout(()=>{},location.hash.slice(1));",
+        "const {window:w}=globalThis;w.setTimeout=(f,d)=>{el.innerHTML=d};window.setTimeout(()=>{},location.hash.slice(1));",
+        "var w=globalThis.window;w.setTimeout=(f,d)=>{el.innerHTML=d};window.setTimeout(()=>{},location.hash.slice(1));",
+        "top.setTimeout=(f,d)=>{el.innerHTML=d};top.setTimeout(()=>{},location.hash.slice(1));",
+    ]);
+}
+
+#[test]
+fn timer_delay_objects_can_execute_during_numeric_coercion() {
+    assert_clean(&["window.setTimeout(()=>{},{valueOf(){return 0}});"]);
+    assert_reported(&[
+        "var d={v:location.hash.slice(1),valueOf(){eval(this.v);return 0}};window.setTimeout(()=>{},d);",
+        "var d={v:location.hash.slice(1),[Symbol.toPrimitive](){eval(this.v);return 0}};window.setTimeout(()=>{},d);",
+    ]);
+}
+
+#[test]
+fn webpack_member_rewrites_and_alias_escapes_stay_unresolved() {
+    assert_clean(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(i){}req.m=mods;var alias;alias=mods;alias[2]=other;var r=req(2);r.Z(location.hash.slice(1));"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2),alias;alias=r;alias.Z=other;r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(i){}req.m=mods;mods[2]=(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}};var r=req(2);r.Z(location.hash.slice(1));"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}}};function req(i){}req.m=mods;var alias=mods;alias[2]=(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.textContent=x}};var r=req(2);r.Z(location.hash.slice(1));"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r.Z=x=>{el.textContent=x};r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);r['Z']=x=>{el.textContent=x};r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2),alias=r;alias.Z=x=>{el.textContent=x};r.Z(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3),alias=r;function o(x){alias.Z=other;r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.O(location.hash.slice(1))}};"#,
+        r#"var mods={3:(e,t,n)=>{n.d(t,{Z:()=>sink});function sink(x){el.innerHTML=x}},2:(e,t,n)=>{n.d(t,{O:()=>o});var r=n(3);function o(x){var alias=r;alias.Z=other;r.Z(x)}},1:(e,t,n)=>{var r=n(2);r.O(location.hash.slice(1))}};"#,
+    ]);
+    assert_reported(&[
+        r#"var mods={2:(e,t,n)=>{n.d(t,{Z:()=>o});function o(x){el.innerHTML=x}},1:(e,t,n)=>{var r=n(2);var other={Z:x=>0};other.Z=x=>0;r.Z(location.hash.slice(1))}};"#,
+    ]);
+}
 
 #[test]
 fn returned_partial_schemes_are_not_a_fixed_url_start() {

@@ -250,6 +250,11 @@ impl<'a> DomXssVisitor<'a> {
     /// variable — which hides what the outer binding of that name stood for:
     /// `var e = window; try { … } catch (e) { el.innerHTML = e.name }`.
     fn with_block_bindings(&mut self, names: &HashSet<String>, walk: impl FnOnce(&mut Self)) {
+        let outer_require = self.webpack_require.clone();
+        let outer_map = self.webpack_map_var.clone();
+        for name in names {
+            self.forget_webpack_binding(name);
+        }
         let hidden: Vec<(String, &'static str)> = names
             .iter()
             .filter_map(|name| Some((name.clone(), self.global_aliases.remove(name.as_str())?)))
@@ -258,6 +263,22 @@ impl<'a> DomXssVisitor<'a> {
             self.forget_url_lead(name);
         }
         walk(self);
+        if outer_require.as_ref().is_some_and(|n| names.contains(n))
+            || self
+                .webpack_require
+                .as_ref()
+                .is_some_and(|n| names.contains(n))
+        {
+            self.webpack_require = outer_require;
+        }
+        if outer_map.as_ref().is_some_and(|n| names.contains(n))
+            || self
+                .webpack_map_var
+                .as_ref()
+                .is_some_and(|n| names.contains(n))
+        {
+            self.webpack_map_var = outer_map;
+        }
         // What the block's own binding stood for ends with the block.
         for name in names {
             self.global_aliases.remove(name.as_str());
@@ -323,6 +344,7 @@ impl<'a> DomXssVisitor<'a> {
     /// The methods can be called in any order, so when they use `this` at
     /// all they are walked once beforehand just for the fields they taint.
     pub(super) fn walk_object_literal(&mut self, object: &ObjectExpression<'a>, this: usize) {
+        self.register_webpack_modules(object);
         let is_method = |property: &ObjectPropertyKind<'a>| {
             matches!(property, ObjectPropertyKind::ObjectProperty(p)
                 if matches!(p.value, Expression::FunctionExpression(_)))
@@ -897,6 +919,7 @@ impl<'a> DomXssVisitor<'a> {
         // Journal checkpoints rather than clones: a clone per body made `N`
         // tainted bindings followed by `N` callbacks O(N²). The rollback below
         // restores exactly what a clone would have held.
+        let webpack_writes = self.enter_webpack_write_scope();
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let response_vars_checkpoint = self.response_object_vars.checkpoint();
@@ -923,6 +946,31 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 _ => {}
             }
+        }
+        // Inside a webpack factory its third parameter is `require`; a
+        // nested function that binds the same name hides it.
+        let outer_require = self.webpack_require.clone();
+        let outer_scope = self.webpack_scope;
+        let outer_map_var = self.webpack_map_var.clone();
+        if let Some(require) = self.webpack_factories.get(&params.span) {
+            self.webpack_require = Some(require.clone());
+            self.webpack_scope = Some(oxc_span::Span::new(
+                params.span.start,
+                statements
+                    .last()
+                    .map_or(params.span.end, |stmt| stmt.span().end),
+            ));
+        } else if outer_require
+            .as_ref()
+            .is_some_and(|name| own_names.contains(name))
+        {
+            self.webpack_require = None;
+        }
+        if outer_map_var
+            .as_ref()
+            .is_some_and(|name| own_names.contains(name))
+        {
+            self.webpack_map_var = None;
         }
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
@@ -981,6 +1029,12 @@ impl<'a> DomXssVisitor<'a> {
         // ponytail: a named function never called in this script (an inline
         // `onload="show()"`) gets no default taint.
         for param in &params.items {
+            if self.webpack_binding_writes.is_some() {
+                self.probe_webpack_pattern_defaults(&param.pattern);
+                if let Some(default) = &param.initializer {
+                    self.walk_expression(default);
+                }
+            }
             let default = param.initializer.as_deref().filter(|_| apply_defaults);
             self.taint_tainted_defaults(&param.pattern, default);
         }
@@ -1019,6 +1073,10 @@ impl<'a> DomXssVisitor<'a> {
             })
             .collect();
 
+        self.leave_webpack_write_scope(webpack_writes, &own_names);
+        self.webpack_require = outer_require;
+        self.webpack_scope = outer_scope;
+        self.webpack_map_var = outer_map_var;
         self.url_leads_exit(url_lead_scope, &locals);
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
