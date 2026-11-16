@@ -1336,6 +1336,20 @@ impl AstDomAnalyzer {
             &ret.program.body,
             &mut visitor.return_shadowed_globals,
         );
+        for stmt in &ret.program.body {
+            if let Statement::ImportDeclaration(import) = stmt {
+                for specifier in import.specifiers.iter().flatten() {
+                    let local = match specifier {
+                        ImportDeclarationSpecifier::ImportSpecifier(s) => &s.local,
+                        ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => &s.local,
+                        ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => &s.local,
+                    };
+                    visitor
+                        .return_shadowed_globals
+                        .insert(local.name.to_string());
+                }
+            }
+        }
         visitor.return_shadowed_globals.retain(|name| {
             matches!(
                 name.as_str(),

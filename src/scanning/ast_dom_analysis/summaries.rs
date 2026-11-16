@@ -657,8 +657,7 @@ impl<'a> DomXssVisitor<'a> {
             self.var_aliases
                 .insert(name.clone(), format!("fn_param_{idx}"));
             if pinned == Some(idx) {
-                self.url_leads
-                    .insert(name.clone(), (UrlLead::Passive, true));
+                self.url_leads.insert(name.clone(), (UrlLead::Pinned, true));
             }
         }
         let before = self.vulnerabilities.len();
@@ -672,7 +671,13 @@ impl<'a> DomXssVisitor<'a> {
         let lead = if concise && epoch != self.url_lead_write_epoch {
             UrlLead::Open
         } else {
-            self.return_url_lead.unwrap_or(UrlLead::Open)
+            match self.return_url_lead {
+                Some(UrlLead::PageUrl) => UrlLead::PageUrl,
+                Some(UrlLead::Pinned) => UrlLead::Pinned,
+                // A passive return can be partial scheme text (`java`).
+                // Its caller may append the remaining `script:`.
+                _ => UrlLead::Open,
+            }
         };
         self.in_return_lead_pass = outer_pass;
         self.collecting_return_url_lead.set(outer_collecting);

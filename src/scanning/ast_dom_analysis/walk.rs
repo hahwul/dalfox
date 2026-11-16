@@ -659,6 +659,10 @@ impl<'a> DomXssVisitor<'a> {
             }
             return;
         };
+        self.note_return_callable_capability(match expr {
+            Expression::NewExpression(new_expr) => &new_expr.callee,
+            _ => expr,
+        });
         match expr {
             Expression::AssignmentExpression(assign) => {
                 self.url_lead_write_epoch = self.url_lead_write_epoch.wrapping_add(1);
@@ -680,12 +684,22 @@ impl<'a> DomXssVisitor<'a> {
                     }
                     _ => None,
                 };
+                // Sloppy-mode arguments slots can rebind a parameter.
+                if self.collecting_return_url_lead.get() && root.as_deref() == Some("arguments") {
+                    self.return_url_lead = Some(UrlLead::Open);
+                }
                 // An untracked destructuring write may replace any callable.
                 self.note_return_write(
                     root.map(|root| root.split('.').next().unwrap_or(&root).to_string())
                         .unwrap_or_default(),
                 );
                 self.walk_assignment_expression(assign);
+            }
+            Expression::Identifier(id)
+                if self.collecting_return_url_lead.get() && id.name == "arguments" =>
+            {
+                // Aliases and reflective mutations of arguments are not modeled.
+                self.return_url_lead = Some(UrlLead::Open);
             }
             Expression::CallExpression(call) => {
                 self.walk_call_expression(call);
