@@ -402,6 +402,11 @@ struct FunctionSummary {
     /// `innerHTML` as well. No entry when there is none.
     pinned_param_sinks: BTreeMap<usize, String>,
     tainted_param_returns: BTreeMap<usize, String>,
+    /// Worst return lead with every parameter attacker-controlled.
+    return_url_lead: Option<UrlLead>,
+    return_lead_ambiguous: bool,
+    /// Worst return lead when just this argument cannot start a script scheme.
+    pinned_param_return_leads: BTreeMap<usize, UrlLead>,
     /// Parameters whose default value is tainted: a call that leaves the
     /// argument out passes the default's source.
     tainted_param_defaults: BTreeMap<usize, String>,
@@ -571,6 +576,13 @@ struct DomXssVisitor<'a> {
     collecting_tainted_returns: bool,
     /// Internal buffer for tainted return sources while collecting summaries
     tainted_return_sources: Vec<String>,
+    collecting_return_url_lead: Cell<bool>,
+    in_return_lead_pass: bool,
+    return_written_roots: HashSet<String>,
+    return_shadowed_globals: HashSet<String>,
+    return_callable_roots: HashSet<String>,
+    url_lead_write_epoch: u64,
+    return_url_lead: Option<UrlLead>,
     /// Source code for line/column calculation
     source_code: &'a str,
     /// Built-in method names the script defines itself (see
@@ -1087,6 +1099,13 @@ impl<'a> DomXssVisitor<'a> {
             bound_function_aliases: Default::default(),
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),
+            collecting_return_url_lead: Cell::new(false),
+            in_return_lead_pass: false,
+            return_written_roots: HashSet::new(),
+            return_shadowed_globals: HashSet::new(),
+            return_callable_roots: HashSet::new(),
+            url_lead_write_epoch: 0,
+            return_url_lead: None,
             page_defined_methods: taint::page_defined_methods(source_code),
             source_code,
             line_starts,
@@ -1284,6 +1303,30 @@ impl AstDomAnalyzer {
             trusted_types_enforced: self.trusted_types_enforced,
             ..DomXssVisitor::new(source_code)
         };
+        DomXssVisitor::collect_declared_names(
+            &ret.program.body,
+            &mut visitor.return_shadowed_globals,
+        );
+        for stmt in &ret.program.body {
+            if let Statement::ImportDeclaration(import) = stmt {
+                for specifier in import.specifiers.iter().flatten() {
+                    let local = match specifier {
+                        ImportDeclarationSpecifier::ImportSpecifier(s) => &s.local,
+                        ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => &s.local,
+                        ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => &s.local,
+                    };
+                    visitor
+                        .return_shadowed_globals
+                        .insert(local.name.to_string());
+                }
+            }
+        }
+        visitor.return_shadowed_globals.retain(|name| {
+            matches!(
+                name.as_str(),
+                "window" | "document" | "location" | "self" | "globalThis" | "top" | "parent"
+            )
+        });
         visitor.walk_script_after(&ret.program.body, globals);
         if visitor.work_steps.get() >= visitor.work_budget {
             crate::dbg_log!(

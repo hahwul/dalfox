@@ -1538,6 +1538,20 @@ impl<'a> DomXssVisitor<'a> {
     }
     /// Walk through a call expression
     pub(super) fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
+        self.note_return_callable_capability(&call.callee);
+        if !matches!(
+            call.callee,
+            Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
+        ) && call.arguments.iter().any(|arg| match arg {
+            Argument::SpreadElement(spread) => {
+                self.return_argument_exposes_window(&spread.argument)
+            }
+            _ => arg
+                .as_expression()
+                .is_some_and(|expr| self.return_argument_exposes_window(expr)),
+        }) {
+            self.note_return_write(String::new());
+        }
         // Standalone `trustedTypes.createPolicy('default', {...})` (not bound to
         // a variable) still registers the auto-applied default policy.
         if let Some((name, config)) = self.tt_create_policy_config(call)

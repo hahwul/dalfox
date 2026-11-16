@@ -18,6 +18,14 @@ impl<'a> DomXssVisitor<'a> {
         init: &Expression<'a>,
     ) {
         let var_name = id.name.as_str();
+        if self.return_callable_roots.contains(var_name)
+            && !matches!(
+                init,
+                Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
+            )
+        {
+            self.note_return_write(var_name.to_string());
+        }
         let (old_url_lead, url_lead) = (self.identifier_url_lead(var_name), self.url_lead(init));
         self.bind_global_alias(var_name, init);
         self.clear_url_search_params_field_sources(var_name);

@@ -1127,3 +1127,150 @@ fn a_local_value_is_not_the_function_of_the_same_name() {
         "function main(){var S=(function(){function bypassSecurityTrustHtml(v){return String(v).replace(/</g,'&lt;')}return{bypassSecurityTrustHtml:bypassSecurityTrustHtml}})(); x.textContent=S.bypassSecurityTrustHtml(location.hash.slice(1))} main();",
     ]);
 }
+
+#[test]
+fn a_function_return_keeps_the_urls_fixed_start() {
+    assert_clean(&[
+        "function d(x){return location.origin+'/chat?'+(x||'')} location.href=d();",
+        "function add(u,c){return u+(u.indexOf('?')<0?'?':'&')+'id='+c} var f=document.createElement('iframe'); f.setAttribute('src',add('/embed/x',document.cookie));",
+        "function id(u){return u} location.href=id('/search?q='+location.hash.slice(1));",
+        "const add=(u,c)=>u+'?id='+c; location.href=add('/embed',document.cookie);",
+        "function d(){if(ok)return location.origin+'/?'+document.cookie; return '/?'+location.hash} location.href=d();",
+        "function d(){return location.origin+'/?'+document.cookie} location.href=d().replace('http:','https:');",
+    ]);
+    assert_reported(&[
+        "function id(u){return u} location.href=id(location.hash.slice(1));",
+        "function d(u){return (ok?'java':'')+u} location.href=d('script:'+location.hash.slice(1));",
+        "function d(u){return decodeURIComponent(u)} location.href=d('java%73cript:'+location.hash.slice(1));",
+        "function d(){return decodeURIComponent('java%73cript:'+location.hash.slice(1))} location.href=d();",
+        "function d(){return location.href.split('h')[0]} location.href=d()+location.hash.slice(1);",
+        "function d(String,u){return String(u)} location.href=d(x=>x.slice(1),location.hash);",
+        "function d(URL,u){return new URL(u)} location.href=d(x=>x.slice(1),location.hash);",
+        "function d(u){return '/?'+u} d=other; location.href=d(location.hash.slice(1));",
+        "function other(u){return u} function d(u){return '/?'+u} function wrap(u){return d(u)} d=other; location.href=wrap(location.hash.slice(1));",
+        "var api={d(u){return '/'+u}}; api=other; location.href=api.d(location.hash.slice(1));",
+        "function add(u,c){return u+'?'+c} var cfg={prefix:'javascript:void(\"'}; var prefix=cfg.prefix+'?'; location.href=add(prefix,location.hash.slice(1))+'\")';",
+        "function d(u){return 'java'+u} location.href=d('script:'+location.hash.slice(1));",
+        "const d=u=>`java${u}`; location.href=d('script:'+location.hash.slice(1));",
+        "function d(u){var p='javascript';return p+':'+u} location.href=d(location.hash.slice(1));",
+        "var base='/'; var d=function(x){return base+x}; base='javascript:'; location.href=d(location.hash.slice(1));",
+        "function d(u){var x='/'+u; return (x=location.hash.slice(1),x)} location.href=d(document.cookie);",
+        "function d(){return '/?'+document.cookie} function f(){function d(){return location.hash.slice(1)} location.href=d()} f();",
+        "function cut(u){return u.slice(1)} location.href=cut(location.hash);",
+        "function d(){if(ok)return location.origin+'/?'+document.cookie; return location.hash.slice(1)} location.href=d();",
+        "function either(u,v){if(ok)return u; return v} location.href=either('/fixed',location.hash.slice(1));",
+        "function d(){return 'javascript:'+location.hash.slice(1)} location.href=d();",
+        "function add(u,c){return u+'?id='+c} location.href=add(location.hash.slice(1),document.cookie);",
+        "function d(){return location.origin+'/?'+document.cookie} el.innerHTML=d();",
+    ]);
+}
+
+#[test]
+fn a_function_return_does_not_borrow_another_scopes_url_start() {
+    assert_reported(&[
+        "function add(u,c){return u+'?'+c} var cfg={prefix:'javascript:eval(\"'}; location.href=add(cfg.prefix,location.hash.slice(1))+'\")';",
+        "function add(u,c){return u+'?'+c} location.href=add(getPrefix(),location.hash.slice(1));",
+        "function d(u){var x=u; return x+(x='/fixed')} location.href=d(location.hash.slice(1));",
+        "function d(u){var x='/';return (x=u,x+(x='/fixed'))} location.href=d(location.hash.slice(1));",
+        "var api={d(u){return '/'+u}}; var alias=api; alias.d=function(u){return u}; location.href=api.d(location.hash.slice(1));",
+        "function d(){return location.origin+'?'+document.cookie} var location={origin:'javascript:void(\"'}; el.href=d()+'\")';",
+        "function d(u){return '/'+u} window.d=other; location.href=d(location.hash.slice(1));",
+        "var d=function(u){return '/'+u}; for(var d=other;false;){} location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} var assign=Object.assign; assign(window,{d:u=>u}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} var assign=Object.assign; assign?.(window,{d:u=>u}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} var assign=Object.assign; assign(ok?window:window,{d:u=>u}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} var assign=Object.assign; assign(this,{d:u=>u}); location.href=d(location.hash.slice(1));",
+        "function d(u,x=(u=u.slice(1))){return u} location.href=d(location.hash);",
+        "function d(u){function nested(){return '/fixed'} return u} location.href=d(location.hash.slice(1));",
+        "function d(u){var cfg={prefix:'javascript:eval(\"'};return cfg.prefix+'?'+u+'\")'} location.href=d(location.hash.slice(1));",
+        "function d(u){return getPrefix()+'?'+u} location.href=d(location.hash.slice(1));",
+        "function d(){function d(){return location.hash.slice(1)} return d()} location.href=d();",
+        "var base=location.hash.slice(1); var d=function(u){return base+'?'+u}; location.href=d(document.cookie);",
+        "var l=location; var d=function(u){return l.origin+u}; l={origin:'javascript:'}; location.href=d(location.hash.slice(1));",
+        "function d(location){return location.origin+document.cookie} location.href=d({origin:location.hash.slice(1)});",
+        "function d({u},c){return u+'?'+c} location.href=d({u:location.hash.slice(1)},document.cookie);",
+        "function d(...u){return u[0]+'?'+document.cookie} location.href=d(location.hash.slice(1));",
+        "function d(u){var x='/fixed'+u; return x} var x=location.hash.slice(1); location.href=x;",
+        "function d(u){if(ok)u=location.hash.slice(1); return u} location.href=d('/fixed');",
+        "function d(u){return u} function f(d){location.href=d(location.hash.slice(1))} f(other);",
+    ]);
+}
+
+#[test]
+fn return_url_lead_inference_bounds_parameter_count() {
+    let params = (0..33)
+        .map(|i| format!("p{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    assert_reported(&[&format!(
+        "function d({params}){{return '/'+p0}} location.href=d(location.hash.slice(1));"
+    )]);
+}
+
+#[test]
+fn returned_partial_schemes_are_not_a_fixed_url_start() {
+    assert_reported(&[
+        "function d(u){return ok?'java':'/'+u} location.href=d(location.hash.slice(1))+'script:'+location.hash.slice(1);",
+        "function d(){return ok?'java':'/'+location.hash} location.href=d()+'script:'+location.hash.slice(1);",
+        "function d(u){return ok?'java':u} location.href=d('/'+location.hash)+'script:'+location.hash.slice(1);",
+    ]);
+}
+
+#[test]
+fn mapped_arguments_cannot_certify_a_parameter_url_start() {
+    assert_reported(&[
+        "function d(u){u='/'+u;arguments[0]=location.hash.slice(1);return u} location.href=d(location.hash.slice(1));",
+        "function d(u){arguments[0]=location.hash.slice(1);return u} location.href=d('/fixed'+location.hash.slice(1));",
+        "function d(u){u='/'+u;var a=arguments;a[0]=location.hash.slice(1);return u} location.href=d(location.hash.slice(1));",
+        "function d(u){u='/'+u;argum\\u0065nts[0]=location.hash.slice(1);return u} location.href=d(location.hash.slice(1));",
+        "function d(u){u='/'+u;Object.defineProperty(arguments,'0',{value:location.hash.slice(1)});return u} location.href=d(location.hash.slice(1));",
+    ]);
+}
+
+#[test]
+fn imported_globals_cannot_certify_a_function_return_url_start() {
+    assert_reported(&[
+        "import location from './cfg.js'; function d(u){return location.origin+u} location.href=d(document.cookie);",
+        "import {location} from './cfg.js'; function d(u){return location.origin+u} location.href=d(document.cookie);",
+        "import * as location from './cfg.js'; function d(u){return location.origin+u} location.href=d(document.cookie);",
+    ]);
+}
+
+#[test]
+fn callable_mutation_capabilities_invalidate_return_url_proofs() {
+    assert_reported(&[
+        "function d(u){return '/'+u} eval('d=function(u){return u}'); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} var e=eval; e('d=function(u){return u}'); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} (0,eval)('d=function(u){return u}'); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} window.eval?.('d=function(u){return u}'); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} function getWindow(){return window} Object.assign(getWindow(),{d:function(u){return u}}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} function getWindow(){return window} var assign=Object.assign; assign(getWindow(),{d:function(u){return u}}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} function getWindow(){return window} var O=Object; O.assign(getWindow(),{d:u=>u}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} function getWindow(){return window} var {assign}=Object; assign(getWindow(),{d:u=>u}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} function getWindow(){return window} Reflect.set(getWindow(),'d',function(u){return u}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} function getWindow(){return window} Object.defineProperty(getWindow(),'d',{value:function(u){return u}}); location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} function getWindow(){return window} Reflect.apply(Object.assign,null,[getWindow(),{d:function(u){return u}}]); location.href=d(location.hash.slice(1));",
+    ]);
+    assert_clean(&[
+        "function d(u){return '/'+u} location.href=d(location.hash.slice(1));",
+        "function id(u){return u} location.href=id('/fixed'+location.hash.slice(1));",
+    ]);
+}
+
+#[test]
+fn a_safe_return_does_not_certify_a_composed_scheme() {
+    assert_reported(&[
+        "function d(u){return 'script:'+u} location.href='java'+d(location.hash.slice(1));",
+        "function d(u){return 'script:'+u} var x=d(location.hash.slice(1)); location.href='java'+x;",
+        "function d(u){return 'script:'+u} var x=ok?d(location.hash.slice(1)):'java'; location.href=x+'script:'+location.hash.slice(1);",
+        "function d(u){return 'script:'+u} var x=d(location.hash.slice(1)); if(ok)x='java'; location.href=x+'script:'+location.hash.slice(1);",
+        "function d(u){return 'script:'+u} var x='java'; x+=d(location.hash.slice(1)); location.href=x;",
+    ]);
+    assert_clean(&[
+        "function d(u){return 'script:'+u} location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} location.href=d(location.hash.slice(1));",
+        "function d(u){return '/'+u} location.href=`${d(location.hash.slice(1))}`;",
+        "function d(u){return '/'+u} location.href='/fixed'+d(location.hash.slice(1));",
+        "function d(u){return '/'+u} var x=d(location.hash.slice(1)); location.href=x;",
+    ]);
+}

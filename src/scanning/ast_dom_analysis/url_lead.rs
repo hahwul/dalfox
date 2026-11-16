@@ -13,6 +13,7 @@
 //! vouch for, and a write made inside a function body can only ever worsen
 //! what the enclosing scope believes (see [`DomXssVisitor::url_leads_exit`]).
 
+use super::sinks::strip_global_object;
 use super::*;
 
 /// What the first characters of a URL value can be, best to worst.
@@ -25,6 +26,9 @@ pub(super) enum UrlLead {
     /// Empty, or text that cannot itself be a script scheme (`?a=b`, `#x`, a
     /// value the page authored). Whatever follows may still lead.
     Passive,
+    /// A whole returned value is safe, but its unknown text cannot certify
+    /// concatenations. Keep this provenance when joined with passive text.
+    ReturnedSafe,
     /// The attacker may write the first characters.
     Open,
 }
@@ -124,12 +128,32 @@ impl<'a> DomXssVisitor<'a> {
         };
         let mut parts = Vec::new();
         self.concat_parts(expr, &mut parts);
+        let composite = parts
+            .iter()
+            .filter(|part| !matches!(part, UrlPart::Text(text) if text.is_empty()))
+            .count()
+            > 1;
         let mut literal = String::new();
         let mut first = true;
+        let mut unknown_prefix = false;
         for part in parts {
             match part {
                 UrlPart::Text(text) => {
                     literal.push_str(&text);
+                    // A passive operand may be partial scheme text (`java`).
+                    // A later colon can finish it; a relative delimiter cannot.
+                    if self.collecting_return_url_lead.get()
+                        && unknown_prefix
+                        && literal
+                            .chars()
+                            .take_while(|c| {
+                                c.is_ascii_alphanumeric()
+                                    || matches!(c, '+' | '-' | '.' | ':' | '\t' | '\n' | '\r')
+                            })
+                            .any(|c| c == ':')
+                    {
+                        return UrlLead::Open;
+                    }
                     match classify_url_prefix(&literal) {
                         PrefixKind::Pins => return UrlLead::Pinned,
                         PrefixKind::Script => return UrlLead::Open,
@@ -138,7 +162,21 @@ impl<'a> DomXssVisitor<'a> {
                     first &= literal.is_empty();
                 }
                 UrlPart::Expr(part) => match self.url_part_lead(part) {
-                    UrlLead::Passive => first = false,
+                    UrlLead::ReturnedSafe if composite => return UrlLead::Open,
+                    UrlLead::Passive => {
+                        if self.collecting_return_url_lead.get()
+                            && (!literal.is_empty() || unknown_prefix)
+                        {
+                            return UrlLead::Open;
+                        }
+                        first = false;
+                        unknown_prefix = true;
+                    }
+                    // A pinned operand may start with `script:`; preceding
+                    // partial text can complete a different scheme.
+                    UrlLead::Pinned if self.collecting_return_url_lead.get() && !first => {
+                        return UrlLead::Open;
+                    }
                     // After other text it no longer *starts* the value.
                     UrlLead::PageUrl if !first => return UrlLead::Pinned,
                     lead => return lead,
@@ -172,7 +210,8 @@ impl<'a> DomXssVisitor<'a> {
                 self.concat_parts(&b.right, out);
             }
             Expression::CallExpression(call)
-                if self.get_callee_property_name(&call.callee).as_deref() == Some("concat") =>
+                if !self.collecting_return_url_lead.get()
+                    && self.get_callee_property_name(&call.callee).as_deref() == Some("concat") =>
             {
                 match self.get_callee_object_expr(&call.callee) {
                     Some(receiver) => self.concat_parts(receiver, out),
@@ -197,6 +236,18 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Lead of one operand that is not itself a concatenation.
     fn url_part_lead(&self, expr: &Expression<'a>) -> UrlLead {
+        if self.collecting_return_url_lead.get()
+            && self.get_expr_string(expr).is_some_and(|path| {
+                let root = path.split('.').next().unwrap_or(&path);
+                matches!(
+                    root,
+                    "window" | "document" | "location" | "self" | "globalThis" | "top" | "parent"
+                ) && (self.local_names.contains(root)
+                    || self.return_shadowed_globals.contains(root))
+            })
+        {
+            return UrlLead::Open;
+        }
         // The page's own URL — `top.location = self.location` frame-busting,
         // or a `new URL(location)` copy with its query rewritten.
         if self.expr_is_location_object(expr) || self.expr_is_page_url_object(expr) {
@@ -217,6 +268,9 @@ impl<'a> DomXssVisitor<'a> {
             // `.search` / `.hash` on it later does not change that.
             Expression::NewExpression(new_expr) if matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "URL") =>
             {
+                if self.collecting_return_url_lead.get() {
+                    return UrlLead::Open;
+                }
                 let arg = |i: usize| new_expr.arguments.get(i).and_then(|a| a.as_expression());
                 return match (
                     arg(0).map(|a| self.url_lead(a)),
@@ -231,13 +285,16 @@ impl<'a> DomXssVisitor<'a> {
         }
         // Page-authored text of unknown content: assumed not to spell a
         // script scheme, and possibly empty.
-        if !self.is_tainted(expr) {
+        if !self.collecting_return_url_lead.get() && !self.is_tainted(expr) {
             return UrlLead::Passive;
         }
         match expr {
             Expression::StaticMemberExpression(member) => self.url_member_lead(member),
             // `lead.split(sep)[0]` keeps the leading text.
             Expression::ComputedMemberExpression(member) => {
+                if self.collecting_return_url_lead.get() {
+                    return UrlLead::Open;
+                }
                 if matches!(&member.expression, Expression::NumericLiteral(n) if n.value == 0.0)
                     && let Expression::CallExpression(call) = &member.object
                     && self.get_callee_property_name(&call.callee).as_deref() == Some("split")
@@ -261,12 +318,17 @@ impl<'a> DomXssVisitor<'a> {
     /// What the variable `name` starts with: what its last binding recorded,
     /// while that record still describes it.
     pub(super) fn identifier_url_lead(&self, name: &str) -> UrlLead {
+        // Ordinary bindings may carry a lead inferred from unknown clean
+        // prefixes. Only records built inside this proof can certify a call.
+        if self.collecting_return_url_lead.get() && !self.in_return_lead_pass {
+            return UrlLead::Open;
+        }
         let tainted = self.tainted_vars.contains(name) || self.global_taints.contains(name);
         match self.url_leads.get(name) {
             // A record made while the name was clean says nothing once
             // something else tainted it, and the other way round.
             Some((lead, was_tainted)) if *was_tainted == tainted => *lead,
-            _ if tainted => UrlLead::Open,
+            _ if tainted || self.collecting_return_url_lead.get() => UrlLead::Open,
             _ => UrlLead::Passive,
         }
     }
@@ -311,8 +373,57 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     fn url_call_lead(&self, call: &CallExpression<'a>) -> UrlLead {
-        // Decoding cannot change how the text starts: `%` is not a scheme
-        // character, so a scheme was never encoded to begin with.
+        // Calls can decode, replace, or supply a different implementation.
+        // Prove only the surrounding expression, not another callee's body.
+        if self.collecting_return_url_lead.get() {
+            return UrlLead::Open;
+        }
+        if self.get_alias_for_callee_identifier(call).is_none()
+            && !call
+                .arguments
+                .iter()
+                .any(|arg| matches!(arg, Argument::SpreadElement(_)))
+            && !self.return_written_roots.contains("")
+            && self.get_expr_string(&call.callee).is_none_or(|key| {
+                !self
+                    .return_written_roots
+                    .contains(key.split('.').next().unwrap_or(&key))
+            })
+            && let Some(summary) = self
+                .get_summary_key_for_callee_expr(&call.callee)
+                .filter(|key| {
+                    !key.contains('.')
+                        && !self
+                            .return_written_roots
+                            .contains(key.split('.').next().unwrap_or(key))
+                })
+                .and_then(|key| self.summary(&key))
+        {
+            let mut lead = summary.return_url_lead.unwrap_or(UrlLead::Open);
+            for (idx, pinned_lead) in &summary.pinned_param_return_leads {
+                if call
+                    .arguments
+                    .get(*idx)
+                    .and_then(Argument::as_expression)
+                    .is_some_and(|arg| {
+                        let outer = self.collecting_return_url_lead.replace(true);
+                        let pinned =
+                            matches!(self.url_lead(arg), UrlLead::PageUrl | UrlLead::Pinned);
+                        self.collecting_return_url_lead.set(outer);
+                        pinned
+                    })
+                {
+                    lead = lead.min(*pinned_lead);
+                }
+            }
+            return if lead == UrlLead::Pinned {
+                UrlLead::ReturnedSafe
+            } else {
+                lead
+            };
+        }
+        // Legacy direct-expression rules; return proofs above do not rely
+        // on decoding preserving a URL's start.
         if let Expression::Identifier(id) = &call.callee
             && matches!(
                 id.name.as_str(),
@@ -380,6 +491,113 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    pub(super) fn return_argument_exposes_window(&self, expr: &Expression<'a>) -> bool {
+        let Some(_guard) = self.enter_recursion() else {
+            return true;
+        };
+        if self.global_alias_of(expr) == Some("window") {
+            return true;
+        }
+        match expr {
+            Expression::ThisExpression(_) => true,
+            Expression::ConditionalExpression(c) => {
+                self.return_argument_exposes_window(&c.consequent)
+                    || self.return_argument_exposes_window(&c.alternate)
+            }
+            Expression::LogicalExpression(l) => {
+                self.return_argument_exposes_window(&l.left)
+                    || self.return_argument_exposes_window(&l.right)
+            }
+            Expression::SequenceExpression(s) => s
+                .expressions
+                .last()
+                .is_some_and(|expr| self.return_argument_exposes_window(expr)),
+            Expression::AssignmentExpression(a) => self.return_argument_exposes_window(&a.right),
+            Expression::AwaitExpression(a) => self.return_argument_exposes_window(&a.argument),
+            Expression::ParenthesizedExpression(p) => {
+                self.return_argument_exposes_window(&p.expression)
+            }
+            Expression::ArrayExpression(array) => {
+                array.elements.iter().any(|element| match element {
+                    ArrayExpressionElement::SpreadElement(spread) => {
+                        self.return_argument_exposes_window(&spread.argument)
+                    }
+                    _ => element
+                        .as_expression()
+                        .is_some_and(|expr| self.return_argument_exposes_window(expr)),
+                })
+            }
+            Expression::ObjectExpression(object) => {
+                object.properties.iter().any(|property| match property {
+                    ObjectPropertyKind::ObjectProperty(property) => {
+                        self.return_argument_exposes_window(&property.value)
+                    }
+                    ObjectPropertyKind::SpreadProperty(spread) => {
+                        self.return_argument_exposes_window(&spread.argument)
+                    }
+                })
+            }
+            _ => false,
+        }
+    }
+
+    /// These callable references may replace global functions through an
+    /// opaque receiver or an alias; return summaries no longer certify calls.
+    pub(super) fn note_return_callable_capability(&mut self, expr: &Expression<'a>) {
+        if self.return_written_roots.contains("") {
+            return;
+        }
+        let Some(expr) = super::resolve::unwrap_comma_callee(expr) else {
+            return;
+        };
+        let Some(name) = self.get_expr_string(expr) else {
+            return;
+        };
+        let mut name = strip_global_object(&name);
+        while let Some(target) = name
+            .strip_suffix(".call")
+            .or_else(|| name.strip_suffix(".apply"))
+            .or_else(|| name.strip_suffix(".bind"))
+        {
+            name = target;
+        }
+        if matches!(
+            name,
+            "eval"
+                | "execScript"
+                | "Function"
+                | "Object"
+                | "Reflect"
+                | "Object.assign"
+                | "Object.defineProperty"
+                | "Object.defineProperties"
+                | "Object.setPrototypeOf"
+                | "Reflect.set"
+                | "Reflect.defineProperty"
+                | "Reflect.deleteProperty"
+                | "Reflect.setPrototypeOf"
+                | "Reflect.apply"
+                | "Reflect.construct"
+        ) {
+            self.note_return_write(String::new());
+        }
+    }
+
+    pub(super) fn note_return_write(&mut self, root: String) {
+        if self.return_written_roots.len() >= 1024 {
+            self.return_written_roots.insert(String::new());
+        } else if !self.return_written_roots.contains("") {
+            self.return_written_roots.insert(root);
+        }
+    }
+
+    pub(super) fn collect_return_url_lead(&mut self, expr: Option<&Expression<'a>>) {
+        if self.collecting_return_url_lead.get() {
+            let lead = expr.map_or(UrlLead::Passive, |expr| self.url_lead(expr));
+            self.return_url_lead = Some(self.return_url_lead.map_or(lead, |old| old.max(lead)));
+        }
+    }
+
     /// `(pattern, flags)` of the regex literal at `span`, read off the source.
     pub(super) fn regex_literal_parts(&self, span: oxc_span::Span) -> Option<(&str, &str)> {
         let raw = self
@@ -423,6 +641,7 @@ impl<'a> DomXssVisitor<'a> {
     /// Lead of `old + appended` (`name += value`).
     pub(super) fn appended_url_lead(old: UrlLead, appended: UrlLead) -> UrlLead {
         match (old, appended) {
+            (UrlLead::ReturnedSafe, _) | (UrlLead::Passive, UrlLead::ReturnedSafe) => UrlLead::Open,
             // No longer the very start of the value.
             (UrlLead::Passive, UrlLead::PageUrl) => UrlLead::Pinned,
             (UrlLead::Passive, appended) => appended,
