@@ -21,15 +21,11 @@ use std::sync::atomic::AtomicBool;
 
 use tokio::sync::Mutex;
 
-use super::{AbortOnDrop, JobProgress, JobStatus, cap_reflection_params, run_within_scan_budget};
+use super::{AbortOnDrop, JobProgress, JobStatus, run_within_scan_budget};
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::analyze_parameters;
+use crate::parameter_analysis::{MAX_DISCOVERED_PARAMS, analyze_parameters, cap_reflection_params};
 use crate::scanning::result::{Result as ScanResult, SanitizedResult};
 use crate::target_parser::{Target, parse_target};
-
-/// Ceiling on parameters carried into the scan phase, named in the warning
-/// below. Defined one level up in `job`; the REST server only re-exports it.
-use super::MAX_DISCOVERED_PARAMS;
 
 /// Build the `Target` a job scans from its `ScanArgs`.
 ///
@@ -164,8 +160,8 @@ impl ScanRun {
 
     /// Record this run's results and final status on `job`, returning the
     /// status stored. A cancel that already landed stays; otherwise the run's
-    /// cancel flag (also tripped by `scan_timeout`) → `Cancelled`, a worker
-    /// panic or lost session → `Error`, else `Done`.
+    /// cancel flag (also tripped by `scan_timeout`) → `Cancelled`, a
+    /// reachability failure, worker panic or lost session → `Error`, else `Done`.
     ///
     /// Why an incomplete run is incomplete goes into `error_message`, prefixed
     /// with the shared error code where one exists so a poller can match on it
@@ -184,7 +180,7 @@ impl ScanRun {
         if job.status != JobStatus::Cancelled {
             job.status = if self.was_cancelled {
                 JobStatus::Cancelled
-            } else if self.panicked || self.lost_session() {
+            } else if self.reachability_failed || self.panicked || self.lost_session() {
                 JobStatus::Error
             } else {
                 JobStatus::Done
@@ -209,7 +205,9 @@ impl ScanRun {
         }
         // Session loss, a worker panic and a timeout are mutually exclusive in
         // practice (a timeout trips the cancel flag, so `panicked` is false).
-        let note = if self.lost_session() {
+        let note = if self.reachability_failed {
+            Some(super::unreachable_error_message())
+        } else if self.lost_session() {
             Some(format!(
                 "{}: {}",
                 crate::cmd::error_codes::SESSION_LOST,
@@ -350,6 +348,20 @@ fn oob_drain_wait_counts_against_scan_timeout() {
         oob_drain_wait(30, 10, Duration::from_secs(12)),
         Duration::ZERO
     );
+}
+
+/// Report a bounded parameter list through the interface's warning channel.
+/// Kept separate so the stable application code and dropped-count format are
+/// covered without running hundreds of scan workers in a unit test.
+pub(crate) fn warn_if_param_cap_reached(dropped: usize, warn: &(dyn Fn(&str) + Send + Sync)) {
+    if dropped > 0 {
+        warn(&format!(
+            "{}: discovered params capped to {} (dropped {})",
+            crate::cmd::error_codes::TRUNCATED_PARAM_CAP,
+            MAX_DISCOVERED_PARAMS,
+            dropped
+        ));
+    }
 }
 
 /// Run one job's scan to completion and report what it left behind.
@@ -860,12 +872,7 @@ pub(crate) async fn execute_scan(
                     // expose thousands of params, and scanning spawns O(params ×
                     // payloads) workers. Truncate with a warning past the cap.
                     let dropped = cap_reflection_params(target);
-                    if dropped > 0 {
-                        warn(&format!(
-                            "discovered params capped to {} (dropped {})",
-                            MAX_DISCOVERED_PARAMS, dropped
-                        ));
-                    }
+                    warn_if_param_cap_reached(dropped, &warn);
 
                     // Count only the params the HTTP scan phase will actually
                     // test (Fragment params are client-side only and spawn no

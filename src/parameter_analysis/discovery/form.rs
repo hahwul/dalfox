@@ -132,8 +132,8 @@ pub(crate) async fn check_form_discovery_with(
             // requests rebuilds the entire multipart body. A page serving a
             // form with 50 000 inputs therefore costs 50 000 requests carrying
             // ~2.5e9 field copies between them. `MAX_DISCOVERED_PARAMS` bounds
-            // the params a scan carries, but only *after* discovery has already
-            // paid for them, and only on the server/MCP paths.
+            // the params a scan carries on every interface, but only *after*
+            // discovery has already paid for them.
             //
             // Note what is capped: the number of fields *probed*, not the field
             // list itself. Truncating `fields` looked equivalent but was not —

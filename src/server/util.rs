@@ -58,12 +58,14 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
             // break the routine `?callback_url=` templated-query shape without
             // closing any silent-drop hole.
             opts.callback_url = None;
-        } else if !has_http_scheme(cb) {
-            return Err(format!(
-                "callback_url must start with http:// or https:// (got '{}')",
-                crate::utils::log::sanitize_log_message(cb)
-            ));
         } else {
+            if !has_http_scheme(cb) {
+                return Err(
+                    "callback_url must start with http:// or https:// and be an absolute URL"
+                        .to_string(),
+                );
+            }
+            crate::cmd::scan::validate_http_url(cb, "callback_url")?;
             opts.callback_url = Some(cb.to_string());
         }
     }

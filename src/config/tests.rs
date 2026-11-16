@@ -413,6 +413,28 @@ fn test_load_path_creates_missing_and_falls_back_across_formats() {
     let _ = std::fs::remove_dir_all(base);
 }
 
+#[cfg(unix)]
+#[test]
+fn newly_created_config_is_not_group_or_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time moved backwards")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("dalfox-private-config-{nonce}"));
+    let path = dir.join("config.toml");
+    let loaded = load_path(&path).expect("create config");
+    assert!(loaded.created);
+
+    let mode = std::fs::metadata(&path)
+        .expect("config exists")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o077, 0, "config mode must exclude group/other");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // --- normalize_and_validate -------------------------------------------------
 
 #[test]

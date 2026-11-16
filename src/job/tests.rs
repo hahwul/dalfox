@@ -1490,6 +1490,67 @@ fn async_jobs_cap_findings_and_say_so() {
     );
 }
 
+#[test]
+fn parameter_cap_warning_uses_the_shared_error_code() {
+    let messages = std::sync::Mutex::new(Vec::<String>::new());
+    let warn = |message: &str| {
+        messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(message.to_string());
+    };
+
+    super::runner::warn_if_param_cap_reached(0, &warn);
+    assert!(messages.lock().unwrap().is_empty());
+
+    super::runner::warn_if_param_cap_reached(7, &warn);
+    assert_eq!(
+        messages.lock().unwrap().as_slice(),
+        [format!(
+            "{}: discovered params capped to {} (dropped 7)",
+            crate::cmd::error_codes::TRUNCATED_PARAM_CAP,
+            crate::parameter_analysis::MAX_DISCOVERED_PARAMS
+        )]
+    );
+}
+
+#[test]
+fn settle_reachability_failure_respects_a_concurrent_cancel() {
+    let run = runner::ScanRun {
+        results: Default::default(),
+        reachability_failed: true,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+        findings_capped: false,
+        warnings: Vec::new(),
+        min_confidence: None,
+    };
+
+    let mut unreachable = Job::new_queued("http://t/".into());
+    unreachable.status = JobStatus::Running;
+    assert_eq!(
+        run.settle(&mut unreachable, Arc::new(Vec::new()), 0, false),
+        JobStatus::Error
+    );
+    let message = unreachable_error_message();
+    assert_eq!(unreachable.error_message.as_deref(), Some(message.as_str()));
+
+    // Cancellation can land after execute_scan returns but before the runner
+    // settles the outcome. The terminal state already stored on the job wins.
+    let mut cancelled = Job::new_queued("http://t/".into());
+    cancelled.status = JobStatus::Running;
+    assert!(cancelled.cancel());
+    assert_eq!(
+        run.settle(&mut cancelled, Arc::new(Vec::new()), 0, false),
+        JobStatus::Cancelled
+    );
+    assert!(cancelled.results.is_some());
+    assert!(cancelled.finished_at_ms.is_some());
+}
+
 /// `preflight_dalfox` deliberately accepts a *subset* of the scan options: it
 /// sends no payloads, so most of them describe nothing it does. REST has no
 /// such tool — `POST /preflight` deserializes the same `ScanRequest` as

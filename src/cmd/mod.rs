@@ -34,6 +34,10 @@ pub mod error_codes {
     // Scan filtering
     pub(crate) const CONTENT_TYPE_MISMATCH: &str = "CONTENT_TYPE_MISMATCH";
     pub(crate) const TRUNCATED_PER_HOST_CAP: &str = "TRUNCATED_PER_HOST_CAP";
+    /// The per-target parameter cap left some discovered parameters untested.
+    /// Carried on CLI `target_summary` entries with `status: "incomplete"` (or
+    /// `"findings"` when a finding was found before the report was built).
+    pub(crate) const TRUNCATED_PARAM_CAP: &str = "TRUNCATED_PARAM_CAP";
     /// `--inject-marker` was set, but the marker is in no supported position
     /// of this target (a query, form or multipart body, top-level JSON string,
     /// header or cookie value), so there was nothing to inject into. Carried on `target_summary` entries with
@@ -90,6 +94,7 @@ mod tests {
             error_codes::TRUNCATED_PER_HOST_CAP,
             "TRUNCATED_PER_HOST_CAP"
         );
+        assert_eq!(error_codes::TRUNCATED_PARAM_CAP, "TRUNCATED_PARAM_CAP");
         assert_eq!(
             error_codes::INJECT_MARKER_NOT_FOUND,
             "INJECT_MARKER_NOT_FOUND"

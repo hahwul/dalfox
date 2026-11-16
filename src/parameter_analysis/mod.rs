@@ -39,6 +39,23 @@ use serde_json::{self, Value};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
+/// Cap on the number of distinct parameters a scan will test. Discovery and
+/// mining can produce a very large set, and scanning fans out O(params ×
+/// payloads) worker tasks, so every interface bounds the set before scanning.
+pub(crate) const MAX_DISCOVERED_PARAMS: usize = 512;
+
+/// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],
+/// returning how many were dropped (0 if already under the cap).
+pub(crate) fn cap_reflection_params(target: &mut Target) -> usize {
+    let n = target.reflection_params.len();
+    if n > MAX_DISCOVERED_PARAMS {
+        target.reflection_params.truncate(MAX_DISCOVERED_PARAMS);
+        n - MAX_DISCOVERED_PARAMS
+    } else {
+        0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Location {
     Query,

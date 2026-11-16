@@ -4,6 +4,17 @@ use crate::target_parser::parse_target;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
+#[test]
+fn cap_reflection_params_bounds_scan_inputs() {
+    let mut target = parse_target("http://example.test/").unwrap();
+    target.reflection_params = (0..=MAX_DISCOVERED_PARAMS)
+        .map(|i| Param::new(format!("p{i}"), "", Location::Query))
+        .collect();
+
+    assert_eq!(cap_reflection_params(&mut target), 1);
+    assert_eq!(target.reflection_params.len(), MAX_DISCOVERED_PARAMS);
+}
+
 // Mock mining function for testing
 fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
     // Simulate adding a reflection param

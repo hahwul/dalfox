@@ -41,7 +41,7 @@ use crate::{
         JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_CONCURRENT_PREFLIGHT,
         MAX_RETAINED_SCANS_MCP, has_http_scheme, purge_expired_jobs as purge_jobs_map,
         spec::{BlindOobRequest, ScanRequestSpec},
-        split_cookie_pairs, unreachable_error_message,
+        split_cookie_pairs,
     },
     scanning::result::SanitizedResult,
     target_parser::parse_target,
@@ -193,13 +193,6 @@ impl DalfoxMcp {
             &|msg: &str| Self::log("WRN", &format!("scan_id={} {}", scan_id, msg)),
         )
         .await;
-
-        if run.reachability_failed {
-            let msg = unreachable_error_message();
-            Self::log("ERR", &msg);
-            mark_job_error_sync(&self.jobs, &scan_id, msg);
-            return;
-        }
 
         let sanitized = run
             .sanitized_results(&progress, include_request, include_response)
