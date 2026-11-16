@@ -13,6 +13,7 @@
 //! vouch for, and a write made inside a function body can only ever worsen
 //! what the enclosing scope believes (see [`DomXssVisitor::url_leads_exit`]).
 
+use super::sinks::strip_global_object;
 use super::*;
 
 /// What the first characters of a URL value can be, best to worst.
@@ -25,6 +26,9 @@ pub(super) enum UrlLead {
     /// Empty, or text that cannot itself be a script scheme (`?a=b`, `#x`, a
     /// value the page authored). Whatever follows may still lead.
     Passive,
+    /// A whole returned value is safe, but its unknown text cannot certify
+    /// concatenations. Keep this provenance when joined with passive text.
+    ReturnedSafe,
     /// The attacker may write the first characters.
     Open,
 }
@@ -124,6 +128,11 @@ impl<'a> DomXssVisitor<'a> {
         };
         let mut parts = Vec::new();
         self.concat_parts(expr, &mut parts);
+        let composite = parts
+            .iter()
+            .filter(|part| !matches!(part, UrlPart::Text(text) if text.is_empty()))
+            .count()
+            > 1;
         let mut literal = String::new();
         let mut first = true;
         let mut unknown_prefix = false;
@@ -153,6 +162,7 @@ impl<'a> DomXssVisitor<'a> {
                     first &= literal.is_empty();
                 }
                 UrlPart::Expr(part) => match self.url_part_lead(part) {
+                    UrlLead::ReturnedSafe if composite => return UrlLead::Open,
                     UrlLead::Passive => {
                         if self.collecting_return_url_lead.get()
                             && (!literal.is_empty() || unknown_prefix)
@@ -161,6 +171,11 @@ impl<'a> DomXssVisitor<'a> {
                         }
                         first = false;
                         unknown_prefix = true;
+                    }
+                    // A pinned operand may start with `script:`; preceding
+                    // partial text can complete a different scheme.
+                    UrlLead::Pinned if self.collecting_return_url_lead.get() && !first => {
+                        return UrlLead::Open;
                     }
                     // After other text it no longer *starts* the value.
                     UrlLead::PageUrl if !first => return UrlLead::Pinned,
@@ -392,7 +407,8 @@ impl<'a> DomXssVisitor<'a> {
                     .and_then(Argument::as_expression)
                     .is_some_and(|arg| {
                         let outer = self.collecting_return_url_lead.replace(true);
-                        let pinned = self.url_scheme_is_pinned(arg);
+                        let pinned =
+                            matches!(self.url_lead(arg), UrlLead::PageUrl | UrlLead::Pinned);
                         self.collecting_return_url_lead.set(outer);
                         pinned
                     })
@@ -400,7 +416,11 @@ impl<'a> DomXssVisitor<'a> {
                     lead = lead.min(*pinned_lead);
                 }
             }
-            return lead;
+            return if lead == UrlLead::Pinned {
+                UrlLead::ReturnedSafe
+            } else {
+                lead
+            };
         }
         // Legacy direct-expression rules; return proofs above do not rely
         // on decoding preserving a URL's start.
@@ -521,6 +541,48 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    /// These callable references may replace global functions through an
+    /// opaque receiver or an alias; return summaries no longer certify calls.
+    pub(super) fn note_return_callable_capability(&mut self, expr: &Expression<'a>) {
+        if self.return_written_roots.contains("") {
+            return;
+        }
+        let Some(expr) = super::resolve::unwrap_comma_callee(expr) else {
+            return;
+        };
+        let Some(name) = self.get_expr_string(expr) else {
+            return;
+        };
+        let mut name = strip_global_object(&name);
+        while let Some(target) = name
+            .strip_suffix(".call")
+            .or_else(|| name.strip_suffix(".apply"))
+            .or_else(|| name.strip_suffix(".bind"))
+        {
+            name = target;
+        }
+        if matches!(
+            name,
+            "eval"
+                | "execScript"
+                | "Function"
+                | "Object"
+                | "Reflect"
+                | "Object.assign"
+                | "Object.defineProperty"
+                | "Object.defineProperties"
+                | "Object.setPrototypeOf"
+                | "Reflect.set"
+                | "Reflect.defineProperty"
+                | "Reflect.deleteProperty"
+                | "Reflect.setPrototypeOf"
+                | "Reflect.apply"
+                | "Reflect.construct"
+        ) {
+            self.note_return_write(String::new());
+        }
+    }
+
     pub(super) fn note_return_write(&mut self, root: String) {
         if self.return_written_roots.len() >= 1024 {
             self.return_written_roots.insert(String::new());
@@ -579,6 +641,7 @@ impl<'a> DomXssVisitor<'a> {
     /// Lead of `old + appended` (`name += value`).
     pub(super) fn appended_url_lead(old: UrlLead, appended: UrlLead) -> UrlLead {
         match (old, appended) {
+            (UrlLead::ReturnedSafe, _) | (UrlLead::Passive, UrlLead::ReturnedSafe) => UrlLead::Open,
             // No longer the very start of the value.
             (UrlLead::Passive, UrlLead::PageUrl) => UrlLead::Pinned,
             (UrlLead::Passive, appended) => appended,

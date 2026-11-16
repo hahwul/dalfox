@@ -50,7 +50,9 @@ Function bodies are analyzed wherever the literal is written — including
 options-object callbacks (`$.ajax({success: fn})`) — and a function's
 parameters shadow same-named bindings from the enclosing scope, so a helper
 that only ever touches its own argument is not reported against an outer
-variable.
+variable. Stable bare-function returns retain a fixed relative or page-origin
+URL start for navigation sinks. Ambiguous or mutable calls, shadowed browser
+globals, and unsupported return shapes keep conservative findings.
 HTML extraction skips non-JavaScript script types (including JSON, templates,
 import maps, and speculation rules) and ignores inline text when `src` is
 present. Same-origin external script discovery uses the same type filter.
