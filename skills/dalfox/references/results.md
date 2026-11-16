@@ -53,6 +53,10 @@ that only ever touches its own argument is not reported against an outer
 variable. Stable bare-function returns retain a fixed relative or page-origin
 URL start for navigation sinks. Ambiguous or mutable calls, shadowed browser
 globals, and unsupported return shapes keep conservative findings.
+Within a webpack bundle, literal module IDs and supported getter exports
+connect imported calls to the exporting factory. Ambiguous or mutated bindings,
+unknown factory initialization, and separately loaded chunks remain outside
+this cross-module resolution.
 HTML extraction skips non-JavaScript script types (including JSON, templates,
 import maps, and speculation rules) and ignores inline text when `src` is
 present. Same-origin external script discovery uses the same type filter.
