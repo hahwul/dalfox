@@ -546,6 +546,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
         let multi_pb_active = multi_pb_clone_inner.is_some();
         let panic_target_key = target.state_key();
         let spawned = target_handles.spawn(async move {
+                let mut target = target;
                 if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
                     // Re-validate the session before spending this target's
                     // request budget. Throttled: on a short run the preflight
@@ -603,6 +604,20 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     } else {
                         cancel_flag_inner.clone()
                     };
+                    // Keep discovery and `--dry-run` complete, but bound the
+                    // payload vectors that `run_scanning` materializes for every
+                    // parameter. A large page can expose tens of thousands of
+                    // distinct form/query fields before the worker limit helps.
+                    let dropped_params =
+                        crate::parameter_analysis::cap_reflection_params(&mut target);
+                    if dropped_params > 0 && !args_clone.silence {
+                        crate::ceprintln!(
+                            "{}: discovered params capped to {} (dropped {})",
+                            crate::utils::log::log_prefix("33", "WARN"),
+                            crate::parameter_analysis::MAX_DISCOVERED_PARAMS,
+                            dropped_params
+                        );
+                    }
                     let scan_fut = crate::scanning::run_scanning(
                         &target,
                         args_clone.clone(),
@@ -691,12 +706,13 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     }
 
                     // Terminal state for `--state-file`. Only a target that
-                    // ran to the end under a live session is `completed`
-                    // and therefore skippable next run; a Ctrl-C, a
-                    // `--scan-timeout` expiry, a session that died
-                    // mid-scan, or a `--limit` cap that cut the dispatch
-                    // loop short all leave coverage unknown, so they are
-                    // recorded `cancelled` and retried. `--limit` matters
+                    // ran to the end under a live session with all discovered
+                    // params tested is `completed` and therefore skippable
+                    // next run; Ctrl-C, a `--scan-timeout` expiry, a session
+                    // that died mid-scan, a per-target parameter cap, or a
+                    // `--limit` cap that cut the dispatch loop short all leave
+                    // coverage unknown, so they are recorded `cancelled` and
+                    // retried. `--limit` matters
                     // as much as the others even though the run "succeeded":
                     // `limit` is part of the config hash, so re-running the
                     // identical command would skip this target forever with
@@ -711,10 +727,26 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                         let entry = interrupted.entry(target.state_key()).or_insert(code);
                         *entry = entry.or(code);
                     }
+                    // A parameter cap intentionally leaves part of this
+                    // target untested. Preserve a more specific timeout code
+                    // if the scan was also cut short, otherwise make that
+                    // partial coverage visible in structured output.
+                    if dropped_params > 0
+                        && !cut_short
+                        && !worker_panicked
+                        && !session_died
+                    {
+                        let mut interrupted = interrupted_targets_target.lock().await;
+                        let code = Some(crate::cmd::error_codes::TRUNCATED_PARAM_CAP);
+                        let entry = interrupted.entry(target.state_key()).or_insert(code);
+                        if entry.is_none() {
+                            *entry = code;
+                        }
+                    }
                     if let Some(sf) = &state_file_target {
                         let outcome = if worker_panicked {
                             super::state_file::TargetOutcome::Error
-                        } else if cut_short || session_died {
+                        } else if cut_short || session_died || dropped_params > 0 {
                             super::state_file::TargetOutcome::Cancelled
                         } else {
                             super::state_file::TargetOutcome::Completed

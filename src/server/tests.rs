@@ -6155,7 +6155,14 @@ fn test_validate_scan_options_rejects_unusable_proxy() {
 /// already been thrown away at submission time.
 #[test]
 fn test_validate_scan_options_rejects_non_http_callback_url() {
-    for bad in ["file:///etc/passwd", "ftp://x/cb", "example.com/cb"] {
+    for bad in [
+        "file:///etc/passwd",
+        "ftp://x/cb",
+        "example.com/cb",
+        "http:hooks.example/cb",
+        "http://",
+        "https://",
+    ] {
         let mut opts = ScanOptions {
             callback_url: Some(bad.to_string()),
             ..ScanOptions::default()
@@ -6183,6 +6190,65 @@ fn test_validate_scan_options_rejects_non_http_callback_url() {
         assert!(validate_scan_options(&mut opts).is_ok());
         assert_eq!(opts.callback_url, None);
     }
+}
+
+#[test]
+fn test_callback_log_origin_redacts_userinfo_path_and_query() {
+    assert_eq!(
+        super::job_runner::callback_log_origin(
+            "https://user:secret@hooks.example:8443/path?token=secret#fragment"
+        ),
+        "https://hooks.example:8443"
+    );
+    assert_eq!(
+        super::job_runner::callback_log_origin("http://[invalid"),
+        "<invalid callback URL>"
+    );
+}
+
+#[tokio::test]
+async fn test_terminal_webhook_failure_log_redacts_path_and_query() {
+    crate::ensure_crypto_provider();
+    let mut state = make_state(None, None, false, false, "cb");
+    let path = temp_log_path("callback-failure-redaction");
+    state.log_file = Some(path.to_string_lossy().into_owned());
+
+    // Port zero is never a listening destination. Disable Reqwest's ambient
+    // proxy settings so this always fails against loopback without external I/O.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("build proxy-free client");
+    let callback = "http://127.0.0.1:0/private/hook?token=secret-value";
+
+    send_terminal_webhook(
+        &state,
+        Some(callback.to_string()),
+        "redaction-test",
+        "http://example.test/",
+        TerminalOutcome {
+            status_label: "error",
+            results: &[],
+            error_message: Some("target unavailable"),
+            warnings: &[],
+        },
+        Some(client),
+    )
+    .await;
+
+    let logged = std::fs::read_to_string(&path).expect("callback failure logged");
+    let _ = std::fs::remove_file(path);
+    assert!(logged.contains("[CALLBACK]"), "{logged}");
+    assert!(logged.contains("failed"), "{logged}");
+    assert!(logged.contains("http://127.0.0.1:0"), "{logged}");
+    assert!(
+        !logged.contains("/private/hook"),
+        "callback path leaked: {logged}"
+    );
+    assert!(
+        !logged.contains("secret-value"),
+        "callback query leaked: {logged}"
+    );
 }
 
 /// The boundary check and the dispatcher must agree on what counts as an

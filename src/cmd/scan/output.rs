@@ -1161,6 +1161,21 @@ pub(crate) async fn derive_outcome(
         return ScanOutcome::Error;
     }
 
+    // The per-target parameter cap is a deliberate resource bound, but when
+    // it drops coverage a no-findings report cannot be called clean. Keep a
+    // useful warning/summary for machine readers and return the error exit
+    // code so automation will not treat the partial scan as a pass.
+    if !failing
+        && state
+            .interrupted_targets
+            .lock()
+            .await
+            .values()
+            .any(|code| *code == Some(crate::cmd::error_codes::TRUNCATED_PARAM_CAP))
+    {
+        return ScanOutcome::Error;
+    }
+
     // Only reachable under `--fail-on high` (with `any`, findings imply
     // `failing`): the run had findings, none gating, and Ctrl-C, `--limit` or
     // `--scan-timeout` stopped it. `--limit` counts every tier, so the first

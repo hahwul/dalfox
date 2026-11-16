@@ -139,10 +139,10 @@ pub(crate) struct ScanState {
     /// told apart from "0 findings because we were logged out".
     pub(crate) session_lost: Arc<Mutex<HashMap<String, String>>>,
     /// Targets whose injection stage was cut short — Ctrl-C, `--limit`,
-    /// `--scan-timeout` — or never dispatched because the run stopped first.
-    /// Reported `incomplete` rather than `clean` when they found nothing. The
-    /// value is the `error_code` to report: `SCAN_TIMEOUT` for a target the
-    /// `--scan-timeout` cap cut short, `None` for the other causes.
+    /// `--scan-timeout` — whose parameter set was truncated, or that were never
+    /// dispatched because the run stopped first. Reported `incomplete` rather
+    /// than `clean` when they found nothing. The value is the `error_code` to
+    /// report when one exists (`SCAN_TIMEOUT` or `TRUNCATED_PARAM_CAP`).
     pub(crate) interrupted_targets: Arc<Mutex<HashMap<String, Option<&'static str>>>>,
     /// Scripts the landing-page AST pass could not read (size cap, nesting
     /// guard), per target. Reported as `ast_skipped` so a page whose real code

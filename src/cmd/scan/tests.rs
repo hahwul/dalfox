@@ -1958,6 +1958,118 @@ async fn test_render_results_stopped_early_targets_are_not_clean() {
 }
 
 #[tokio::test]
+async fn test_parameter_cap_marks_empty_scan_incomplete() {
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let path = temp_out_path("param_cap_incomplete");
+    args.output = Some(path.clone());
+    let url = "https://wide.example/".to_string();
+    let state = make_scan_state(Vec::new());
+    state.interrupted_targets.lock().await.insert(
+        url.clone(),
+        Some(crate::cmd::error_codes::TRUNCATED_PARAM_CAP),
+    );
+
+    let targets = refs(std::slice::from_ref(&url));
+    let (results, output_write_failed) = render_results(
+        &args,
+        &state,
+        &targets,
+        std::time::Duration::from_millis(1),
+        crate::cmd::scan::output::RequestTally::default(),
+        false,
+        None,
+    )
+    .await;
+    let content = std::fs::read_to_string(&path).expect("output file written");
+    let _ = std::fs::remove_file(&path);
+    let report: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+    let outcome = super::output::derive_outcome(
+        &args,
+        &targets,
+        &state,
+        &results,
+        crate::cmd::scan::output::RequestTally::default(),
+        output_write_failed,
+    )
+    .await;
+
+    assert_eq!(outcome, ScanOutcome::Error);
+    assert_eq!(report["meta"]["incomplete"], true);
+    assert_eq!(report["meta"]["target_summary"][0]["status"], "incomplete");
+    assert_eq!(
+        report["meta"]["target_summary"][0]["error_code"],
+        crate::cmd::error_codes::TRUNCATED_PARAM_CAP
+    );
+}
+
+/// A target with more discovered parameters than the scan-worker bound must
+/// show partial coverage and stay retryable in the resume file. Fragment-only
+/// params exercise the cap without sending hundreds of HTTP requests.
+#[tokio::test]
+async fn scan_host_group_caps_parameter_fanout_and_records_retryable_state() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let tag = format!("param_cap_e2e_{}", std::process::id());
+    let state_file = temp_out_path(&format!("{tag}_state"));
+    let args = Arc::new(ScanArgs {
+        silence: false,
+        skip_ast_analysis: true,
+        ..default_scan_args()
+    });
+    let state_file_handle =
+        Arc::new(super::state_file::StateFile::open(&state_file, &args).expect("open state file"));
+    let mut target = parse_target("http://example.test/").expect("valid target");
+    target.reflection_params = (0..=crate::parameter_analysis::MAX_DISCOVERED_PARAMS)
+        .map(|i| Param::new(format!("fragment{i}"), "FUZZ", Location::Fragment))
+        .collect();
+    let key = target.state_key();
+    // A prior non-specific incomplete marker must be upgraded to the concrete
+    // reason when the per-target cap is discovered.
+    let interrupted_targets = Arc::new(Mutex::new(HashMap::from([(key.clone(), None)])));
+    let group_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+    let group_permit = group_semaphore
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("group permit");
+
+    super::scan_loop::scan_host_group(super::scan_loop::HostGroupCtx {
+        host: "example.test".to_string(),
+        group: vec![target],
+        group_permit,
+        global_semaphore_clone: Arc::new(tokio::sync::Semaphore::new(1)),
+        multi_pb_clone: None,
+        args_arc: args,
+        results_clone: Arc::new(Mutex::new(Vec::new())),
+        findings_count_group: Arc::new(AtomicUsize::new(0)),
+        finding_tx_group: None,
+        scan_idx: Arc::new(AtomicUsize::new(0)),
+        overall_done_clone: Arc::new(AtomicUsize::new(0)),
+        cancel_flag_group: Arc::new(AtomicBool::new(false)),
+        session_monitor_group: None,
+        skipped_targets_group: Arc::new(Mutex::new(HashMap::new())),
+        interrupted_targets_group: interrupted_targets.clone(),
+        state_file_group: Some(state_file_handle.clone()),
+        session_lost_group: Arc::new(AtomicBool::new(false)),
+        total_targets: 1,
+        spinner_allowed: false,
+    })
+    .await;
+
+    assert_eq!(
+        interrupted_targets.lock().await.get(&key),
+        Some(&Some(crate::cmd::error_codes::TRUNCATED_PARAM_CAP))
+    );
+    drop(state_file_handle);
+    let state = std::fs::read_to_string(&state_file).expect("state record written");
+    let _ = std::fs::remove_file(state_file);
+    assert!(
+        state.contains("\"outcome\":\"cancelled\""),
+        "partially scanned target must be retried on resume: {state}"
+    );
+}
+
+#[tokio::test]
 async fn test_render_results_attributes_stamped_findings_to_their_origin() {
     // Query-less siblings in one directory (a HAR / POST list): the URL
     // heuristic credits a finding to every sibling; the stamped origin to one.

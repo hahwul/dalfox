@@ -24,6 +24,18 @@ fn test_parse_raw_http_absolute_form() {
 }
 
 #[test]
+fn raw_http_absolute_form_accepts_uppercase_scheme() {
+    for (request_uri, expected_url) in [
+        ("HTTP://example.com/path", "http://example.com/path"),
+        ("HTTPS://example.com/path", "https://example.com/path"),
+    ] {
+        let raw = format!("GET {request_uri} HTTP/1.1\r\n\r\n");
+        let t = parse_raw_http_request(&raw).expect("URL schemes are case-insensitive");
+        assert_eq!(t.url.as_str(), expected_url);
+    }
+}
+
+#[test]
 fn test_parse_raw_http_drops_unsendable_user_agent() {
     // A control byte fails the header at send(), and the UA rides on every
     // request: kept, it made the live target read as unreachable.

@@ -65,13 +65,6 @@ pub(crate) const MAX_RETRIES: u32 = 5;
 /// Request-level `retry_delay` cap (ms), for the same reason.
 pub(crate) const MAX_RETRY_DELAY_MS: u64 = 10_000;
 
-/// Cap on the number of distinct parameters a single async (server/MCP) scan
-/// will test. `analyze_parameters` can discover/mine a very large parameter set
-/// on a hostile or sprawling target, and scanning fans out O(params × payloads)
-/// worker tasks — so an uncapped count amplifies CPU / memory / outbound load
-/// from one submission. Beyond this the candidate set is truncated with a log.
-pub(crate) const MAX_DISCOVERED_PARAMS: usize = 512;
-
 /// Upper bound for the per-parameter payload cap accepted via scan options.
 /// `0` means "no explicit cap" (the built-in payload safety cap still applies).
 /// Purely a typo guard — a real scan never needs six figures of payloads per
@@ -760,20 +753,6 @@ pub(crate) fn validate_param_specs(specs: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],
-/// returning how many were dropped (0 if already under the cap). Shared by the
-/// REST server, MCP, and both preflight paths so every async front-end bounds
-/// the per-scan fan-out identically. Callers should log when the return is > 0.
-pub(crate) fn cap_reflection_params(target: &mut Target) -> usize {
-    let n = target.reflection_params.len();
-    if n > MAX_DISCOVERED_PARAMS {
-        target.reflection_params.truncate(MAX_DISCOVERED_PARAMS);
-        n - MAX_DISCOVERED_PARAMS
-    } else {
-        0
-    }
 }
 
 /// Split an HTTP-style `Cookie` header value (`a=b; c=d`) into `(name, value)`

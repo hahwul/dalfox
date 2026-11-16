@@ -330,21 +330,6 @@ pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, o
     )
     .await;
 
-    if run.reachability_failed {
-        // The target is fully hydrated here, so deliver the terminal webhook
-        // through its proxy/TLS-aware client just like other job errors.
-        let cb_client = target.build_client_or_default();
-        mark_job_error(
-            &state,
-            &job_id,
-            &url,
-            unreachable_error_message(),
-            Some(cb_client),
-        )
-        .await;
-        return;
-    }
-
     let final_results_arc = run
         .sanitized_results(&progress, args.include_request, args.include_response)
         .await;
@@ -483,6 +468,7 @@ pub(crate) async fn send_terminal_webhook(
     // fall back to a default client. Webhook delivery should not silently
     // drop just because the scan never got far enough to build a target.
     let client = client.unwrap_or_default();
+    let log_destination = callback_log_origin(&cb_url);
     let result = client
         .post(&cb_url)
         .json(&payload)
@@ -493,10 +479,26 @@ pub(crate) async fn send_terminal_webhook(
         Ok(resp) => log(
             state,
             "CALLBACK",
-            &format!("POST {} -> {}", cb_url, resp.status()),
+            &format!("POST {} -> {}", log_destination, resp.status()),
         ),
-        Err(e) => log(state, "CALLBACK", &format!("POST {} failed: {}", cb_url, e)),
+        Err(e) => log(
+            state,
+            "CALLBACK",
+            &format!(
+                "POST {} failed: {}",
+                log_destination,
+                crate::utils::log::sanitize_log_message(&e.without_url().to_string())
+            ),
+        ),
     }
+}
+
+/// Return only a callback's origin for logs. Paths and query strings often
+/// carry webhook credentials, and URL userinfo must never be written to logs.
+pub(super) fn callback_log_origin(callback_url: &str) -> String {
+    url::Url::parse(callback_url)
+        .map(|parsed| parsed.origin().ascii_serialization())
+        .unwrap_or_else(|_| "<invalid callback URL>".to_string())
 }
 
 /// Worker count `/preflight` runs discovery/mining at when the request does not
