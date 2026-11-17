@@ -15,7 +15,7 @@ pub async fn probe_dictionary_params(
     let preexisting = snapshot_param_slots(&reflection_params).await;
 
     // Resolve candidate parameter names (remote, file, or the expanded
-    // built-in list). Remote fetches remain process-cached by provider set.
+    // built-in list). Remote fetches are cached by provider set and proxy.
     let mut params: Vec<String> = Vec::new();
     let mut loaded = false;
 
@@ -34,11 +34,11 @@ pub async fn probe_dictionary_params(
         {
             eprintln!("Error initializing remote wordlists: {}", e);
         }
-        // Keyed by this scan's provider set: the cache is process-global, so a
-        // provider-less lookup in a server/MCP daemon must not return a list
-        // fetched by an earlier job with different providers.
-        if let Some(words) = crate::payload::get_remote_words_for(&args.remote_wordlists)
-            && !words.is_empty()
+        // The cache is process-global; use this scan's provider set and proxy.
+        if let Some(words) = crate::payload::get_remote_words_for_with_proxy(
+            &args.remote_wordlists,
+            args.proxy.as_deref(),
+        ) && !words.is_empty()
         {
             params = words.as_ref().clone();
             loaded = true;

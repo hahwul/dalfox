@@ -4,7 +4,7 @@ impl ProviderCache {
     /// Make a partial entry due for a retry now. (Not by subtracting the
     /// backoff from an `Instant`: that underflows on a freshly booted Windows
     /// host, whose monotonic clock starts near zero.)
-    fn expire_partial(&self, key: &[String]) {
+    fn expire_partial(&self, key: &ProviderCacheKey) {
         let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(e) = m.get_mut(key)
             && let Some(at) = e.retry_at.as_mut()
@@ -204,6 +204,79 @@ fn test_build_remote_client_invalid_proxy_is_tolerated() {
     assert!(client.is_ok());
 }
 
+#[tokio::test]
+async fn proxied_provider_fetch_does_not_poison_direct_fetch() {
+    use axum::{Router, routing::get};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let direct_hits = Arc::new(AtomicUsize::new(0));
+    let hits = direct_hits.clone();
+    let origin = Router::new().route(
+        "/list",
+        get(move || {
+            hits.fetch_add(1, Ordering::SeqCst);
+            async { "trusted\n" }
+        }),
+    );
+    let origin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_addr = origin_listener.local_addr().unwrap();
+    let origin_server = tokio::spawn(async move {
+        let _ = axum::serve(origin_listener, origin).await;
+    });
+
+    let proxy = Router::new().fallback(|| async { "substituted\n" });
+    let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    let proxy_server = tokio::spawn(async move {
+        let _ = axum::serve(proxy_listener, proxy).await;
+    });
+
+    let name = "proxy-isolation-regression";
+    register_payload_provider(name, vec![format!("http://{origin_addr}/list")]);
+    let providers = vec![name.to_string()];
+    init_remote_payloads_with(
+        &providers,
+        RemoteFetchOptions {
+            timeout_secs: None,
+            proxy: Some(format!("http://{proxy_addr}")),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(direct_hits.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        *get_remote_payloads_for_with_proxy(&providers, Some(&format!("http://{proxy_addr}")))
+            .unwrap(),
+        vec!["substituted".to_string()]
+    );
+
+    init_remote_payloads_with(&providers, RemoteFetchOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(direct_hits.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *get_remote_payloads_for(&providers).unwrap(),
+        vec!["trusted".to_string()]
+    );
+
+    let args = crate::cmd::scan::ScanArgs {
+        only_custom_payload: true,
+        remote_payloads: providers,
+        proxy: Some(format!("http://{proxy_addr}")),
+        ..Default::default()
+    };
+    let payloads = crate::scanning::xss_common::get_dynamic_payloads(
+        &crate::parameter_analysis::InjectionContext::Html(None),
+        &args,
+    )
+    .unwrap();
+    assert!(payloads.contains(&"substituted".to_string()));
+    assert!(!payloads.contains(&"trusted".to_string()));
+
+    origin_server.abort();
+    proxy_server.abort();
+}
+
 #[test]
 fn test_sanitize_lines_keeps_inline_hash_and_slashes() {
     // Only *leading* '#', '//', ';' mark a comment; the same characters
@@ -309,7 +382,7 @@ async fn partial_fetch_is_retried_not_pinned() {
 
     PAYLOADS
         .cache
-        .expire_partial(&provider_cache_key(&providers));
+        .expire_partial(&provider_cache_key(&providers, None));
     init_remote_payloads_with(&providers, RemoteFetchOptions::default())
         .await
         .expect("retry succeeds");
