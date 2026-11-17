@@ -8,14 +8,11 @@ use tokio::task::JoinSet;
 /// Default timeout for remote fetch operations.
 const DEFAULT_TIMEOUT_SECS: u64 = 15;
 
-/// Ceiling on distinct provider sets held in one cache.
+/// Ceiling on distinct provider/proxy combinations held in one cache.
 ///
-/// Provider names are caller-supplied (a REST/MCP scan request carries
-/// `remote_payloads` / `remote_wordlists` verbatim), so the number of distinct
-/// *sets* a long-lived daemon can be asked to remember is unbounded — including
-/// sets naming providers that do not exist, which cache an empty list without
-/// ever touching the network. A real deployment uses a handful of sets, so this
-/// bound is only ever reached by someone spraying names.
+/// Provider names and proxy URLs come from REST/MCP requests, so a long-lived
+/// daemon can see arbitrarily many combinations. A real deployment uses a
+/// handful; this cap prevents an unbounded resident cache.
 ///
 /// Reaching it is reported to the caller as a fetch failure rather than
 /// silently leaving the entry uncached: the getters are keyed, so an uncached
@@ -25,7 +22,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 15;
 /// warning, which is exactly what happens.
 const MAX_CACHED_PROVIDER_SETS: usize = 64;
 
-/// A process-wide cache of fetched remote lists, keyed by provider set.
+/// A process-wide cache of fetched remote lists, keyed by provider set and proxy.
 ///
 /// This used to be a bare `OnceLock<Arc<Vec<String>>>` — "fetch once per
 /// process", which is right for the one-scan-per-process CLI and wrong for the
@@ -38,12 +35,13 @@ const MAX_CACHED_PROVIDER_SETS: usize = 64;
 ///   and cached an **empty** list, poisoning every later job in the same way —
 ///   they short-circuited on the already-set cell and scanned with nothing.
 ///
-/// Keying by the provider set fixes both: an entry can only ever be read back
-/// by a job that asked for exactly the same providers.
+/// Provider-set keying fixes both cases above; proxy keying also prevents one
+/// job's proxy response from becoming another job's list.
 struct ProviderCache(OnceLock<Mutex<CachedLists>>);
 
-/// Fetched lists indexed by the normalized provider set that produced them.
-type CachedLists = HashMap<Vec<String>, CachedList>;
+/// Fetched lists indexed by provider set and the proxy that fetched them.
+type ProviderCacheKey = (Vec<String>, Option<String>);
+type CachedLists = HashMap<ProviderCacheKey, CachedList>;
 
 /// One cached list. `retry_at` marks a fetch where some provider URL failed:
 /// the surviving entries are served, and the set is fetched again once that
@@ -67,14 +65,14 @@ impl ProviderCache {
         self.0.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
-    fn get(&self, key: &[String]) -> Option<Arc<Vec<String>>> {
+    fn get(&self, key: &ProviderCacheKey) -> Option<Arc<Vec<String>>> {
         let m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
         m.get(key).map(|e| e.lines.clone())
     }
 
     /// Whether `key` needs no fetch: fully fetched, or partial but retried
     /// recently enough.
-    fn is_fresh(&self, key: &[String]) -> bool {
+    fn is_fresh(&self, key: &ProviderCacheKey) -> bool {
         let m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
         m.get(key)
             .is_some_and(|e| e.retry_at.is_none_or(|at| std::time::Instant::now() < at))
@@ -84,7 +82,7 @@ impl ProviderCache {
     /// this is a new set — never evicting a live entry, which a job mid-scan
     /// may still be reading.
     #[must_use]
-    fn store(&self, key: Vec<String>, lines: Vec<String>, partial: bool) -> bool {
+    fn store(&self, key: ProviderCacheKey, lines: Vec<String>, partial: bool) -> bool {
         let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
         if m.len() >= MAX_CACHED_PROVIDER_SETS && !m.contains_key(&key) {
             return false;
@@ -135,13 +133,15 @@ fn cache_full_error(kind: &str) -> Box<dyn std::error::Error> {
 /// resolve to *different* URL sets share one cache entry — `[" burp "]` misses
 /// the registry and caches an empty list, which `["burp"]` would then read back.
 ///
-/// A `Vec<String>` key rather than a joined string, so a provider name
-/// containing the separator cannot collide with a two-provider set.
-fn provider_cache_key(providers: &[String]) -> Vec<String> {
+/// A `Vec<String>` provider key avoids separator collisions. The proxy string
+/// stays distinct because it selects which network path supplied the list.
+fn provider_cache_key(providers: &[String], proxy: Option<&str>) -> ProviderCacheKey {
     let mut names: Vec<String> = providers.iter().map(|p| p.to_ascii_lowercase()).collect();
     names.sort();
     names.dedup();
-    names
+    // build_remote_client falls back to a direct connection for an invalid proxy.
+    let effective_proxy = proxy.filter(|p| reqwest::Proxy::all(*p).is_ok());
+    (names, effective_proxy.map(str::to_owned))
 }
 
 /// The provider registry of one [`RemoteKind`]: lowercased name -> URLs.
@@ -227,7 +227,7 @@ impl RemoteKind {
         providers: &[String],
         opts: RemoteFetchOptions,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let key = provider_cache_key(providers);
+        let key = provider_cache_key(providers, opts.proxy.as_deref());
         if self.cache.is_fresh(&key) {
             return Ok(());
         }
@@ -330,12 +330,18 @@ pub async fn init_remote_wordlists_with(
 
 /// Public API: the cached remote XSS payloads fetched for `providers`.
 ///
-/// Returns `None` when this provider set has not been initialized. Prefer this
-/// over [`get_remote_payloads`] anywhere more than one scan can run in the same
-/// process (the server and MCP daemons): the cache holds one entry per provider
-/// set, and only the caller knows which one it asked for.
+/// Returns the direct-fetch entry, or `None` when it has not been initialized.
+/// Scans with a proxy use [`get_remote_payloads_for_with_proxy`] instead.
 pub fn get_remote_payloads_for(providers: &[String]) -> Option<Arc<Vec<String>>> {
-    PAYLOADS.cache.get(&provider_cache_key(providers))
+    get_remote_payloads_for_with_proxy(providers, None)
+}
+
+/// Return only payloads fetched through this scan's proxy (or directly).
+pub fn get_remote_payloads_for_with_proxy(
+    providers: &[String],
+    proxy: Option<&str>,
+) -> Option<Arc<Vec<String>>> {
+    PAYLOADS.cache.get(&provider_cache_key(providers, proxy))
 }
 
 /// Public API: Get a clone of the cached remote XSS payloads (if initialized).
@@ -350,9 +356,18 @@ pub fn get_remote_payloads() -> Option<Arc<Vec<String>>> {
 
 /// Public API: the cached remote parameter words fetched for `providers`.
 ///
-/// Returns `None` when this provider set has not been initialized.
+/// Returns the direct-fetch entry, or `None` when it has not been initialized.
+/// Scans with a proxy use [`get_remote_words_for_with_proxy`] instead.
 pub fn get_remote_words_for(providers: &[String]) -> Option<Arc<Vec<String>>> {
-    WORDLISTS.cache.get(&provider_cache_key(providers))
+    get_remote_words_for_with_proxy(providers, None)
+}
+
+/// Return only words fetched through this scan's proxy (or directly).
+pub fn get_remote_words_for_with_proxy(
+    providers: &[String],
+    proxy: Option<&str>,
+) -> Option<Arc<Vec<String>>> {
+    WORDLISTS.cache.get(&provider_cache_key(providers, proxy))
 }
 
 /// Collapse a provider->URL expansion to the set of distinct URLs, preserving

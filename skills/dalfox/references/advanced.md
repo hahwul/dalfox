@@ -26,7 +26,7 @@ Biggest lever for request count is usually `--skip-mining` (or the more granular
 
 `--only-discovery` / `--dry-run` are excellent for "how many parameters will this scan actually hit?" before a long run. Dry-run JSON surfaces `meta.warnings` if an explicit `-p` could not be seeded (e.g. `path` / `fragment`).
 
-Remote wordlists (`--remote-wordlists burp,assetnote`) are cached with OnceLock for the lifetime of the process.
+Remote wordlists (`--remote-wordlists burp,assetnote`) are cached for the lifetime of the process by provider set and proxy, so one scan does not reuse a list supplied through another scan's proxy.
 
 Dictionary and DOM query mining pack candidates into bounded canary buckets
 (normally 64 names, ~8 KiB URL budget) rather than one request per name, and
