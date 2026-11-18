@@ -54,7 +54,6 @@ async fn worker(
         findings_count: Arc::new(AtomicUsize::new(0)),
         pb: None,
         overall_pb: None,
-        limit_result_type: Arc::from("ALL"),
         cancel: None,
         finding_tx: None,
         semaphore: Arc::new(Semaphore::new(1)),

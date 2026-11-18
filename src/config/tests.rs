@@ -663,6 +663,7 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
             baseline_mode: Some("annotate".to_string()),
             min_confidence: Some("high".to_string()),
             fail_on: Some("high".to_string()),
+            tier_model: Some("confidence".to_string()),
             ..Default::default()
         }),
     };
@@ -674,6 +675,7 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
     assert_eq!(args.baseline_mode(), "annotate");
     assert_eq!(args.min_confidence.as_deref(), Some("high"));
     assert_eq!(args.fail_on.as_deref(), Some("high"));
+    assert_eq!(args.tier_model.as_deref(), Some("confidence"));
 
     // CLI explicitly re-asserts the built-in defaults: config must not win.
     let mut args = default_scan_args();
@@ -681,11 +683,13 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
     args.baseline_mode_arg = Some("filter".to_string());
     args.min_confidence = Some("low".to_string());
     args.fail_on = Some("any".to_string());
+    args.tier_model = Some("legacy".to_string());
     cfg.apply_to_scan_args_if_default(&mut args);
     assert_eq!(args.on_session_loss_mode(), "abort");
     assert_eq!(args.baseline_mode(), "filter");
     assert_eq!(args.min_confidence.as_deref(), Some("low"));
     assert_eq!(args.fail_on.as_deref(), Some("any"));
+    assert_eq!(args.tier_model.as_deref(), Some("legacy"));
 }
 
 /// The generalization of the test above: `--baseline-mode` and

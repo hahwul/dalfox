@@ -318,21 +318,24 @@ pub(crate) async fn accumulate_findings(
     results: &tokio::sync::Mutex<Vec<crate::scanning::result::Result>>,
     findings_count: &std::sync::atomic::AtomicUsize,
     batch: Vec<crate::scanning::result::Result>,
-    limit_result_type: &str,
-    min_confidence: Option<&str>,
-    discard_below_min_confidence: bool,
+    args: &ScanArgs,
 ) {
     let mut batch = batch;
-    if discard_below_min_confidence {
-        batch.retain(|r| !r.below_min_confidence(min_confidence));
+    if args.discard_below_min_confidence {
+        batch.retain(|r| !args.below_min_confidence(r));
     }
     if batch.is_empty() {
         return;
     }
     let mut guard = results.lock().await;
-    let added = count_new_matching_results(&guard, &batch, limit_result_type, min_confidence);
+    let added = count_new_matching_results(&guard, &batch, args);
     guard.extend(batch);
-    findings_count.fetch_add(added, std::sync::atomic::Ordering::Relaxed);
+    // A stronger same-key winner can stop matching the report selection.
+    if added >= 0 {
+        findings_count.fetch_add(added as usize, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        findings_count.fetch_sub(added.unsigned_abs(), std::sync::atomic::Ordering::Relaxed);
+    }
 }
 /// Fetch all same-origin `<script src>` bundles referenced by `html` and run
 /// AST DOM-XSS analysis on each one. Called once per target at the pre-scan

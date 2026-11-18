@@ -1203,7 +1203,7 @@ async fn verify_sxss_dom(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     upload_urls: Vec<url::Url>,
-) -> (bool, Option<String>, Option<DomEvidenceKind>) {
+) -> (bool, Option<String>, Option<DomEvidenceKind>, bool) {
     let check_urls = crate::scanning::check_reflection::with_extra_urls(
         crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args),
         upload_urls,
@@ -1263,7 +1263,8 @@ async fn verify_sxss_dom(
                         && let Some(evidence_kind) =
                             classify_dom_evidence_for_response(payload, &text, ct)
                     {
-                        return (true, Some(text), Some(evidence_kind));
+                        let blocked = super::confidence::inline_blocked(&headers, payload);
+                        return (true, Some(text), Some(evidence_kind), blocked);
                     }
                 }
             }
@@ -1276,7 +1277,7 @@ async fn verify_sxss_dom(
             break 'retry;
         }
     }
-    (false, None, None)
+    (false, None, None, false)
 }
 
 /// Richer result of a single DOM-verification injection (issue #1156).
@@ -1327,6 +1328,7 @@ pub struct DomVerifyOutcome {
 pub(crate) struct DomVerifyEvidenceOutcome {
     pub(crate) outcome: DomVerifyOutcome,
     pub(crate) evidence_kind: Option<DomEvidenceKind>,
+    pub(crate) inline_blocked: bool,
 }
 
 /// Verify DOM evidence from a normal (non-stored) injection response.
@@ -1367,7 +1369,11 @@ async fn verify_normal_dom(
     // inert echo (payload present, but not executable) can still feed the
     // DOM-phase early-exit signal.
     match crate::utils::http::read_body_counted(resp).await {
-        Ok(text) => verify_dom_response_text(status_code, content_type, &text, payload),
+        Ok(text) => {
+            let blocked = super::confidence::inline_blocked(&headers, payload);
+            verify_dom_response_text(status_code, content_type, &text, payload)
+                .with_inline_blocked(blocked)
+        }
         Err(_) => DomVerifyEvidenceOutcome::status_only(status_code),
     }
 }
@@ -1388,6 +1394,11 @@ pub(crate) fn dom_outcome_is_status_only(
 }
 
 impl DomVerifyEvidenceOutcome {
+    pub(crate) fn with_inline_blocked(mut self, blocked: bool) -> Self {
+        self.inline_blocked = blocked;
+        self
+    }
+
     /// The outcome for a response whose body cannot verify (a redirect, an
     /// `--ignore-return` status, an unreadable body): only the status feeds the
     /// DOM phase's early-exit streaks.
@@ -1398,6 +1409,7 @@ impl DomVerifyEvidenceOutcome {
                 ..Default::default()
             },
             evidence_kind: None,
+            inline_blocked: false,
         }
     }
 }
@@ -1468,6 +1480,7 @@ pub(crate) fn verify_dom_response_text(
                 status: status_code,
             },
             evidence_kind: Some(evidence_kind),
+            inline_blocked: false,
         };
     }
     DomVerifyEvidenceOutcome {
@@ -1479,6 +1492,7 @@ pub(crate) fn verify_dom_response_text(
             status: status_code,
         },
         evidence_kind: None,
+        inline_blocked: false,
     }
 }
 
@@ -1544,7 +1558,7 @@ pub(crate) async fn check_dom_verification_with_evidence(
                 );
             }
         }
-        let (verified, response_text, evidence_kind) =
+        let (verified, response_text, evidence_kind, inline_blocked) =
             verify_sxss_dom(client, target, param, payload, args, upload_urls).await;
         DomVerifyEvidenceOutcome {
             outcome: DomVerifyOutcome {
@@ -1555,6 +1569,7 @@ pub(crate) async fn check_dom_verification_with_evidence(
                 status: 0,
             },
             evidence_kind,
+            inline_blocked,
         }
     } else if let Ok(resp) = inject_resp {
         verify_normal_dom(resp, payload, &args.ignore_return).await

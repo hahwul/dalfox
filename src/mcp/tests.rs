@@ -57,6 +57,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         waf_evasion: false,
         waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE as f64,
         min_confidence: None,
+        tier_model: None,
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,

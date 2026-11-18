@@ -91,9 +91,13 @@ pub(crate) fn sanitize_results(
         .iter()
         .filter(|r| !r.below_min_confidence(view.min_confidence.as_deref()))
         .collect();
-    crate::cmd::scan::dedupe_ast_results(kept)
+    crate::cmd::scan::dedupe_ast_results_for_model(kept, view.tier_model.as_deref())
         .into_iter()
-        .map(|r| r.to_sanitized(view.include_request, view.include_response))
+        .map(|r| {
+            let mut r = r.to_sanitized(view.include_request, view.include_response);
+            r.apply_tier_model(view.tier_model.as_deref());
+            r
+        })
         .collect()
 }
 
@@ -121,6 +125,7 @@ pub(crate) struct ScanRun {
     /// The request's `min_confidence`; findings it drops never reach the
     /// stored results or the settled tally.
     pub(crate) min_confidence: Option<String>,
+    pub(crate) tier_model: Option<String>,
 }
 
 impl ScanRun {
@@ -150,6 +155,7 @@ impl ScanRun {
                 include_request,
                 include_response,
                 min_confidence: self.min_confidence.clone(),
+                tier_model: self.tier_model.clone(),
             },
         );
         progress
@@ -598,7 +604,7 @@ pub(crate) async fn execute_scan(
                             session.clone(),
                             results.clone(),
                             findings_count.clone(),
-                            &args.limit_count_filter(),
+                            &args,
                             cancel_flag.clone(),
                             true,
                         ));
@@ -763,9 +769,7 @@ pub(crate) async fn execute_scan(
                                         &results,
                                         &findings_count,
                                         ast_batch,
-                                        &args.limit_count_filter(),
-                                        args.min_confidence.as_deref(),
-                                        args.discard_below_min_confidence,
+                                        &args,
                                     )
                                     .await;
                                     if crate::utils::response_has_markup_document(
@@ -787,9 +791,7 @@ pub(crate) async fn execute_scan(
                                             &results,
                                             &findings_count,
                                             ext_batch,
-                                            &args.limit_count_filter(),
-                                            args.min_confidence.as_deref(),
-                                        args.discard_below_min_confidence,
+                                            &args,
                                         )
                                         .await;
                                     }
@@ -1000,5 +1002,6 @@ pub(crate) async fn execute_scan(
         findings_capped: scan_report.limit_stopped,
         warnings: std::mem::take(&mut *job_warnings.lock().unwrap_or_else(|e| e.into_inner())),
         min_confidence: args.min_confidence.clone(),
+        tier_model: args.tier_model.clone(),
     }
 }

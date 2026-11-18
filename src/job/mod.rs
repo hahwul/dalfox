@@ -529,6 +529,7 @@ pub(crate) struct ScanOptionChecks<'a, F = f32> {
     /// parsed it (REST `f32`, MCP `f64`).
     pub waf_min_confidence: Option<F>,
     pub min_confidence: Option<&'a str>,
+    pub tier_model: Option<&'a str>,
     pub headers: &'a [String],
     pub user_agent: Option<&'a str>,
     pub cookies: &'a [String],
@@ -627,6 +628,15 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
                 "min_confidence must be one of {} (got '{}')",
                 crate::cmd::scan::MIN_CONFIDENCE_VALUES.join(", "),
                 crate::utils::log::sanitize_log_message(level)
+            ));
+        }
+        if let Some(model) = self.tier_model
+            && !crate::cmd::scan::TIER_MODEL_VALUES.contains(&model)
+        {
+            return Err(format!(
+                "tier_model must be one of {} (got '{}')",
+                crate::cmd::scan::TIER_MODEL_VALUES.join(", "),
+                crate::utils::log::sanitize_log_message(model)
             ));
         }
         // A malformed header — or a control byte in a User-Agent / cookie,
@@ -869,6 +879,7 @@ pub(crate) struct ResultView {
     pub include_request: bool,
     pub include_response: bool,
     pub min_confidence: Option<String>,
+    pub tier_model: Option<String>,
 }
 
 impl ResultView {
@@ -879,6 +890,7 @@ impl ResultView {
             include_request: args.include_request,
             include_response: args.include_response,
             min_confidence: args.min_confidence.clone(),
+            tier_model: args.tier_model.clone(),
         }
     }
 }

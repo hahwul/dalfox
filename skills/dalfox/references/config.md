@@ -73,3 +73,5 @@ Neither `dalfox mcp` nor `dalfox server` reads the config file. Their scans are 
 1. Check stderr for `Warning:` / `Notice:` lines about the config.
 2. `dalfox scan --config /path/to/your.toml --debug --dry-run 'https://target/?q=1'` — preflight only, no payloads.
 3. Remember: if you typed the flag at all, the config value is ignored for that field.
+
+`scan.tier_model`: `"legacy"` (default) or `"confidence"`; an explicit CLI `--tier-model legacy` wins over config.

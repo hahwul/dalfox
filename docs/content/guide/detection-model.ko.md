@@ -55,12 +55,12 @@ AST 탐지 결과를 고를 때는 `type == "A"`가 아니라 `detection_method 
 ### 실제로 나오는 조합
 
 티어와 방식은 따로 정해지므로 `V`가 곧 `dom-verification`을 뜻하지 않습니다.
-Dalfox가 내보내는 탐지 결과는 다음 중 하나입니다.
+기본 `legacy` 모델에서 Dalfox가 내보내는 탐지 결과는 다음 중 하나입니다.
 
 | `type` | `detection_method` | `confidence` | `severity` | 산출 경로 |
 |--------|--------------------|--------------|------------|-------------|
-| `V` | `dom-verification` | `high` | High | 전용 DOM 검증 요청 |
-| `V` | `reflection` | `high` | High | 반사 단계에서, 반사 응답 자체가 *이미* 실행 가능한 위치로 파싱되는 경우 |
+| `V` | `dom-verification` | `high` 또는 `low` | High | 전용 DOM 검증 요청 |
+| `V` | `reflection` | `high` 또는 `low` | High | 반사 단계에서, 반사 응답 자체가 *이미* 실행 가능한 위치로 파싱되는 경우 |
 | `V` | `oob` | `high` | High | 대역외 콜백 |
 | `V` | `ast` | `high` 또는 `low` | High | 레거시 AST 승격 두 곳. [전환](#전환) 절이 다루는 바로 그 불일치 |
 | `A` | `ast` | `high` 또는 `low` | Medium | 그 외 모든 소스→싱크 흐름 |
@@ -114,6 +114,8 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
 
 모든 XSS 탐지 결과에는 `high` 또는 `low`인 `confidence`와, 판단 신호를 나열한 `confidence_reason`이 붙습니다. 요청 기반 방식은 증거를 그대로 따르고, AST 탐지 결과는 흐름의 형태로 등급을 매깁니다.
 
+반사·DOM 검증은 근거가 나온 응답의 CSP 헤더를 함께 봅니다. 인라인 스크립트를 막는 강제 정책 아래의 인라인 핸들러·`<script>` 본문·`javascript:` URL은 `low`이며 이유는 `CSP does not permit inline script`입니다. 알려진 CSP 우회 후보는 `high`를 유지합니다. 정책이 없거나 report-only인 경우 기존 등급을 유지합니다. 저장형 XSS는 조회 응답의 CSP 헤더 정책을 씁니다. 기본 티어 모델에서는 등급만 바뀝니다.
+
 `high`가 되려면 다음을 모두 만족해야 합니다.
 
 - **링크만으로 공격자가 도달할 수 있는 소스.** `location.*`, `document.URL`, `URLSearchParams`는 페이로드를 URL에 직접 싣습니다. 원래라면 공격자가 제어하는 구동 페이지가 필요한 소스(`window.name`, `document.referrer`, `postMessage`, 스토리지, `history.state`)는 `low`입니다. 다만 페이지가 그 소스를 쿼리 파라미터에서 스스로 채워 넣으면 링크만으로도 구동되므로 `high`가 되고, 근거에 `non-URL source seeded from a query parameter by the page`가 붙습니다.
@@ -148,20 +150,20 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
   않습니다. 옵션을 주면 `meta.fail_on`이 `{level, matched}`를 보고합니다.
   설정 파일에서는 `fail_on`이며, REST API와 MCP에는 종료 코드가 없어 CLI 전용입니다.
 
-`--only-poc`와 `--limit-result-type`은 여전히 `type`으로 고르고, SARIF
+`--only-poc`와 `--limit-result-type`은 선택한 티어 모델로 고르고(`confidence`에서 `a`는 AST 탐지 방법 선택), SARIF
 `level`도 여전히 severity를 따릅니다(등급은 `properties`에 있습니다).
 
 ## 전환
 
-티어 자체는 아직 바뀌지 않습니다. 지금 등급 기준으로 거르려면 `--min-confidence`를 직접 켜세요. 티어가 따라 바뀌기 전에 각 탐지 결과가 어디로 갈지 미리 볼 수 있습니다.
+기본 티어 모델은 `legacy`입니다. `--tier-model confidence`(설정·REST·MCP: `tier_model`)를 켜면 중복 제거와 출력 필터 전에 high→`V`/`High`, low→`R`/`Info`로 매핑합니다. `detection_method`와 정보용 탐지 결과는 유지합니다. SARIF level은 기존 serializer가 새 severity를 따라 정합니다.
 
 1. **현재:** `type`은 그대로이고, `detection_method`와 `confidence`를 쓸 수 있습니다. 선택자로서의 `type == "A"`는 권장하지 않으니 `detection_method == "ast"`를 쓰세요.
-2. **다음:** `--tier-model confidence`를 옵트인으로 제공합니다.
+2. **현재 사용 가능:** CLI·REST·MCP에서 `--tier-model confidence`를 옵트인으로 제공합니다.
 3. **그 다음:** 그것이 기본값이 되고, `--tier-model legacy`가 탈출구로 남습니다. `A`는 사라집니다. `high` 등급인 AST 탐지 결과는 `V`, 나머지는 `R`로 갑니다. 원래 `R`이 맡던 자리입니다. `R`의 이름도 이때 함께 바뀝니다. 그때부터는 반사 말고 다른 탐지 결과도 담게 되기 때문입니다.
 
-`--only-poc a`는 계속 동작합니다. 티어가 사라진 뒤에는 `detection_method == "ast"`를 고릅니다. 플래그 값이 제거되는 일은 없습니다.
+`confidence` 모델에서 `--only-poc a`와 `--limit-result-type a`는 매핑된 V/R 모두에서 `detection_method == "ast"`를 고릅니다. `v`는 high 탐지 결과를 고르며 스캔 중 제한과 표시 제한이 같은 기준을 씁니다. `legacy`의 기존 티어 선택은 유지합니다.
 
-과도기에는 `type`과 `confidence`가 어긋날 수 있습니다. `type=V, confidence=low`인 탐지 결과가 그런 예입니다. 레거시 경로 두 곳이 근거가 부족한데도 AST 탐지 결과를 `V`로 승격시키기 때문입니다. 등급은 Dalfox가 실제로 주장할 수 있는 것을, 티어는 지금까지 출력해 온 것을 보고합니다. 이 불일치는 버그가 아니라 미리보기 신호입니다.
+`legacy`에서는 `type`과 `confidence`가 어긋날 수 있습니다. `type=V, confidence=low`인 탐지 결과가 그런 예입니다. 레거시 경로 두 곳이 근거가 부족한데도 AST 탐지 결과를 `V`로 승격시키기 때문입니다. 등급은 Dalfox가 실제로 주장할 수 있는 것을, 티어는 지금까지 출력해 온 것을 보고합니다. 이 불일치는 버그가 아니라 미리보기 신호입니다.
 
 티어가 등급에서 파생되기 시작하면 티어를 읽는 모든 것이 함께 바뀝니다. 같은 `--only-poc v`가 다른 집합을 고르고, 종료 코드도 다른 집합에서 뒤집히며, 중복 제거의 우선순위도 달라집니다. 모두 의도된 결과입니다.
 
@@ -238,3 +240,7 @@ AST 패스, 오래된 라이브러리, OOB 콜백에서 나온 결과는 최종 
 | 악용 가능 판단에만 CI 실패시키기 | `--only-poc v` (그렇지 않으면 어떤 티어든 `1`) |
 | Dalfox가 확신할 수 없는 결과 제외 | `--min-confidence high` (`I`는 유지) |
 | `high` 주장에만 CI 실패, 나머지는 리포트에 유지 | `--fail-on high` |
+
+반사·DOM confidence는 기존 스크립트 안의 JS 주입을 인라인 삽입으로 낮추지 않습니다. 위치 순서를 검증하지 못하는 CSP meta와 아직 해석하지 못하는 `script-src-attr`/`script-src-elem` 세부 정책은 보수적으로 high를 유지합니다.
+
+주입한 script의 nonce가 CSP와 일치하면 high를 유지합니다. 아직 확인하지 못하는 script hash 및 `unsafe-hashes` 권한도 보수적으로 high로 둡니다.

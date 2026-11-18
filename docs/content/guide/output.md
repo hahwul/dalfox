@@ -430,3 +430,5 @@ Don't re-run the gate command above with `-o .dalfox/baseline.json`. It would wr
 
 - Automate scans with the [REST API Server](../../integrations/server/).
 - Let an AI agent drive scans with the [MCP Server](../../integrations/mcp/).
+
+`--tier-model confidence` maps high→`V`/`High` and low→`R`/`Info` before rendering. No `A` is emitted; use `detection_method: ast` to identify static findings. Informational severity and ungraded findings are preserved. SARIF levels follow the new severity. The default is `legacy`. Reflection and DOM-verification findings can grade low when their evidence response's CSP header blocks inline execution.

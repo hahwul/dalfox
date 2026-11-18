@@ -328,7 +328,76 @@ pub(crate) fn bound_evidence_body(body: String, payload: &str) -> String {
     out
 }
 
+fn confidence_tier(
+    tier: &FindingType,
+    confidence: Option<Confidence>,
+    model: Option<&str>,
+) -> FindingType {
+    if model != Some("confidence") || *tier == FindingType::Informational {
+        return tier.clone();
+    }
+    match confidence {
+        Some(Confidence::High) => FindingType::Verified,
+        Some(Confidence::Low) => FindingType::Reflected,
+        None => tier.clone(),
+    }
+}
+
+fn severity_for_tier(tier: &FindingType) -> &'static str {
+    match tier {
+        FindingType::Verified => "High",
+        FindingType::AstDetected => "Medium",
+        _ => "Info",
+    }
+}
+
+impl SanitizedResult {
+    pub(crate) fn apply_tier_model(&mut self, model: Option<&str>) {
+        if model == Some("confidence")
+            && self.result_type != FindingType::Informational
+            && self.confidence.is_some()
+        {
+            self.result_type = confidence_tier(&self.result_type, self.confidence, model);
+            self.type_description = self.result_type.long_description().to_string();
+            self.severity = severity_for_tier(&self.result_type).to_string();
+        }
+    }
+}
+
 impl Result {
+    pub(crate) fn tier_for_model(&self, model: Option<&str>) -> FindingType {
+        confidence_tier(&self.result_type, self.confidence, model)
+    }
+
+    pub(crate) fn severity_for_model(&self, model: Option<&str>) -> &str {
+        if model == Some("confidence")
+            && self.result_type != FindingType::Informational
+            && self.confidence.is_some()
+        {
+            severity_for_tier(&self.tier_for_model(model))
+        } else {
+            &self.severity
+        }
+    }
+
+    pub(crate) fn apply_tier_model(&mut self, model: Option<&str>) {
+        if model == Some("confidence")
+            && self.result_type != FindingType::Informational
+            && self.confidence.is_some()
+        {
+            self.severity = self.severity_for_model(model).to_string();
+            self.result_type = self.tier_for_model(model);
+        }
+    }
+
+    pub(crate) fn matches_type(&self, filter: &str, model: Option<&str>) -> bool {
+        filter.eq_ignore_ascii_case("all")
+            || (model == Some("confidence")
+                && filter.contains('A')
+                && self.detection_method == FindingMethod::Ast)
+            || filter.contains(self.tier_for_model(model).short())
+    }
+
     /// The one `--min-confidence` rule: `min` is the already-validated level
     /// (`None` / `"low"` keep everything). Only `"high"` drops anything, and
     /// only an XSS claim graded `low` — ungraded findings (informational `I`)

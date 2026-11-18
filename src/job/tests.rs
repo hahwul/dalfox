@@ -709,6 +709,7 @@ fn rest_and_mcp_requests_agree_on_scan_args() {
         session_check: mcp_params.session_check,
         session_check_url: mcp_params.session_check_url,
         min_confidence: mcp_params.min_confidence,
+        tier_model: mcp_params.tier_model,
         sxss: mcp_params.sxss,
         sxss_url: mcp_params.sxss_url,
         sxss_method: mcp_params.sxss_method,
@@ -771,6 +772,7 @@ fn rest_non_default_options_reach_scan_args() {
         session_check: Some("Sign out".to_string()),
         session_check_url: Some("https://app/me".to_string()),
         min_confidence: Some("high".to_string()),
+        tier_model: None,
         include_request: Some(true),
         include_response: Some(true),
         sxss: Some(true),
@@ -1475,6 +1477,7 @@ fn async_jobs_cap_findings_and_say_so() {
         findings_capped: true,
         warnings: Vec::new(),
         min_confidence: None,
+        tier_model: None,
     };
     let mut job = Job::new_queued("http://t/".into());
     assert_eq!(
@@ -1527,6 +1530,7 @@ fn settle_reachability_failure_respects_a_concurrent_cancel() {
         findings_capped: false,
         warnings: Vec::new(),
         min_confidence: None,
+        tier_model: None,
     };
 
     let mut unreachable = Job::new_queued("http://t/".into());
@@ -1600,8 +1604,9 @@ fn preflight_accepts_a_documented_subset_of_the_scan_options() {
         "force_waf",
         "waf_evasion",
         "waf_min_confidence",
-        // No findings to grade.
+        // No findings to grade or map into tiers.
         "min_confidence",
+        "tier_model",
         // Nothing is fetched to fuel an attack the caller has not run yet.
         "remote_payloads",
         "remote_wordlists",
@@ -2029,6 +2034,7 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         findings_capped: false,
         warnings: Vec::new(),
         min_confidence: None,
+        tier_model: None,
     };
     let note = "SCAN_TIMEOUT: scan exceeded scan_timeout (5s); returning partial results";
     for (prior, append, want) in [
@@ -2060,6 +2066,7 @@ fn settle_keeps_session_lost_on_a_cancelled_job() {
         findings_capped: false,
         warnings: Vec::new(),
         min_confidence: None,
+        tier_model: None,
     };
     let mut job = Job::new_queued("http://t/".into());
     assert_eq!(
@@ -2115,6 +2122,7 @@ fn settle_keeps_session_lost_when_the_cancel_lands_after_the_run() {
         findings_capped: false,
         warnings: (0..MAX_JOB_WARNINGS + 8).map(|i| format!("w{i}")).collect(),
         min_confidence: None,
+        tier_model: None,
     };
     let mut job = Job::new_queued("http://t/".into());
     assert!(job.cancel());
@@ -2174,6 +2182,7 @@ async fn sanitized_results_folds_duplicate_ast_findings() {
         findings_capped: false,
         warnings: Vec::new(),
         min_confidence: None,
+        tier_model: None,
     };
     let progress = JobProgress::default();
     let out = run.sanitized_results(&progress, false, false).await;
@@ -2221,6 +2230,7 @@ async fn sanitized_results_honor_min_confidence() {
             findings_capped: false,
             warnings: Vec::new(),
             min_confidence: min.map(String::from),
+            tier_model: None,
         };
         let progress = JobProgress::default();
         let kept = run.sanitized_results(&progress, false, false).await;
@@ -2264,6 +2274,7 @@ async fn sanitized_results_filter_min_confidence_before_ast_dedup() {
         findings_capped: false,
         warnings: Vec::new(),
         min_confidence: Some("high".to_string()),
+        tier_model: None,
     };
     let progress = JobProgress::default();
     let kept = run.sanitized_results(&progress, false, false).await;
@@ -2309,6 +2320,7 @@ fn scan_option_checks_reject_an_unknown_min_confidence() {
         assert!(
             ScanOptionChecks::<f32> {
                 min_confidence: Some(ok),
+                tier_model: None,
                 ..Default::default()
             }
             .validate()
@@ -2317,6 +2329,7 @@ fn scan_option_checks_reject_an_unknown_min_confidence() {
     }
     let err = ScanOptionChecks::<f32> {
         min_confidence: Some("medium"),
+        tier_model: None,
         ..Default::default()
     }
     .validate()
@@ -2548,3 +2561,5 @@ fn validate_cookie_pairs_allows_blank_on_every_surface() {
     assert!(validate_cookie_pairs("--cookies", " ").is_ok());
     assert!(validate_cookie_pairs("--cookies", "sid").is_err());
 }
+
+mod confidence_model;

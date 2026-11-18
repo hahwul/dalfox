@@ -104,6 +104,8 @@ jobs:
       # docs/data/perf-budget.json by more than its tolerance, or when findings
       # drop (a cost win that costs detection is not a win); `hostile-scan`
       # fails on a crash, a hang, or peak RSS over 1 GB.
+      - name: Effectiveness accounting self-test
+        run: EFFECTIVENESS_SELF_TEST=1 crystal run scripts/effectiveness_snapshot.cr
       - name: Effectiveness (precision / recall gate)
         run: crystal run scripts/effectiveness_snapshot.cr
       - name: Perf budget (request-volume gate)

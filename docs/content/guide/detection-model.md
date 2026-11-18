@@ -55,12 +55,12 @@ To select AST findings, use `detection_method == "ast"`, not `type == "A"`. The 
 ### The combinations that occur
 
 The tier and the method are chosen separately, so `V` does not imply
-`dom-verification`. Every finding Dalfox emits is one of these:
+`dom-verification`. In the default `legacy` model, every finding Dalfox emits is one of these:
 
 | `type` | `detection_method` | `confidence` | `severity` | Produced by |
 |--------|--------------------|--------------|------------|-------------|
-| `V` | `dom-verification` | `high` | High | The dedicated DOM-verification request |
-| `V` | `reflection` | `high` | High | The reflection phase, when the reflection response *already* parses to an executable position |
+| `V` | `dom-verification` | `high` or `low` | High | The dedicated DOM-verification request |
+| `V` | `reflection` | `high` or `low` | High | The reflection phase, when the reflection response *already* parses to an executable position |
 | `V` | `oob` | `high` | High | An out-of-band callback |
 | `V` | `ast` | `high` or `low` | High | The two legacy AST promotions, which are the disagreement [Migration](#migration) is about |
 | `A` | `ast` | `high` or `low` | Medium | Every other source→sink flow |
@@ -112,7 +112,7 @@ This also explains a result that looks like a gap but isn't. In a pure client-si
 
 ## `confidence`: the grade behind the claim
 
-Every XSS finding carries a `confidence` of `high` or `low`, plus a `confidence_reason` naming the deciding signals. For request-based methods it follows the evidence directly. For AST findings it is graded from the flow's shape.
+Every XSS finding carries a `confidence` of `high` or `low`, plus a `confidence_reason` naming the deciding signals. For request-based methods it follows the parser evidence and the evidence response's CSP header. A verified inline handler, inline `<script>` body or `javascript:` URL grades `low` under an enforcing CSP that blocks inline script, with reason `CSP does not permit inline script`. Known CSP-bypass candidates retain `high`. No policy, report-only policies retain the previous grade. Stored-XSS uses the retrieval response's policy. Only the grade changes under the default tier model. For AST findings it is graded from the flow's shape.
 
 `high` requires all of:
 
@@ -148,20 +148,20 @@ only. Four things act on it:
   fails it. When set, `meta.fail_on` reports `{level, matched}`. Config
   `fail_on`; CLI only, since REST and MCP have no exit code.
 
-`--only-poc` and `--limit-result-type` still select by `type`, and SARIF
+`--only-poc` and `--limit-result-type` select by the chosen tier model (with `a` selecting AST method under `confidence`), and SARIF
 `level` still follows severity (the grade is under `properties`).
 
 ## Migration
 
-The tier itself does not move yet. To act on the grade today, opt in with `--min-confidence`. You can see where each finding will land before the tier follows.
+The default tier model remains `legacy`. Opt in with `--tier-model confidence` (config, REST and MCP: `tier_model`) to derive tiers from the grade before deduplication and report filters. `high` becomes `V` / `High`, `low` becomes `R` / `Info`; `detection_method` and informational findings stay unchanged. SARIF levels follow those severities through the existing serializer.
 
 1. **Now:** `type` is unchanged, and `detection_method` and `confidence` are available. `type == "A"` is deprecated as a selector; use `detection_method == "ast"`.
-2. **Next:** `--tier-model confidence` as an opt-in.
+2. **Available now:** `--tier-model confidence` as an opt-in, across CLI, REST and MCP.
 3. **Then:** that becomes the default, with `--tier-model legacy` as an escape hatch. `A` retires: `high`-graded AST findings become `V` and the rest become `R`, which is what `R` was always for. `R` gets a new name in that release too, because by then it will hold more than reflections.
 
-`--only-poc a` keeps working throughout; once the tier is gone it selects `detection_method == "ast"`. No flag value is ever removed.
+Under `confidence`, `--only-poc a` and `--limit-result-type a` select `detection_method == "ast"`, including both mapped tiers. `--only-poc v` selects high findings; the scan-time and display limits use the same selection. Under `legacy`, the existing type selectors are unchanged.
 
-During the transition, `type` and `confidence` can disagree: a finding can read `type=V, confidence=low`. Two legacy code paths promote AST findings to `V` on evidence that does not support the claim. The grade reports what Dalfox can assert; the tier reports what it has historically emitted. The disagreement is the preview signal, not a bug.
+Under `legacy`, `type` and `confidence` can disagree: a finding can read `type=V, confidence=low`. Two legacy code paths promote AST findings to `V` on evidence that does not support the claim. The grade reports what Dalfox can assert; the tier reports what it has historically emitted. The disagreement is the preview signal, not a bug.
 
 Once the tier derives from the grade, everything that reads the tier follows it. The same `--only-poc v` selects a different set, the exit code flips on a different set, and deduplication ranks the survivors differently. That is intended.
 
@@ -194,7 +194,7 @@ are not the number of findings recorded during the scan:
   all find the same source→sink flow. One survives per fingerprint:
   the strongest by `type`, then `severity`, then `confidence`. Type comes
   first, so a `low`-confidence `V` still outranks a `high` `A`, unless
-  `--min-confidence high` removed the `V` before deduplication ran.
+  `--min-confidence high` removed the `V` before deduplication ran. Under `confidence`, tiers are mapped first, so the high AST finding wins instead.
 
 `--stream-findings` prints each scan-loop finding the moment it is recorded,
 which is *before* the `R` collapse and before AST duplicates are narrowed to
@@ -241,3 +241,7 @@ The full rule is in [Exit codes](../output/#exit-codes).
 | Fail CI only on asserted vulnerabilities | `--only-poc v` (otherwise any tier exits `1`) |
 | Drop findings Dalfox cannot stand behind | `--min-confidence high` (`I` is kept) |
 | Fail CI only on `high` claims, keep the rest in the report | `--fail-on high` |
+
+Request-based confidence keeps existing-script JS-context evidence high. CSP meta policies (whose position relative to execution is not established) and unsupported `script-src-attr` / `script-src-elem` overrides conservatively retain high.
+
+A matching nonce on an injected script retains high. Script hash permission and `unsafe-hashes` authorization are not resolved here and conservatively retain high.

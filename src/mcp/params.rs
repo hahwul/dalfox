@@ -309,6 +309,10 @@ pub(crate) struct ScanWithDalfoxParams {
     /// are always kept. Default: none (same as "low").
     #[serde(default)]
     pub min_confidence: Option<String>,
+    /// Finding tiers: legacy (default) preserves V/A/R; confidence maps high to V,
+    /// low to R and re-derives severity. Detection method stays unchanged.
+    #[serde(default)]
+    pub tier_model: Option<String>,
 
     /// Fetch remote XSS payloads from providers. Available: "portswigger",
     /// "payloadbox". An unregistered name is rejected, because it would fetch

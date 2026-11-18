@@ -5192,3 +5192,5 @@ async fn ast_skipped_scripts_surface_in_the_meta_envelope() {
     .await;
     assert!(results.is_empty() && !write_failed);
 }
+
+mod confidence_model;

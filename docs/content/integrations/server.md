@@ -393,6 +393,7 @@ before it submits. It is `null` for a caller that did not send the API key.
     "waf_min_confidence": 0.3,
     "max_payloads_per_param": 0,
     "min_confidence": "high",
+    "tier_model": "legacy",
     "blind_oob": true,
     "blind_oob_wait": 30,
     "session_check": "Sign out",
@@ -700,3 +701,5 @@ sudo systemctl enable --now dalfox
   `deep_scan`) can still run for a long time. Set `--scan-timeout <secs>` so
   every submitted scan has a hard wall-clock budget and a single slow target
   can't tie up a worker indefinitely.
+
+`tier_model` accepts `legacy` (default) or `confidence`. The latter maps high→V/High and low→R/Info, preserving `detection_method` and informational severity. Unknown values are rejected as invalid input.

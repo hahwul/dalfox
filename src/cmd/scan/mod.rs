@@ -56,13 +56,14 @@ pub use args::{
     FORMAT_VALUES, INPUT_TYPE_VALUES, LIMIT_RESULT_TYPE_VALUES, MAX_MINING_BUCKET_SIZE,
     MAX_PER_PARAM_CONCURRENCY, MAX_SXSS_BACKOFF_MS, MIN_CONFIDENCE_VALUES, MINING_BISECT_WAYS,
     ON_SESSION_LOSS_VALUES, ONLY_POC_VALUES, PARAM_TYPE_VALUES, POC_TYPE_VALUES,
-    PREFLIGHT_DEFAULT_WORKERS, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES, format_is_machine,
+    PREFLIGHT_DEFAULT_WORKERS, PreflightOptions, ScanArgs, TIER_MODEL_VALUES, WAF_BYPASS_VALUES,
+    format_is_machine,
 };
 pub(crate) use args::{
     MIN_CONFIDENCE_HIGH, parse_base_url_arg, parse_force_waf_arg, parse_http_method_arg,
 };
 pub(crate) use logging::log_info;
-pub(crate) use postprocess::{ast_dedup_parts, dedupe_ast_results};
+pub(crate) use postprocess::{ast_dedup_parts, dedupe_ast_results_for_model};
 pub(crate) use preflight::finish_waf_detection;
 // Shared with `job::normalize_proxy` so REST/MCP refuse the same unroutable
 // proxy values the CLI startup gate does. The CLI wrapper that also rejects
@@ -650,7 +651,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             session.clone(),
             state.results.clone(),
             state.findings_count.clone(),
-            &args.limit_count_filter(),
+            args,
             cancel_flag.clone(),
             args.silence,
         )

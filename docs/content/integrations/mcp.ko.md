@@ -193,6 +193,7 @@ WAF 임계값 아래로 유지할 때 쓰세요.
   "waf_evasion": false,
   "waf_min_confidence": 0.3,
   "min_confidence": null,
+  "tier_model": "legacy",
   "remote_payloads": [],
   "remote_wordlists": [],
   "max_payloads_per_param": 0,
@@ -609,3 +610,5 @@ CLI와 같은 규칙이 적용되며, Dalfox가 대신 확인해 주지는 못�
 - **도구(tool)가 표시되지 않나요?** MCP 클라이언트가 사용하는 PATH에 `dalfox` 바이너리가 있는지 확인하세요. macOS의 Claude Desktop에서는 대개 `/usr/local/bin` 또는 `/opt/homebrew/bin`입니다.
 - **결과가 비어 있나요?** 다시 폴링하세요. 스캔은 비동기입니다. `suggested_poll_interval_ms`를 폴링 주기로 사용하세요.
 - **로그를 보고 싶나요?** 설정하는 동안 `dalfox mcp --debug`를 실행하세요. 디버그 라인은 stderr로 가므로 MCP 채널을 오염시키지 않습니다.
+
+`tier_model`은 `legacy`(기본값) 또는 `confidence`입니다. 후자는 high→V/High, low→R/Info로 매핑하고 `detection_method`와 정보용 severity를 유지합니다. 지원하지 않는 값은 입력 오류입니다.

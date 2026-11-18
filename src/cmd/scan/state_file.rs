@@ -229,8 +229,8 @@ pub(crate) fn target_identity(target: &Target, cli: &CliCredentials) -> TargetId
 ///   made. The two preview modes never write records at all. `limit`,
 ///   `limit_result_type`, `only_poc` and `min_confidence` are deliberately
 ///   *not* here: `--limit` stops the scan early, so it decides coverage, and
-///   the other three decide which findings count toward that stop
-///   ([`ScanArgs::limit_count_filter`]).
+///   the other three and `tier_model` decide which findings count toward that stop
+///   ([`ScanArgs::counts_toward_limit`]).
 /// - **Run-wide credential values** (values of credential `headers`, every
 ///   `cookies` value, `cookie_from_raw`'s path) — see [`CliCredentials`].
 ///   Names stay hashed.

@@ -245,7 +245,10 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
         Arc::new(session),
         results.clone(),
         findings_count.clone(),
-        "ALL",
+        &crate::cmd::scan::ScanArgs {
+            limit_result_type: "ALL".to_string(),
+            ..Default::default()
+        },
         cancel,
         /* silence */ true,
     );
@@ -297,7 +300,10 @@ async fn oob_findings_count_honors_limit_result_type() {
         Arc::new(session),
         results.clone(),
         findings_count.clone(),
-        "R",
+        &crate::cmd::scan::ScanArgs {
+            limit_result_type: "R".to_string(),
+            ..Default::default()
+        },
         Arc::new(AtomicBool::new(false)),
         /* silence */ true,
     );
@@ -374,7 +380,10 @@ async fn oob_form_callback_is_attributed_to_the_scanned_target() {
         Arc::new(session),
         results.clone(),
         Arc::new(AtomicUsize::new(0)),
-        "ALL",
+        &crate::cmd::scan::ScanArgs {
+            limit_result_type: "ALL".to_string(),
+            ..Default::default()
+        },
         Arc::new(AtomicBool::new(false)),
         /* silence */ true,
     );
@@ -490,7 +499,10 @@ async fn oob_poll_failures_are_reported_not_swallowed() {
         Arc::new(session),
         Arc::new(TokioMutex::new(Vec::new())),
         Arc::new(AtomicUsize::new(0)),
-        "ALL",
+        &crate::cmd::scan::ScanArgs {
+            limit_result_type: "ALL".to_string(),
+            ..Default::default()
+        },
         Arc::new(AtomicBool::new(false)),
         /* silence */ false,
     );
@@ -512,7 +524,10 @@ async fn oob_unregistered_nonce_findings_are_capped() {
         Arc::new(session),
         results.clone(),
         Arc::new(AtomicUsize::new(0)),
-        "ALL",
+        &crate::cmd::scan::ScanArgs {
+            limit_result_type: "ALL".to_string(),
+            ..Default::default()
+        },
         Arc::new(AtomicBool::new(false)),
         /* silence */ true,
     );
@@ -649,7 +664,10 @@ async fn poller_finish_under_cancel_still_deregisters() {
         Arc::new(session),
         results,
         findings_count,
-        "ALL",
+        &crate::cmd::scan::ScanArgs {
+            limit_result_type: "ALL".to_string(),
+            ..Default::default()
+        },
         cancel,
         /* silence */ true,
     );

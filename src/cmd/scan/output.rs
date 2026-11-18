@@ -610,17 +610,16 @@ pub(crate) async fn render_results(
             .count();
         (kept, dropped)
     };
+    let kept = kept
+        .into_iter()
+        .map(|mut r| {
+            r.apply_tier_model(args.tier_model.as_deref());
+            r
+        })
+        .collect();
     let mut final_results = dedupe_ast_results(kept);
 
-    // Apply --only-poc filter: keep only results whose type matches the specified filters
-    if !args.only_poc.is_empty() {
-        let allowed: Vec<String> = args
-            .only_poc
-            .iter()
-            .map(|s| s.trim().to_uppercase())
-            .collect();
-        final_results.retain(|r| allowed.iter().any(|a| a == r.result_type.short()));
-    }
+    final_results.retain(|r| args.matches_only_poc(r));
 
     // Apply the `--baseline` diff after `--only-poc` but before `--limit`.
     //
@@ -657,7 +656,7 @@ pub(crate) async fn render_results(
             final_results
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| r.result_type.short() == want)
+                .filter(|(_, r)| r.matches_type(&want, args.tier_model.as_deref()))
                 .nth(lim - 1)
                 .map_or(final_results.len(), |(i, _)| i + 1)
         }

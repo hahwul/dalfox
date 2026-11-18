@@ -2475,6 +2475,7 @@ struct FetchedInjection {
     body: Option<ReflectionBody>,
     status: u16,
     xml_content_type: bool,
+    inline_blocked: bool,
     /// The DOM-verification verdict for this same response, when the caller
     /// asked for it and the response is one the DOM phase may reuse instead of
     /// sending the identical request again (issue #1661). `None` whenever the
@@ -2743,6 +2744,7 @@ async fn fetch_injection_response(
             body: None,
             status: 0,
             xml_content_type: false,
+            inline_blocked: false,
             dom: None,
         };
     }
@@ -2808,7 +2810,7 @@ async fn fetch_injection_response(
             param: &Param,
             payload: &str,
             args: &crate::cmd::scan::ScanArgs,
-        ) -> Option<(ReflectionBody, bool)> {
+        ) -> Option<(ReflectionBody, bool, bool)> {
             let status_code = resp.status().as_u16();
             if injection_response_suppressed(status_code, resp.headers(), param, args) {
                 return None;
@@ -2834,7 +2836,7 @@ async fn fetch_injection_response(
             param: &Param,
             payload: &str,
             status_code: u16,
-        ) -> Option<(ReflectionBody, bool)> {
+        ) -> Option<(ReflectionBody, bool, bool)> {
             let content_type = headers
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
@@ -2859,11 +2861,16 @@ async fn fetch_injection_response(
             }
             let mut body = ReflectionBody::rendered(text).with_js_content_type(is_js_content_type);
             body.renderable = !followed_redirect;
-            Some((body, crate::utils::is_xml_content_type(&content_type)))
+            let blocked = super::confidence::inline_blocked(headers, payload);
+            Some((
+                body,
+                crate::utils::is_xml_content_type(&content_type),
+                blocked,
+            ))
         }
 
         let mut upload_urls = Vec::new();
-        let inject_body: Option<(ReflectionBody, bool)> = match inject_resp {
+        let inject_body: Option<(ReflectionBody, bool, bool)> = match inject_resp {
             Ok(resp) => {
                 // Mirror the normal path's WAF accounting on the stored-write
                 // response before consuming the body: a 403/406/503 stored-write
@@ -2904,7 +2911,7 @@ async fn fetch_injection_response(
         let check_urls = with_extra_urls(resolve_sxss_check_urls(target, param, args), upload_urls);
         let retries = args.sxss_retries.max(1) as u64;
         let skip_payload_retries = sxss_payload_retries_skipped();
-        let mut fallback_body: Option<(ReflectionBody, bool)> = None;
+        let mut fallback_body: Option<(ReflectionBody, bool, bool)> = None;
         // Attempt-major so an early exit can consider the *whole* first pass
         // over the check URLs, not just one URL: retries exist for
         // propagation delay, and delay affects every retrieval URL alike.
@@ -2964,6 +2971,7 @@ async fn fetch_injection_response(
                             body: Some(body.0),
                             status: 0,
                             xml_content_type: body.1,
+                            inline_blocked: body.2,
                             dom: None,
                         };
                     }
@@ -2989,26 +2997,30 @@ async fn fetch_injection_response(
         // renders the stored value (e.g. POST /comments returns the rendered
         // /comments page). Without this check we'd miss the entire class
         // of sinks where the write-response is the rendered view.
-        let inline_xml_content_type = inject_body.as_ref().and_then(|(body, is_xml)| {
+        let inline_xml_content_type = inject_body.as_ref().and_then(|(body, is_xml, blocked)| {
             (classify_reflection(&body.text, payload).is_some()
                 && sxss_injection_credited(&body.text, payload))
-            .then_some(*is_xml)
+            .then_some((*is_xml, *blocked))
         });
-        if let Some(xml_content_type) = inline_xml_content_type {
+        if let Some((xml_content_type, inline_blocked)) = inline_xml_content_type {
             return FetchedInjection {
-                body: inject_body.map(|(body, _)| body),
+                body: inject_body.map(|(body, _, _)| body),
                 status: 0,
                 xml_content_type,
+                inline_blocked,
                 dom: None,
             };
         }
-        let (body, xml_content_type) = fallback_body
+        let (body, xml_content_type, inline_blocked) = fallback_body
             .or(inject_body)
-            .map_or((None, false), |(body, is_xml)| (Some(body), is_xml));
+            .map_or((None, false, false), |(body, is_xml, blocked)| {
+                (Some(body), is_xml, blocked)
+            });
         FetchedInjection {
             body,
             status: 0,
             xml_content_type,
+            inline_blocked,
             dom: None,
         }
     } else {
@@ -3059,6 +3071,7 @@ async fn fetch_injection_response(
                     body: None,
                     status: status_code,
                     xml_content_type: false,
+                    inline_blocked: false,
                     dom: status_only_dom(),
                 };
             }
@@ -3091,12 +3104,15 @@ async fn fetch_injection_response(
                     body: Some(ReflectionBody::redirect_location(status_code, location)),
                     status: status_code,
                     xml_content_type: false,
+                    inline_blocked: false,
                     dom: status_only_dom(),
                 };
             }
             let followed_redirect = is_followed_redirect(&resp);
+            let headers = resp.headers().clone();
             match crate::utils::http::read_body_counted(resp).await {
                 Ok(body) => {
+                    let inline_blocked = super::confidence::inline_blocked(&headers, payload);
                     let dom = if dom_status_only {
                         status_only_dom()
                     } else {
@@ -3107,6 +3123,7 @@ async fn fetch_injection_response(
                                 &body,
                                 payload,
                             )
+                            .with_inline_blocked(inline_blocked)
                         })
                     };
                     if !response_body_supports_xss(&content_type, &body) {
@@ -3114,6 +3131,7 @@ async fn fetch_injection_response(
                             body: None,
                             status: status_code,
                             xml_content_type: false,
+                            inline_blocked: false,
                             dom,
                         };
                     }
@@ -3138,6 +3156,7 @@ async fn fetch_injection_response(
                             body: None,
                             status: status_code,
                             xml_content_type: false,
+                            inline_blocked: false,
                             dom,
                         };
                     }
@@ -3148,6 +3167,7 @@ async fn fetch_injection_response(
                         body: Some(body),
                         status: status_code,
                         xml_content_type,
+                        inline_blocked,
                         dom,
                     }
                 }
@@ -3161,6 +3181,7 @@ async fn fetch_injection_response(
                         body: None,
                         status: status_code,
                         xml_content_type: false,
+                        inline_blocked: false,
                         dom: None,
                     }
                 }
@@ -3171,6 +3192,7 @@ async fn fetch_injection_response(
                 body: None,
                 status: 0,
                 xml_content_type: false,
+                inline_blocked: false,
                 dom: None,
             }
         }
@@ -3197,7 +3219,7 @@ pub async fn check_reflection_with_response(
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
 ) -> (Option<ReflectionKind>, Option<ReflectionBody>, u16, bool) {
-    let (kind, body, status, xml_content_type, _) =
+    let (kind, body, status, xml_content_type, _, _) =
         check_reflection_with_dom_outcome(client, target, param, payload, args, streak, false)
             .await;
     (kind, body, status, xml_content_type)
@@ -3221,11 +3243,13 @@ pub(crate) async fn check_reflection_with_dom_outcome(
     u16,
     bool,
     Option<crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome>,
+    bool,
 ) {
     let FetchedInjection {
         body,
         status,
         xml_content_type,
+        inline_blocked,
         dom,
     } = fetch_injection_response(client, target, param, payload, args, streak, want_dom).await;
     if let Some(body) = body {
@@ -3240,9 +3264,16 @@ pub(crate) async fn check_reflection_with_dom_outcome(
             Some(_) if args.sxss && !sxss_injection_credited(&body.text, payload) => None,
             other => other,
         };
-        (kind, Some(body), status, xml_content_type, dom)
+        (
+            kind,
+            Some(body),
+            status,
+            xml_content_type,
+            dom,
+            inline_blocked,
+        )
     } else {
-        (None, None, status, xml_content_type, dom)
+        (None, None, status, xml_content_type, dom, inline_blocked)
     }
 }
 

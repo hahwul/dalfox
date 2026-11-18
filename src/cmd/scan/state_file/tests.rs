@@ -573,6 +573,10 @@ fn scan_affecting_flags_change_the_hash() {
 
     for tweak in [
         ScanArgs {
+            tier_model: Some("confidence".to_string()),
+            ..Default::default()
+        },
+        ScanArgs {
             deep_scan: true,
             ..Default::default()
         },

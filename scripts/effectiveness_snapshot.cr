@@ -15,9 +15,9 @@
 #   3. Scan every case with the release binary in parallel, targeting the
 #      declared injection point (`-p name:header`, `--cookies`, `-d`, …).
 #   4. Classify: expected && detected = TP, expected && !detected = FN,
-#      !expected && detected = FP, !expected && !detected = TN. Tallied twice —
-#      once for any finding, once for `V`-only, because an `R` on a case the
-#      corpus labels clean is a much weaker claim than a `V`.
+#      !expected && detected = FP, !expected && !detected = TN. Tallied for
+#      any finding, V-only, high-confidence, and each (method, confidence) bucket.
+#      Each bucket counts a case once, regardless of duplicate findings.
 #   5. Write `docs/data/effectiveness.json`, including every FP and FN with the
 #      payload and evidence so the failures are actionable.
 #   6. Compare against the committed snapshot and exit non-zero when recall
@@ -353,12 +353,21 @@ end
 def build_snapshot(outcomes : Array(Outcome), wall_clock : Float64, lab_count : Int32) : JSON::Any
   overall = Tally.new
   verified_overall = Tally.new
+  high_overall = Tally.new
+  high_by_category = Hash(String, Tally).new { |h, k| h[k] = Tally.new }
+  by_method_confidence = Hash({String, String}, Tally).new { |h, k| h[k] = Tally.new }
+  buckets = outcomes.flat_map(&.findings).map { |f| {f.detection_method, f.confidence || "ungraded"} }.uniq.sort
   by_category = Hash(String, Tally).new { |h, k| h[k] = Tally.new }
   verified_by_category = Hash(String, Tally).new { |h, k| h[k] = Tally.new }
 
   outcomes.each do |o|
     overall.add(o.expected, o.detected)
     verified_overall.add(o.expected, o.verified)
+    high = o.findings.any? { |f| f.confidence == "high" }
+    high_overall.add(o.expected, high)
+    high_by_category[o.lab_case.category].add(o.expected, high)
+    found_buckets = o.findings.map { |f| {f.detection_method, f.confidence || "ungraded"} }.to_set
+    buckets.each { |bucket| by_method_confidence[bucket].add(o.expected, found_buckets.includes?(bucket)) }
     by_category[o.lab_case.category].add(o.expected, o.detected)
     verified_by_category[o.lab_case.category].add(o.expected, o.verified)
   end
@@ -366,6 +375,7 @@ def build_snapshot(outcomes : Array(Outcome), wall_clock : Float64, lab_count : 
   categories = by_category.keys.sort!.map do |name|
     t = by_category[name]
     v = verified_by_category[name]
+    h = high_by_category[name]
     {
       category:  name,
       cases:     t.cases,
@@ -378,6 +388,7 @@ def build_snapshot(outcomes : Array(Outcome), wall_clock : Float64, lab_count : 
       recall:    t.recall,
       f1:        t.f1,
       verified:  {tp: v.tp, fp: v.fp, recall: v.recall, precision: v.precision},
+      high_confidence: {tp: h.tp, fp: h.fp, recall: h.recall, precision: h.precision},
     }
   end
 
@@ -421,6 +432,10 @@ def build_snapshot(outcomes : Array(Outcome), wall_clock : Float64, lab_count : 
     },
     total:      overall.to_json_object,
     verified:   verified_overall.to_json_object,
+    high_confidence: high_overall.to_json_object,
+    by_method_confidence: buckets.map do |method, confidence|
+      {detection_method: method, confidence: confidence, metrics: by_method_confidence[{method, confidence}].to_json_object}
+    end,
     categories: categories,
     timing:     {
       wall_clock_seconds: wall_clock.round(1),
@@ -463,6 +478,17 @@ def print_summary(data : JSON::Any)
   if ast_only = data["ast_only"]?
     puts "    (#{ast_only} of those V-misses are cases detected only by static [A] analysis, which never emits V)"
   end
+  if high = data["high_confidence"]?
+    puts "==> detection (high confidence only)"
+    puts "    precision #{pct(high["precision"]?)}  recall #{pct(high["recall"]?)}  FP #{high["fp"]}"
+  end
+  if buckets = data["by_method_confidence"]?
+    puts "==> precision by detection method / confidence"
+    buckets.as_a.each do |bucket|
+      m = bucket["metrics"]
+      puts "    #{bucket["detection_method"]}/#{bucket["confidence"]}: #{pct(m["precision"]?)} (TP #{m["tp"]}, FP #{m["fp"]})"
+    end
+  end
   if timing
     puts "==> #{timing["wall_clock_seconds"]}s wall clock, #{timing["median_seconds"]}s median per case, #{timing["concurrency"]} workers"
   end
@@ -497,6 +523,13 @@ def gate(data : JSON::Any) : Int32
   baseline = Snapshot.load(DATA_PATH)
   report = Report.new("effectiveness gate")
 
+  high = data["high_confidence"]
+  verified = data["verified"]
+  report.check("high-confidence precision >= V-only precision",
+    "high #{high["precision"]}% vs V #{verified["precision"]}%") do
+    high["precision"].as_f >= verified["precision"].as_f
+  end
+
   # `Snapshot.load` reads the path this run is about to overwrite, so the
   # caller must load the baseline *before* writing — see main.
   unless baseline
@@ -510,6 +543,9 @@ def gate(data : JSON::Any) : Int32
     "total.fp"           => {FP_TOLERANCE, false},
     "verified.recall"    => {TOLERANCE, true},
     "verified.precision" => {TOLERANCE, true},
+    "high_confidence.recall" => {TOLERANCE, true},
+    "high_confidence.precision" => {TOLERANCE, true},
+    "high_confidence.fp" => {FP_TOLERANCE, false},
   })
 
   deltas.each do |d|
@@ -525,6 +561,31 @@ end
 # ---------------------------------------------------------------------------
 # Main.
 # ---------------------------------------------------------------------------
+
+if ENV["EFFECTIVENESS_SELF_TEST"]? == "1"
+  make_case = ->(id : Int32, expected : Bool) {
+    LabCase.from_json({uid: id.to_s, id: id, name: "test", category: "test", handler_type: "test", expected_detection: expected, method: "GET", url: "http://localhost/", param: "q", location: "Query"}.to_json)
+  }
+  finding = ->(tier : String, method : String, confidence : String) {
+    Dalfox::Finding.from_json({type: tier, detection_method: method, confidence: confidence}.to_json)
+  }
+  high = finding.call("A", "ast", "high")
+  low = finding.call("V", "reflection", "low")
+  outcomes = [
+    Outcome.new(make_case.call(1, true), true, false, [high, high], 0.0, nil),
+    Outcome.new(make_case.call(2, false), true, true, [low], 0.0, nil),
+    Outcome.new(make_case.call(3, true), false, false, [] of Dalfox::Finding, 0.0, nil),
+  ]
+  data = build_snapshot(outcomes, 0.0, 3)
+  h = data["high_confidence"]
+  raise "high bucket must count cases once" unless h["tp"].as_i == 1 && h["fp"].as_i == 0 && h["fn"].as_i == 1 && h["tn"].as_i == 1
+  buckets = data["by_method_confidence"].as_a
+  raise "method buckets missing" unless buckets.size == 2
+  ast = buckets.find { |b| b["detection_method"].as_s == "ast" }.not_nil!["metrics"]
+  raise "AST copies inflated precision" unless ast["tp"].as_i == 1 && ast["fp"].as_i == 0
+  puts "effectiveness accounting self-test passed"
+  exit 0
+end
 
 if RENDER_ONLY
   snapshot = Snapshot.load(DATA_PATH)
