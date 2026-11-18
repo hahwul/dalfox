@@ -74,7 +74,8 @@ impl<'a> DomXssVisitor<'a> {
                 .iter()
                 .all(|expr| self.selector_input_is_read_only(expr)),
             Expression::CallExpression(call) => {
-                matches!(call.callee.without_parentheses(), Expression::StaticMemberExpression(m)
+                !self.return_written_roots.contains("String")
+                    && matches!(call.callee.without_parentheses(), Expression::StaticMemberExpression(m)
                     if matches!(m.property.name.as_str(), "slice" | "substring" | "substr")
                         && self.get_expr_string(&m.object).is_some_and(|name| self.is_source(&name)))
                     && call.arguments.iter().all(|arg| {
