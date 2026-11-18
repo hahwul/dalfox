@@ -1669,3 +1669,25 @@ fn a_selector_prefix_reaches_a_helpers_jquery_constructor() {
         "function u(x,t){$(t).addClass('x')} u(...[0,location.hash.slice(1)],'#'+location.hash.slice(1));",
     ]);
 }
+
+#[test]
+fn selector_helper_arguments_cannot_replace_jquery_before_the_body_runs() {
+    assert_clean(&[
+        "function u(t){$(t).addClass('x')}(0,u)('#'+location.hash.slice(1),'fixed');",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.substring(1));",
+        "function u(t){$(t).addClass('x')}u(`#${location.hash.substr(1)}`);",
+    ]);
+    assert_reported(&[
+        "function u(t){$(t).addClass('x')}u('#'+($=other,location.hash.slice(1)));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),$=other);",
+        "function u(t){jQuery(t).addClass('x')}u('#'+location.hash.slice(1),jQuery=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),window.$=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),window['$']=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),Object.assign(window,{$:other}));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),Reflect.set(window,'$',other));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),$=function(t){el.innerHTML=t.slice(1);return {addClass(){}}});",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),unknown());",
+        "function u(t){$(t).addClass('x')}($=other,u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(u=other,u)('#'+location.hash.slice(1));",
+    ]);
+}

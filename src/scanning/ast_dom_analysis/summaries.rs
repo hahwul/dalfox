@@ -38,6 +38,54 @@ impl<'a> DomXssVisitor<'a> {
             .filter(|summary| !summary.return_lead_ambiguous)
     }
 
+    /// The callee and arguments run before the helper's jQuery call.
+    /// Unknown calls and writes there cannot certify the captured constructor.
+    pub(super) fn selector_input_is_read_only(&self, expr: &Expression<'a>) -> bool {
+        let Some(_guard) = self.enter_recursion() else {
+            return false;
+        };
+        match expr.without_parentheses() {
+            Expression::Identifier(_) => true,
+            Expression::StaticMemberExpression(m) => self.selector_input_is_read_only(&m.object),
+            Expression::ComputedMemberExpression(m) => {
+                self.selector_input_is_read_only(&m.object)
+                    && self.selector_input_is_read_only(&m.expression)
+            }
+            Expression::BinaryExpression(b) => {
+                self.selector_input_is_read_only(&b.left)
+                    && self.selector_input_is_read_only(&b.right)
+            }
+            Expression::LogicalExpression(l) => {
+                self.selector_input_is_read_only(&l.left)
+                    && self.selector_input_is_read_only(&l.right)
+            }
+            Expression::ConditionalExpression(c) => {
+                self.selector_input_is_read_only(&c.test)
+                    && self.selector_input_is_read_only(&c.consequent)
+                    && self.selector_input_is_read_only(&c.alternate)
+            }
+            Expression::TemplateLiteral(t) => t
+                .expressions
+                .iter()
+                .all(|expr| self.selector_input_is_read_only(expr)),
+            Expression::SequenceExpression(s) => s
+                .expressions
+                .iter()
+                .all(|expr| self.selector_input_is_read_only(expr)),
+            Expression::CallExpression(call) => {
+                matches!(call.callee.without_parentheses(), Expression::StaticMemberExpression(m)
+                    if matches!(m.property.name.as_str(), "slice" | "substring" | "substr")
+                        && self.get_expr_string(&m.object).is_some_and(|name| self.is_source(&name)))
+                    && call.arguments.iter().all(|arg| {
+                        arg.as_expression().is_some_and(|expr| {
+                            expr.is_literal() || self.eval_static_string_expr(expr).is_some()
+                        })
+                    })
+            }
+            _ => expr.is_literal(),
+        }
+    }
+
     // shortcut: certify one call chain with static method arguments; larger helpers need scoped selector facts.
     fn direct_selector_param(
         &self,
