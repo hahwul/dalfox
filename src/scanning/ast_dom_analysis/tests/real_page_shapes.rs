@@ -1689,5 +1689,7 @@ fn selector_helper_arguments_cannot_replace_jquery_before_the_body_runs() {
         "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),unknown());",
         "function u(t){$(t).addClass('x')}($=other,u)('#'+location.hash.slice(1));",
         "function u(t){$(t).addClass('x')}(u=other,u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(Object.assign(window,{$:other}),u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(Reflect.set(window,'$',other),u)('#'+location.hash.slice(1));",
     ]);
 }
