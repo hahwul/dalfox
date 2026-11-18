@@ -12,6 +12,136 @@ type Report = (u32, u32, String);
 const MAX_URL_LEAD_PARAMS: usize = 32;
 
 impl<'a> DomXssVisitor<'a> {
+    /// Suppression facts require a stable bare callable and unshifted arguments.
+    pub(super) fn stable_call_summary(
+        &self,
+        call: &CallExpression<'a>,
+    ) -> Option<&FunctionSummary> {
+        if self.get_alias_for_callee_identifier(call).is_some()
+            || call
+                .arguments
+                .iter()
+                .any(|arg| matches!(arg, Argument::SpreadElement(_)))
+            || self.return_written_roots.contains("")
+            || self.get_expr_string(&call.callee).is_some_and(|key| {
+                self.return_written_roots
+                    .contains(key.split('.').next().unwrap_or(&key))
+            })
+        {
+            return None;
+        }
+        let key = self.get_summary_key_for_callee_expr(&call.callee)?;
+        if key.contains('.') || self.return_written_roots.contains(&key) {
+            return None;
+        }
+        self.summary(&key)
+            .filter(|summary| !summary.return_lead_ambiguous)
+    }
+
+    /// The callee and arguments run before the helper's jQuery call.
+    /// Unknown calls and writes there cannot certify the captured constructor.
+    pub(super) fn selector_input_is_read_only(&self, expr: &Expression<'a>) -> bool {
+        let Some(_guard) = self.enter_recursion() else {
+            return false;
+        };
+        match expr.without_parentheses() {
+            Expression::Identifier(_) => true,
+            Expression::StaticMemberExpression(m) => self.selector_input_is_read_only(&m.object),
+            Expression::ComputedMemberExpression(m) => {
+                self.selector_input_is_read_only(&m.object)
+                    && self.selector_input_is_read_only(&m.expression)
+            }
+            Expression::BinaryExpression(b) => {
+                self.selector_input_is_read_only(&b.left)
+                    && self.selector_input_is_read_only(&b.right)
+            }
+            Expression::LogicalExpression(l) => {
+                self.selector_input_is_read_only(&l.left)
+                    && self.selector_input_is_read_only(&l.right)
+            }
+            Expression::ConditionalExpression(c) => {
+                self.selector_input_is_read_only(&c.test)
+                    && self.selector_input_is_read_only(&c.consequent)
+                    && self.selector_input_is_read_only(&c.alternate)
+            }
+            Expression::TemplateLiteral(t) => t
+                .expressions
+                .iter()
+                .all(|expr| self.selector_input_is_read_only(expr)),
+            Expression::SequenceExpression(s) => s
+                .expressions
+                .iter()
+                .all(|expr| self.selector_input_is_read_only(expr)),
+            Expression::CallExpression(call) => {
+                !self.return_written_roots.contains("String")
+                    && matches!(call.callee.without_parentheses(), Expression::StaticMemberExpression(m)
+                    if matches!(m.property.name.as_str(), "slice" | "substring" | "substr")
+                        && self.get_expr_string(&m.object).is_some_and(|name| self.is_source(&name)))
+                    && call.arguments.iter().all(|arg| {
+                        arg.as_expression().is_some_and(|expr| {
+                            expr.is_literal() || self.eval_static_string_expr(expr).is_some()
+                        })
+                    })
+            }
+            _ => expr.is_literal(),
+        }
+    }
+
+    // shortcut: certify one call chain with static method arguments; larger helpers need scoped selector facts.
+    fn direct_selector_param(
+        &self,
+        formal_params: &FormalParameters<'a>,
+        body: &[Statement<'a>],
+        params: &[String],
+    ) -> Option<usize> {
+        if formal_params.rest.is_some()
+            || formal_params.items.iter().any(|param| {
+                param.initializer.is_some()
+                    || !matches!(param.pattern, BindingPattern::BindingIdentifier(_))
+            })
+        {
+            return None;
+        }
+        let mut expr = match body {
+            [Statement::ExpressionStatement(stmt)] => &stmt.expression,
+            [Statement::ReturnStatement(stmt)] => stmt.argument.as_ref()?,
+            _ => return None,
+        };
+        loop {
+            let _guard = self.enter_recursion()?;
+            let Expression::CallExpression(call) = expr.without_parentheses() else {
+                return None;
+            };
+            match call.callee.without_parentheses() {
+                Expression::Identifier(id) if matches!(id.name.as_str(), "$" | "jQuery") => {
+                    if params.iter().any(|param| param == id.name.as_str())
+                        || self.local_names.contains(id.name.as_str())
+                        || self.return_shadowed_globals.contains(id.name.as_str())
+                        || call.arguments.len() != 1
+                    {
+                        return None;
+                    }
+                    let Expression::Identifier(arg) =
+                        call.arguments[0].as_expression()?.without_parentheses()
+                    else {
+                        return None;
+                    };
+                    return params.iter().position(|param| param == arg.name.as_str());
+                }
+                Expression::StaticMemberExpression(member)
+                    if call.arguments.iter().all(|arg| {
+                        arg.as_expression()
+                            .and_then(|arg| self.eval_static_string_expr(arg))
+                            .is_some()
+                    }) =>
+                {
+                    expr = &member.object
+                }
+                _ => return None,
+            }
+        }
+    }
+
     /// Walk through statements
     pub(super) fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
         let displaced = self.collect_function_declarations(stmts);
@@ -587,6 +717,24 @@ impl<'a> DomXssVisitor<'a> {
         self.webpack_require = saved_webpack_require;
         self.webpack_scope = saved_webpack_scope;
         self.webpack_map_var = saved_webpack_map;
+        if let Some(idx) = self.direct_selector_param(formal_params, body_stmts, &params)
+            && summary
+                .tainted_param_sinks
+                .get(&idx)
+                .is_some_and(|sink| sink == "jQuery$")
+            && param_reports
+                .iter()
+                .find(|(param, _)| *param == idx)
+                .is_some_and(|(_, reports)| {
+                    reports
+                        .iter()
+                        .filter(|report| !free.contains(*report))
+                        .all(|(_, _, sink)| sink == "jQuery$")
+                })
+        {
+            summary.selector_param = Some(idx);
+        }
+
         self.tainted_vars = saved_tainted;
         self.field_only_taint = saved_field_only;
         self.var_aliases = saved_aliases;

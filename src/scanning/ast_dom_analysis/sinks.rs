@@ -747,6 +747,25 @@ impl<'a> DomXssVisitor<'a> {
                 if !tainted {
                     continue;
                 }
+                if sink_name == "jQuery$"
+                    && self.selector_input_is_read_only(&call.callee)
+                    && call.arguments.iter().all(|arg| {
+                        arg.as_expression()
+                            .is_some_and(|expr| self.selector_input_is_read_only(expr))
+                    })
+                    && !self.return_written_roots.contains("$")
+                    && !self.return_written_roots.contains("jQuery")
+                    && self
+                        .stable_call_summary(call)
+                        .is_some_and(|summary| summary.selector_param == Some(idx))
+                    && call
+                        .arguments
+                        .get(idx)
+                        .and_then(Argument::as_expression)
+                        .is_some_and(|arg| self.jquery_arg_forces_selector(arg))
+                {
+                    continue;
+                }
                 // The helper navigates to its argument (`a.href = url`, the
                 // anchor-as-URL-parser idiom included): `parse(location.href)`
                 // is as pinned there as the direct write would be, and only

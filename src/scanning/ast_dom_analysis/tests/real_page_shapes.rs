@@ -1641,3 +1641,56 @@ fn a_safe_return_does_not_certify_a_composed_scheme() {
         "function d(u){return '/'+u} var x=d(location.hash.slice(1)); location.href=x;",
     ]);
 }
+
+#[test]
+fn a_selector_prefix_reaches_a_helpers_jquery_constructor() {
+    assert_clean(&[
+        "function u(t){$(t).addClass('x')} var e=new URLSearchParams(location.search).get('modal'); u('#'+e);",
+        "function u(t){return $(t)} u('#'+location.hash.slice(1));",
+        "const u=t=>$(t); u('.item-'+location.hash.slice(1));",
+        "function u(t){jQuery(t).addClass('x')} u('#'+location.hash.slice(1));",
+    ]);
+    assert_reported(&[
+        "function u(t){$(t).addClass('x')} u(location.hash.slice(1));",
+        "function String(u){return u.slice(1)} function outer(){function String(u){return u}} location.href=String(location.hash);",
+        "function outer($){function u(t){$(t).addClass('x')} u('#'+location.hash.slice(1))} outer(other);",
+        "var $=other; function u(t){$(t).addClass('x')} u('#'+location.hash.slice(1));",
+        "import $ from 'other'; function u(t){$(t).addClass('x')} u('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')} $=other; u('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')} u('<'+location.hash.slice(1));",
+        "function u(t){$(t.slice(1)).addClass('x')} u('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass($(t.slice(1)))} u('#'+location.hash.slice(1));",
+        "function u(t){$(t); el.innerHTML=t} u('#'+location.hash.slice(1));",
+        "function u(t){$(t).html(t)} u('#'+location.hash.slice(1));",
+        "function u(t,x=(t=t.slice(1))){$(t).addClass('x')} u('#'+location.hash.slice(1));",
+        "function u($,t){$(t).addClass('x')} u(other,'#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')} u=other; u('#'+location.hash.slice(1));",
+        "var api={u(t){$(t).addClass('x')}}; api.u('#'+location.hash.slice(1));",
+        "function u(x,t){$(t).addClass('x')} u(...[0,location.hash.slice(1)],'#'+location.hash.slice(1));",
+    ]);
+}
+
+#[test]
+fn selector_helper_arguments_cannot_replace_jquery_before_the_body_runs() {
+    assert_clean(&[
+        "function u(t){$(t).addClass('x')}(0,u)('#'+location.hash.slice(1),'fixed');",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.substring(1));",
+        "function u(t){$(t).addClass('x')}u(`#${location.hash.substr(1)}`);",
+    ]);
+    assert_reported(&[
+        "function u(t){$(t).addClass('x')}u('#'+($=other,location.hash.slice(1)));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),$=other);",
+        "function u(t){jQuery(t).addClass('x')}u('#'+location.hash.slice(1),jQuery=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),window.$=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),window['$']=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),Object.assign(window,{$:other}));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),Reflect.set(window,'$',other));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),$=function(t){el.innerHTML=t.slice(1);return {addClass(){}}});",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),unknown());",
+        "function u(t){$(t).addClass('x')}($=other,u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(u=other,u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(Object.assign(window,{$:other}),u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(Reflect.set(window,'$',other),u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')} String.prototype.slice=other; u('#'+location.hash.slice(1));",
+    ]);
+}

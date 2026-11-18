@@ -397,6 +397,8 @@ pub struct DomXssVulnerability {
 #[derive(Default)]
 struct FunctionSummary {
     tainted_param_sinks: BTreeMap<usize, String>,
+    /// A single constructor call chain that passes this parameter to jQuery.
+    selector_param: Option<usize>,
     /// For a parameter whose sink above is a navigation: the sink an
     /// argument that cannot start with a script scheme (see `url_lead`)
     /// still reaches — the body cut its head off, or wrote it to
@@ -1353,7 +1355,15 @@ impl AstDomAnalyzer {
         visitor.return_shadowed_globals.retain(|name| {
             matches!(
                 name.as_str(),
-                "window" | "document" | "location" | "self" | "globalThis" | "top" | "parent"
+                "window"
+                    | "document"
+                    | "location"
+                    | "self"
+                    | "globalThis"
+                    | "top"
+                    | "parent"
+                    | "$"
+                    | "jQuery"
             )
         });
         visitor.walk_script_after(&ret.program.body, globals);
