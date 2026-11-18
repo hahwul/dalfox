@@ -121,6 +121,8 @@ pub const MIN_CONFIDENCE_VALUES: &[&str] = &["low", MIN_CONFIDENCE_HIGH];
 /// `--fail-on high`: exit 1 only when a reported finding is graded `high`.
 /// `any` (the default) fails on every reported finding.
 pub(crate) const FAIL_ON_HIGH: &str = "high";
+pub const TIER_MODEL_VALUES: &[&str] = &["legacy", "confidence"];
+
 pub const FAIL_ON_VALUES: &[&str] = &["any", FAIL_ON_HIGH];
 pub const ENCODER_VALUES: &[&str] = &[
     "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
@@ -473,6 +475,15 @@ pub struct ScanArgs {
     // `None` so an explicit `--min-confidence low` beats a config-file `high`.
     #[arg(long, value_name = "LEVEL", value_parser = clap::builder::PossibleValuesParser::new(MIN_CONFIDENCE_VALUES.iter().copied()))]
     pub min_confidence: Option<String>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Finding tiers: legacy preserves V/A/R; confidence maps high to V and low
+    /// to R, with severity following the tier (default: legacy)
+    ///
+    /// Detection method stays unchanged. Under confidence, --only-poc a selects
+    /// all AST findings, including those mapped to V or R.
+    #[arg(long, value_name = "MODEL", value_parser = clap::builder::PossibleValuesParser::new(TIER_MODEL_VALUES.iter().copied()))]
+    pub tier_model: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
     /// Which findings make the run exit 1: any, or only high-confidence ones
@@ -948,6 +959,7 @@ impl Default for ScanArgs {
             baseline: None,
             baseline_mode_arg: None,
             min_confidence: None,
+            tier_model: None,
             fail_on: None,
             param: vec![],
             data: None,
@@ -1110,28 +1122,21 @@ impl ScanArgs {
             .unwrap_or(BASELINE_MODE_FILTER)
     }
 
-    /// The finding types the `--limit` tally counts, as the filter string
-    /// [`crate::scanning::count_matching_results`] takes (`ALL`, or the type
-    /// letters): `--limit-result-type` narrowed to the `--only-poc` types.
-    /// `--limit` caps what the report displays, so a finding `--only-poc`
-    /// hides must not stop the scan. Empty when the two exclude each other.
-    pub(crate) fn limit_count_filter(&self) -> String {
-        let limit = self.limit_result_type.to_uppercase();
-        if self.only_poc.is_empty() {
-            return limit;
-        }
-        let shown: String = self
-            .only_poc
-            .iter()
-            .map(|s| s.trim().to_uppercase())
-            .collect();
-        if limit == "ALL" {
-            shown
-        } else if shown.contains(&limit) {
-            limit
-        } else {
-            String::new()
-        }
+    pub(crate) fn matches_only_poc(&self, r: &crate::scanning::result::Result) -> bool {
+        self.only_poc.is_empty()
+            || self
+                .only_poc
+                .iter()
+                .any(|f| r.matches_type(&f.trim().to_uppercase(), self.tier_model.as_deref()))
+    }
+
+    pub(crate) fn counts_toward_limit(&self, r: &crate::scanning::result::Result) -> bool {
+        !self.below_min_confidence(r)
+            && self.matches_only_poc(r)
+            && r.matches_type(
+                &self.limit_result_type.to_uppercase(),
+                self.tier_model.as_deref(),
+            )
     }
 
     /// Whether `--min-confidence` drops `r`; see

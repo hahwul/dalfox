@@ -194,6 +194,7 @@ default. `target` is the only required one:
   "waf_evasion": false,
   "waf_min_confidence": 0.3,
   "min_confidence": null,
+  "tier_model": "legacy",
   "remote_payloads": [],
   "remote_wordlists": [],
   "max_payloads_per_param": 0,
@@ -622,3 +623,5 @@ poll, a `list_scans_dalfox` listing, the matching resource) carry
 - **Tool not showing up?** Make sure the `dalfox` binary is on the PATH the MCP client uses. For Claude Desktop on macOS, that's usually `/usr/local/bin` or `/opt/homebrew/bin`.
 - **Empty results?** Poll again; scans are async. Use `suggested_poll_interval_ms` as your cadence.
 - **Want logs?** Run `dalfox mcp --debug` while you're setting things up. The debug lines go to stderr so they don't pollute the MCP channel.
+
+`tier_model` accepts `legacy` (default) or `confidence`. The latter maps high→V/High and low→R/Info, preserving `detection_method` and informational severity. Unknown values are rejected as invalid input.

@@ -79,9 +79,13 @@ These are static flow checks; runtime reachability still needs confirmation.
 Every XSS finding carries `confidence` (`"high"` / `"low"`) plus a
 `confidence_reason` naming the deciding signals. It is absent on `I`.
 
-During the tier migration `type` and `confidence` can legitimately disagree
+Under the default `legacy` tier model `type` and `confidence` can legitimately disagree
 (`type: "V"`, `confidence: "low"` from two legacy AST promotions). That is the
 preview signal, not a bug.
+
+`--tier-model confidence` (config/REST/MCP `tier_model`) maps high to `V`/`High` and low to `R`/`Info` before dedup and filters. The default `legacy` view is unchanged. In the confidence view, `a` selects AST method for both `--only-poc` and `--limit-result-type`; informational severity is preserved. SARIF level follows the resulting severity.
+
+Reflection and DOM verification grade inline handlers, inline script bodies and `javascript:` URLs low when the evidence response's enforcing CSP header blocks inline script. Stored XSS uses the retrieval response. Report-only, absent policies and known CSP-bypass candidates keep their previous grade.
 
 What reads `confidence`:
 
@@ -368,3 +372,7 @@ A `done` scan can still carry `warnings` (a string list, absent when empty; dedu
    execute" — except for `detection_method: "oob"`, where a real browser did
    fetch the payload.
 6. Offer to re-run with `--deep-scan`, specific `--poc-type`, or WAF bypass options if the first pass was noisy or blocked.
+
+Request-based confidence keeps existing-script JS-context evidence high. CSP meta policies (whose position relative to execution is not established) and unsupported `script-src-attr` / `script-src-elem` overrides conservatively retain high.
+
+A matching nonce on an injected script retains high. Script hash permission and `unsafe-hashes` authorization are not resolved here and conservatively retain high.

@@ -276,6 +276,9 @@ pub(crate) struct ScanOptions {
     /// (drop low-confidence findings from the job's results). Informational
     /// findings carry no grade and are always kept.
     pub(crate) min_confidence: Option<String>,
+    /// Finding tiers: legacy (default) preserves V/A/R; confidence maps high to V,
+    /// low to R and re-derives severity. Detection method stays unchanged.
+    pub(crate) tier_model: Option<String>,
     /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped
     /// by the server's `--rate-limit` when set.
     pub(crate) rate_limit: Option<u32>,

@@ -592,14 +592,6 @@ impl PageSecurityPosture {
             // only an explicit, unpinned `'unsafe-inline'` does.
             // `missing_script_src` means neither `script-src` nor `default-src`
             // is present, so nothing restricts script execution.
-            //
-            // Known gap: `analyze_csp` collects nonces / hashes from
-            // `script-src` only, so a policy that pins them on `default-src`
-            // with no `script-src` reads as inline-permitting here and can grade
-            // `high` when the browser would block the handler. Widening that
-            // collection would also change which bypass payloads are generated,
-            // which is a detection-behaviour change and out of scope for this
-            // phase; the error is toward over-claiming on a rare policy shape.
             inline_script_allowed: csp.missing_script_src
                 || (csp.has_unsafe_inline && !csp.is_nonce_or_hash_based()),
         }

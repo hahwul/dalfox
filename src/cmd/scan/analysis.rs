@@ -920,9 +920,7 @@ pub(crate) async fn detect_outdated_libs(
                 results_clone,
                 findings_count_clone,
                 lib_findings,
-                &args_clone.limit_count_filter(),
-                args_clone.min_confidence.as_deref(),
-                args_clone.discard_below_min_confidence,
+                args_clone,
             )
             .await;
         }
@@ -966,9 +964,7 @@ async fn run_initial_ast_pass(
             results_clone,
             findings_count_clone,
             ast_batch,
-            &args_clone.limit_count_filter(),
-            args_clone.min_confidence.as_deref(),
-            args_clone.discard_below_min_confidence,
+            args_clone,
         )
         .await;
         if args_clone.analyze_external_js
@@ -990,9 +986,7 @@ async fn run_initial_ast_pass(
                 results_clone,
                 findings_count_clone,
                 ext_batch,
-                &args_clone.limit_count_filter(),
-                args_clone.min_confidence.as_deref(),
-                args_clone.discard_below_min_confidence,
+                args_clone,
             )
             .await;
         }

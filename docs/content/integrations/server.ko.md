@@ -383,6 +383,7 @@ curl http://127.0.0.1:6664/health
     "waf_min_confidence": 0.3,
     "max_payloads_per_param": 0,
     "min_confidence": "high",
+    "tier_model": "legacy",
     "blind_oob": true,
     "blind_oob_wait": 30,
     "session_check": "Sign out",
@@ -660,3 +661,5 @@ sudo systemctl enable --now dalfox
   요청만 제한합니다. 파라미터와 페이로드가 많은 스캔(또는 `deep_scan`)은 여전히 오랫동안
   실행될 수 있습니다. `--scan-timeout <secs>`를 설정하여 제출된 모든 스캔에 강제 벽시계
   시간 예산을 두면, 느린 대상 하나가 워커를 무한정 묶어 둘 수 없게 됩니다.
+
+`tier_model`은 `legacy`(기본값) 또는 `confidence`입니다. 후자는 high→V/High, low→R/Info로 매핑하고 `detection_method`와 정보용 severity를 유지합니다. 지원하지 않는 값은 입력 오류입니다.

@@ -82,6 +82,7 @@ pub(crate) struct ScanRequestSpec {
     pub(crate) session_check_url: Option<String>,
     /// `low` / `high`, already validated; `None` keeps every finding.
     pub(crate) min_confidence: Option<String>,
+    pub(crate) tier_model: Option<String>,
     /// Stored-XSS mode: inject at the target, look for the payload on
     /// `sxss_url` (plus pages discovery found on its own).
     pub(crate) sxss: bool,
@@ -191,6 +192,7 @@ impl Default for ScanRequestSpec {
             session_check: None,
             session_check_url: None,
             min_confidence: None,
+            tier_model: None,
         }
     }
 }
@@ -268,6 +270,7 @@ impl ScanRequestSpec {
             // Applied to the job's results when it settles
             // (`ScanRun::sanitized_results`), as the CLI applies it at render.
             min_confidence: self.min_confidence,
+            tier_model: self.tier_model,
             // ... and dropped as collected, so the findings cap above bounds
             // what the job stores rather than only what it reports.
             discard_below_min_confidence: true,
@@ -369,6 +372,7 @@ impl ScanRequestSpec {
             session_check: opts.session_check.clone(),
             session_check_url: opts.session_check_url.clone(),
             min_confidence: opts.min_confidence.clone(),
+            tier_model: opts.tier_model.clone(),
             sxss: opts.sxss.unwrap_or(d.sxss),
             sxss_url: opts.sxss_url.clone().unwrap_or(d.sxss_url),
             sxss_method: opts.sxss_method.clone().unwrap_or(d.sxss_method),

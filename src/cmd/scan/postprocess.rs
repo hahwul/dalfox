@@ -34,8 +34,8 @@ pub(crate) fn extract_context(response: &str, payload: &str) -> Option<(usize, S
 /// Dedup rank: type, then severity, then confidence (`high` > `low` >
 /// ungraded). Compared as a tuple so each axis only breaks ties in the one
 /// before it.
-fn result_priority(result: &Result) -> (u8, u8, u8) {
-    let type_score = match result.result_type {
+fn result_priority(result: &Result, model: Option<&str>) -> (u8, u8, u8) {
+    let type_score = match result.tier_for_model(model) {
         FindingType::Verified => 3,
         FindingType::AstDetected => 2,
         FindingType::Reflected => 1,
@@ -43,7 +43,8 @@ fn result_priority(result: &Result) -> (u8, u8, u8) {
         // this arm exists only for match exhaustiveness.
         FindingType::Informational => 0,
     };
-    let severity_score = match result.severity.as_str() {
+    let severity = result.severity_for_model(model);
+    let severity_score = match severity {
         "High" => 3,
         "Medium" => 2,
         "Low" => 1,
@@ -79,6 +80,13 @@ pub(crate) fn ast_dedup_parts(result: &Result) -> Option<(&str, &str, &str)> {
 // live list by reference, under its lock, without cloning request/response
 // bodies it is about to drop.
 pub(crate) fn dedupe_ast_results<T: std::borrow::Borrow<Result>>(results: Vec<T>) -> Vec<T> {
+    dedupe_ast_results_for_model(results, None)
+}
+
+pub(crate) fn dedupe_ast_results_for_model<T: std::borrow::Borrow<Result>>(
+    results: Vec<T>,
+    model: Option<&str>,
+) -> Vec<T> {
     let mut out: Vec<T> = Vec::with_capacity(results.len());
     let mut ast_index_by_key: HashMap<String, usize> = HashMap::new();
 
@@ -89,7 +97,9 @@ pub(crate) fn dedupe_ast_results<T: std::borrow::Borrow<Result>>(results: Vec<T>
         };
 
         if let Some(existing_idx) = ast_index_by_key.get(&key).copied() {
-            if result_priority(result.borrow()) > result_priority(out[existing_idx].borrow()) {
+            if result_priority(result.borrow(), model)
+                > result_priority(out[existing_idx].borrow(), model)
+            {
                 out[existing_idx] = result;
             }
         } else {

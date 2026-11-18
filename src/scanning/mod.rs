@@ -93,6 +93,7 @@ pub mod xss_common;
 
 // Scan-hub helper modules (extracted for parallel work / navigability).
 mod ast_dom_phase;
+mod confidence;
 mod param_jobs;
 mod payload_families;
 mod progress;
@@ -123,9 +124,7 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 
 /// Count how many results in `results` match `filter` and survive
-/// `--min-confidence` (`min_confidence`, the raw option value). `filter` is
-/// [`ScanArgs::limit_count_filter`]: `ALL`, or the uppercase type letters that
-/// count (normalised once at scan start).
+/// the confidence floor, --only-poc and --limit-result-type in the selected tier model.
 ///
 /// This is the findings tally behind `--limit`'s early stop, the deep-scan
 /// findings cap, the multi-target ticker, and the REST/MCP live
@@ -134,13 +133,20 @@ pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 /// reports nothing.
 pub(crate) fn count_matching_results(
     results: &[crate::scanning::result::Result],
-    filter: &str,
-    min_confidence: Option<&str>,
+    args: &ScanArgs,
 ) -> usize {
+    if args.tier_model.as_deref() == Some("confidence") {
+        return crate::cmd::scan::dedupe_ast_results_for_model(
+            results.iter().collect(),
+            args.tier_model.as_deref(),
+        )
+        .into_iter()
+        .filter(|r| args.counts_toward_limit(r))
+        .count();
+    }
     results
         .iter()
-        .filter(|r| !r.below_min_confidence(min_confidence))
-        .filter(|r| filter == "ALL" || filter.contains(r.result_type.short()))
+        .filter(|r| args.counts_toward_limit(r))
         .count()
 }
 
@@ -149,18 +155,28 @@ pub(crate) fn count_matching_results(
 /// already counted: `dedupe_ast_results` keeps one finding per
 /// `ast_dedup_key`, and every parameter's probe re-finds the same page-level
 /// sink.
-// ponytail: a key counts once any member matches; under `--limit-result-type a`
-// a later `V` duplicate wins the fold and the counted `A` is not reported.
+// Legacy counting retains its historical any-matching-copy rule. Confidence
+// counting follows the selected winner, including replacements across batches.
 pub(crate) fn count_new_matching_results(
     existing: &[crate::scanning::result::Result],
     batch: &[crate::scanning::result::Result],
-    filter: &str,
-    min_confidence: Option<&str>,
-) -> usize {
-    let matches = |r: &&crate::scanning::result::Result| {
-        !r.below_min_confidence(min_confidence)
-            && (filter == "ALL" || filter.contains(r.result_type.short()))
-    };
+    args: &ScanArgs,
+) -> isize {
+    if args.tier_model.as_deref() == Some("confidence")
+        && batch
+            .iter()
+            .any(|r| crate::cmd::scan::ast_dedup_parts(r).is_some())
+    {
+        let before = count_matching_results(existing, args);
+        let combined = existing.iter().chain(batch).collect();
+        let after =
+            crate::cmd::scan::dedupe_ast_results_for_model(combined, args.tier_model.as_deref())
+                .into_iter()
+                .filter(|r| args.counts_toward_limit(r))
+                .count();
+        return after as isize - before as isize;
+    }
+    let matches = |r: &&crate::scanning::result::Result| args.counts_toward_limit(r);
     // Borrowed keys: this runs under the results lock on every flush, so the
     // walk over `existing` must not allocate per result.
     use crate::cmd::scan::ast_dedup_parts as ast_key;
@@ -231,8 +247,7 @@ fn found_param_key(param: &Param) -> String {
 async fn collapse_target_results(
     results: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     findings_count: &Arc<AtomicUsize>,
-    limit_result_type: &str,
-    min_confidence: Option<&str>,
+    args: &ScanArgs,
     target: &Target,
 ) {
     // Before the lock: the key hashes the request body, and every other
@@ -249,9 +264,9 @@ async fn collapse_target_results(
     // so subtracting them underflows the unsigned counter to ~usize::MAX and
     // poisons `limit_reached()` for the rest of a multi-target run (a silent,
     // hard-to-diagnose scan truncation).
-    let before_matching = count_matching_results(&original, limit_result_type, min_confidence);
+    let before_matching = count_matching_results(&original, args);
     let collapsed = collapse_redundant_reflected(original, &target_key, &target_url_str);
-    let after_matching = count_matching_results(&collapsed, limit_result_type, min_confidence);
+    let after_matching = count_matching_results(&collapsed, args);
     *guard = collapsed;
     if after_matching < before_matching {
         findings_count.fetch_sub(before_matching - after_matching, Ordering::Relaxed);
@@ -529,7 +544,6 @@ struct ScanWorkerCtx {
     findings_count: Arc<AtomicUsize>,
     pb: Option<ProgressBar>,
     overall_pb: Option<Arc<indicatif::ProgressBar>>,
-    limit_result_type: Arc<str>,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
     /// Per-parameter worker slot: one permit per param, held for the whole
@@ -622,6 +636,7 @@ impl ScanWorkerCtx {
         u16,
         bool,
         Option<crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome>,
+        bool,
     ) {
         let _permit = self.req_budget.acquire().await;
         check_reflection::check_reflection_with_dom_outcome(
@@ -692,15 +707,7 @@ impl ScanWorkerCtx {
         }
         let mut batch = std::mem::take(local_results);
         crate::scanning::result::stamp_origin(&mut batch, &self.target.state_key());
-        accumulate_findings(
-            &self.results,
-            &self.findings_count,
-            batch,
-            &self.limit_result_type,
-            self.args.min_confidence.as_deref(),
-            self.args.discard_below_min_confidence,
-        )
-        .await;
+        accumulate_findings(&self.results, &self.findings_count, batch, &self.args).await;
     }
 
     /// Scan a single parameter end-to-end: acquire a worker permit, probe
@@ -1109,7 +1116,14 @@ impl ScanWorkerCtx {
             .await;
             for (
                 reflection_payload,
-                (reflected_kind, reflection_body, status, xml_content_type, dom_outcome),
+                (
+                    reflected_kind,
+                    reflection_body,
+                    status,
+                    xml_content_type,
+                    dom_outcome,
+                    inline_blocked,
+                ),
             ) in reflection_payloads[i..end].iter().zip(fetched)
             {
                 self.inc_progress(1);
@@ -1163,7 +1177,7 @@ impl ScanWorkerCtx {
                     reflection_payload,
                     reflected_kind,
                     reflection_body,
-                    (status, xml_content_type),
+                    (status, xml_content_type, inline_blocked),
                     state,
                 )
                 .await;
@@ -1238,7 +1252,7 @@ impl ScanWorkerCtx {
         // payload total or ticked on the progress bar — the same treatment the
         // shared CSP/tech payloads get (see `generate_param_jobs`), so the bar
         // still reaches 100% from the planned set and never overshoots.
-        let (_, reflection_body, status, _xml, _) =
+        let (_, reflection_body, status, _xml, _, _) =
             self.fetch_reflection(param, probe, waf_streak, false).await;
         // A 4xx/5xx body is a WAF block / error interstitial, not the page the
         // framework compiles — `tech_info` was fingerprinted from the preflight
@@ -1327,10 +1341,10 @@ impl ScanWorkerCtx {
         reflection_payload: &str,
         reflected_kind: Option<check_reflection::ReflectionKind>,
         reflection_body: Option<check_reflection::ReflectionBody>,
-        status_and_xml_content_type: (u16, bool),
+        response_meta: (u16, bool, bool),
         state: &mut ParamScanState,
     ) {
-        let (status, xml_content_type) = status_and_xml_content_type;
+        let (status, xml_content_type, inline_blocked) = response_meta;
         {
             // Everything downstream of here infers execution from the body
             // (AST sinks, the static V upgrade), so it may only ever see a
@@ -1529,14 +1543,16 @@ impl ScanWorkerCtx {
                     // label to `*-CSTI` so users can tell client-side
                     // template injection apart from generic HTML reflection.
                     let (confidence, confidence_reason) = if dom_evidence_kind.is_some() {
-                        (
-                            crate::scanning::result::Confidence::High,
+                        confidence::verified_grade(
+                            inline_blocked,
+                            dom_evidence_kind,
                             "payload reached an executable position in the parsed response",
                         )
                     } else {
                         (
                             crate::scanning::result::Confidence::Low,
-                            "payload echoed in the response; no executable position confirmed",
+                            "payload echoed in the response; no executable position confirmed"
+                                .to_string(),
                         )
                     };
                     let mut result = crate::scanning::result::Result::builder(finding_type)
@@ -1673,6 +1689,7 @@ impl ScanWorkerCtx {
                 let crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome {
                     outcome,
                     evidence_kind,
+                    inline_blocked,
                 } = outcome;
                 let crate::scanning::check_dom_verification::DomVerifyOutcome {
                     verified: dom_verified,
@@ -1719,16 +1736,18 @@ impl ScanWorkerCtx {
                         let evidence_label =
                             evidence_kind.map_or("DOM evidence", |kind| kind.label());
 
-                        // DOM-verified => Vulnerability
+                        let (confidence, confidence_reason) = confidence::verified_grade(
+                            inline_blocked,
+                            evidence_kind,
+                            format!(
+                                "DOM verification confirmed an executable position ({})",
+                                evidence_label
+                            ),
+                        );
+                        // DOM-verified => Vulnerability (the legacy tier is unchanged).
                         let mut result =
                             crate::scanning::result::Result::builder(FindingType::Verified)
-                                .confidence(
-                                    crate::scanning::result::Confidence::High,
-                                    format!(
-                                        "DOM verification confirmed an executable position ({})",
-                                        evidence_label
-                                    ),
-                                )
+                                .confidence(confidence, confidence_reason)
                                 .inject_type(inject_type_for_payload_with_sink(
                                     self.args.sxss,
                                     dom_payload,
@@ -2074,7 +2093,6 @@ pub async fn run_scanning(
     let req_budget = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
         effective_workers,
     )));
-    let limit_result_type: Arc<str> = Arc::from(args.limit_count_filter());
 
     // Reset WAF block counters for this scan
     crate::WAF_BLOCK_COUNT.store(0, Ordering::Relaxed);
@@ -2111,7 +2129,6 @@ pub async fn run_scanning(
         findings_count: findings_count.clone(),
         pb: pb.clone(),
         overall_pb: overall_pb.clone(),
-        limit_result_type: limit_result_type.clone(),
         cancel: cancel.clone(),
         finding_tx: finding_tx.clone(),
         semaphore: semaphore.clone(),
@@ -2241,14 +2258,7 @@ pub async fn run_scanning(
     // Collapse this target's R findings that are already proven by one of
     // its own V findings on the same (param, location, inject_type), scoped
     // to the current target so other targets' findings are never affected.
-    collapse_target_results(
-        &results,
-        &findings_count,
-        &limit_result_type,
-        args.min_confidence.as_deref(),
-        target,
-    )
-    .await;
+    collapse_target_results(&results, &findings_count, &args, target).await;
 
     if let Some(pb) = pb {
         finish_scan_bar(

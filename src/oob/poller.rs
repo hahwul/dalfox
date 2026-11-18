@@ -89,7 +89,7 @@ struct Poller {
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
-    limit_result_type: String,
+    count_args: crate::cmd::scan::ScanArgs,
     cancel: Arc<AtomicBool>,
     seen: StdMutex<HashSet<String>>,
     stop: AtomicBool,
@@ -132,7 +132,7 @@ pub(crate) fn spawn_poller(
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
-    limit_result_type: &str,
+    args: &crate::cmd::scan::ScanArgs,
     cancel: Arc<AtomicBool>,
     silence: bool,
 ) -> PollerHandle {
@@ -140,7 +140,12 @@ pub(crate) fn spawn_poller(
         session,
         results,
         findings_count,
-        limit_result_type: limit_result_type.to_string(),
+        count_args: crate::cmd::scan::ScanArgs {
+            limit_result_type: args.limit_result_type.clone(),
+            only_poc: args.only_poc.clone(),
+            tier_model: args.tier_model.clone(),
+            ..Default::default()
+        },
         cancel,
         seen: StdMutex::new(HashSet::new()),
         stop: AtomicBool::new(false),
@@ -290,15 +295,7 @@ async fn poll_once(p: &Poller) {
     }
 
     // OOB findings are always `High`, so `--min-confidence` never drops one.
-    crate::scanning::accumulate_findings(
-        &p.results,
-        &p.findings_count,
-        batch,
-        &p.limit_result_type,
-        None,
-        false,
-    )
-    .await;
+    crate::scanning::accumulate_findings(&p.results, &p.findings_count, batch, &p.count_args).await;
 }
 
 /// One-line stderr notice when a callback lands (kept off stdout so JSON/SARIF

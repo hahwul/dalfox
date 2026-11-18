@@ -185,8 +185,10 @@ pub(crate) async fn run_scan_loop(
         let include_response = args.include_response;
         let streamed = state.streamed_findings.clone();
         let min_confidence = args.min_confidence.clone();
+        let tier_model = args.tier_model.clone();
         let handle = tokio::spawn(async move {
-            while let Some(result) = rx.recv().await {
+            while let Some(mut result) = rx.recv().await {
+                result.apply_tier_model(tier_model.as_deref());
                 if !super::output::admit_streamed(
                     &result,
                     min_confidence.as_deref(),

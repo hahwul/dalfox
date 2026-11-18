@@ -425,3 +425,5 @@ dalfox scan scope.txt --only-poc v -f json -o .dalfox/baseline.json
 
 - [REST API 서버](../../integrations/server/)로 스캔을 자동화하세요.
 - [MCP 서버](../../integrations/mcp/)로 AI 에이전트가 스캔을 돌리게 하세요.
+
+`--tier-model confidence`는 렌더링 전에 high→`V`/`High`, low→`R`/`Info`로 매핑합니다. `A`는 출력하지 않으며 `detection_method: ast`로 구분합니다. `I`의 severity와 등급 없는 결과는 유지합니다. SARIF level은 새 severity를 따릅니다. 기본값은 `legacy`입니다. 실제 응답의 CSP 헤더가 인라인 실행을 막으면 반사·DOM 검증도 low가 될 수 있습니다.

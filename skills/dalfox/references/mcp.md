@@ -114,6 +114,7 @@ Terminal jobs auto-purge after 1 hour.
   "waf_evasion": false,                            // adaptive evasion: request jitter + cooldown on clusters of blocks
   "waf_min_confidence": 0.3,                       // 0.0–1.0 floor; weaker fingerprints are discarded
   "min_confidence": "high",                        // omit or "low" = keep all; "high" drops low-confidence findings (I kept)
+  "tier_model": "legacy",
   "remote_payloads": ["portswigger"],              // fetch remote XSS payload sets ("portswigger", "payloadbox")
   "remote_wordlists": ["burp"],                    // fetch remote param wordlists ("burp", "assetnote")
   "max_payloads_per_param": 0,                     // 0 = built-in cap (3000 per set unless deep_scan); use 10–50 for agent smoke
@@ -277,3 +278,5 @@ One `scan_with_dalfox` call → terminal results (or `wait_timed_out`).
    terminal jobs auto-expire).
 
 When both MCP tools and the `dalfox` binary exist, **prefer MCP** for agent-driven work.
+
+`tier_model` accepts `legacy` (default) or `confidence`. The latter maps high→V/High and low→R/Info, preserving `detection_method` and informational severity. Unknown values are rejected as invalid input.

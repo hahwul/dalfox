@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-09-13T09:02:11Z",
+  "generated_at": "2026-11-18T14:13:45Z",
   "tool": "effectiveness",
-  "dalfox_version": "3.2.2",
+  "dalfox_version": "3.3.0",
   "corpus": {
     "lab_cases": 809,
     "scanned": 809,
@@ -10,13 +10,13 @@
   "total": {
     "cases": 809,
     "expected": 753,
-    "tp": 729,
+    "tp": 728,
     "fp": 1,
-    "fn": 24,
+    "fn": 25,
     "tn": 55,
     "precision": 99.86,
-    "recall": 96.81,
-    "f1": 98.31
+    "recall": 96.68,
+    "f1": 98.24
   },
   "verified": {
     "cases": 809,
@@ -29,6 +29,94 @@
     "recall": 82.07,
     "f1": 90.09
   },
+  "high_confidence": {
+    "cases": 809,
+    "expected": 753,
+    "tp": 695,
+    "fp": 1,
+    "fn": 58,
+    "tn": 55,
+    "precision": 99.86,
+    "recall": 92.3,
+    "f1": 95.93
+  },
+  "by_method_confidence": [
+    {
+      "detection_method": "ast",
+      "confidence": "high",
+      "metrics": {
+        "cases": 809,
+        "expected": 753,
+        "tp": 77,
+        "fp": 0,
+        "fn": 676,
+        "tn": 56,
+        "precision": 100.0,
+        "recall": 10.23,
+        "f1": 18.56
+      }
+    },
+    {
+      "detection_method": "ast",
+      "confidence": "low",
+      "metrics": {
+        "cases": 809,
+        "expected": 753,
+        "tp": 38,
+        "fp": 0,
+        "fn": 715,
+        "tn": 56,
+        "precision": 100.0,
+        "recall": 5.05,
+        "f1": 9.61
+      }
+    },
+    {
+      "detection_method": "dom-verification",
+      "confidence": "high",
+      "metrics": {
+        "cases": 809,
+        "expected": 753,
+        "tp": 72,
+        "fp": 0,
+        "fn": 681,
+        "tn": 56,
+        "precision": 100.0,
+        "recall": 9.56,
+        "f1": 17.45
+      }
+    },
+    {
+      "detection_method": "reflection",
+      "confidence": "high",
+      "metrics": {
+        "cases": 809,
+        "expected": 753,
+        "tp": 546,
+        "fp": 1,
+        "fn": 207,
+        "tn": 55,
+        "precision": 99.82,
+        "recall": 72.51,
+        "f1": 84.0
+      }
+    },
+    {
+      "detection_method": "reflection",
+      "confidence": "low",
+      "metrics": {
+        "cases": 809,
+        "expected": 753,
+        "tp": 1,
+        "fp": 0,
+        "fn": 752,
+        "tn": 56,
+        "precision": 100.0,
+        "recall": 0.13,
+        "f1": 0.26
+      }
+    }
+  ],
   "categories": [
     {
       "category": "body",
@@ -42,6 +130,12 @@
       "recall": 85.29,
       "f1": 92.06,
       "verified": {
+        "tp": 29,
+        "fp": 0,
+        "recall": 85.29,
+        "precision": 100.0
+      },
+      "high_confidence": {
         "tp": 29,
         "fp": 0,
         "recall": 85.29,
@@ -64,24 +158,36 @@
         "fp": 0,
         "recall": 86.84,
         "precision": 100.0
+      },
+      "high_confidence": {
+        "tp": 33,
+        "fp": 0,
+        "recall": 86.84,
+        "precision": 100.0
       }
     },
     {
       "category": "dom_xss",
       "cases": 153,
       "expected": 110,
-      "tp": 110,
+      "tp": 109,
       "fp": 0,
-      "fn": 0,
+      "fn": 1,
       "tn": 43,
       "precision": 100.0,
-      "recall": 100.0,
-      "f1": 100.0,
+      "recall": 99.09,
+      "f1": 99.54,
       "verified": {
         "tp": 0,
         "fp": 0,
         "recall": 0.0,
         "precision": 0.0
+      },
+      "high_confidence": {
+        "tp": 77,
+        "fp": 0,
+        "recall": 70.0,
+        "precision": 100.0
       }
     },
     {
@@ -96,6 +202,12 @@
       "recall": 89.58,
       "f1": 94.5,
       "verified": {
+        "tp": 43,
+        "fp": 0,
+        "recall": 89.58,
+        "precision": 100.0
+      },
+      "high_confidence": {
         "tp": 43,
         "fp": 0,
         "recall": 89.58,
@@ -118,6 +230,12 @@
         "fp": 0,
         "recall": 83.87,
         "precision": 100.0
+      },
+      "high_confidence": {
+        "tp": 26,
+        "fp": 0,
+        "recall": 83.87,
+        "precision": 100.0
       }
     },
     {
@@ -132,9 +250,15 @@
       "recall": 98.49,
       "f1": 99.24,
       "verified": {
-        "tp": 260,
+        "tp": 261,
         "fp": 0,
-        "recall": 98.11,
+        "recall": 98.49,
+        "precision": 100.0
+      },
+      "high_confidence": {
+        "tp": 261,
+        "fp": 0,
+        "recall": 98.49,
         "precision": 100.0
       }
     },
@@ -150,20 +274,26 @@
       "recall": 100.0,
       "f1": 99.78,
       "verified": {
-        "tp": 227,
+        "tp": 226,
         "fp": 1,
-        "recall": 100.0,
+        "recall": 99.56,
+        "precision": 99.56
+      },
+      "high_confidence": {
+        "tp": 226,
+        "fp": 1,
+        "recall": 99.56,
         "precision": 99.56
       }
     }
   ],
   "timing": {
-    "wall_clock_seconds": 1.4,
-    "median_seconds": 0.011,
-    "slowest_seconds": 0.08,
+    "wall_clock_seconds": 1.6,
+    "median_seconds": 0.014,
+    "slowest_seconds": 0.06,
     "concurrency": 8
   },
-  "ast_only": 110,
+  "ast_only": 109,
   "errors": 0,
   "cases": [
     {
@@ -181,7 +311,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.08,
+      "seconds": 0.06,
       "error": null
     },
     {
@@ -271,7 +401,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.08,
+      "seconds": 0.05,
       "error": null
     },
     {
@@ -307,7 +437,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.01,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -343,7 +473,25 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.02,
+      "seconds": 0.01,
+      "error": null
+    },
+    {
+      "kind": "FN",
+      "uid": "dom_xss/1342",
+      "name": "class_static_method_summary_flow",
+      "category": "dom_xss",
+      "param": "query",
+      "location": "Query",
+      "url": "http://127.0.0.1:4801/case/dom_xss/1342?query=test",
+      "result_type": "",
+      "detection_method": "",
+      "confidence": "",
+      "payload": "",
+      "evidence": "",
+      "findings": 0,
+      "verified_findings": 0,
+      "seconds": 0.01,
       "error": null
     },
     {
@@ -361,7 +509,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.05,
+      "seconds": 0.04,
       "error": null
     },
     {
@@ -451,7 +599,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.06,
+      "seconds": 0.05,
       "error": null
     },
     {
@@ -505,7 +653,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.02,
+      "seconds": 0.01,
       "error": null
     },
     {
@@ -523,7 +671,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.02,
+      "seconds": 0.01,
       "error": null
     },
     {
@@ -609,7 +757,7 @@
       "result_type": "V",
       "detection_method": "reflection",
       "confidence": "high",
-      "payload": "</textarea><IMG src=x onerror=alert(1) ClAss=dlx9051c17e>",
+      "payload": "</textarea><IMG src=x onerror=alert(1) ClAss=dlxae33b6fc>",
       "evidence": "DOM verification successful for param query (DOM marker)",
       "findings": 1,
       "verified_findings": 1,

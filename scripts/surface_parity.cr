@@ -458,6 +458,15 @@ report.group("REST <-> MCP scan surface")
 mcp_set = mcp_params.to_set
 rest_mapped = rest_options.map { |o| REST_TO_MCP_ALIASES[o]? || o }
 
+report.check("tier_model exposed on CLI, REST and MCP", "missing tier_model surface") do
+  flag_by_long.has_key?("tier-model") && rest_options.includes?("tier_model") && mcp_params.includes?("tier_model")
+end
+report.check("REST/MCP tier_model uses shared validation", "tier_model validation missing") do
+  read("src/job/mod.rs").includes?("TIER_MODEL_VALUES.contains(&model)") &&
+    read("src/server/util.rs").includes?("tier_model: opts.tier_model.as_deref()") &&
+    mcp_src.includes?("tier_model: tier_model.as_deref()")
+end
+
 report.check_empty("every REST scan option exists on the MCP tool",
   rest_options.reject { |o| REST_ONLY_OPTIONS.includes?(o) }
     .reject { |o| mcp_set.includes?(REST_TO_MCP_ALIASES[o]? || o) }, MAX_LIST)
