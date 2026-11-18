@@ -122,6 +122,17 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 5. Result aggregation
 6. Format-specific output rendering
 
+### AST summary safety
+
+- Selector-helper suppressions require stable callable/constructor bindings and
+  read-only callee/argument evaluation; argument writes run before the helper body.
+- General declaration-collision resolution is bounded to direct transfers.
+  Unsupported collisions retain existing conservative flow facts: replacing them
+  with empty summaries can drop real parameter-to-sink findings. Preserve outer
+  summaries intact and keep the declaration cache bounded.
+- Webpack export resolution has its own scope gate; general declaration changes
+  must preserve its ordinary-walk isolation.
+
 ### Where to edit by feature
 
 - New scan flag:

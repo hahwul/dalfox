@@ -53,6 +53,17 @@ that only ever touches its own argument is not reported against an outer
 variable. Stable bare-function returns retain a fixed relative or page-origin
 URL start for navigation sinks. Ambiguous or mutable calls, shadowed browser
 globals, and unsupported return shapes keep conservative findings.
+A selector prefix can also rule out a simple helper's jQuery HTML constructor:
+its body must forward the parameter unchanged through a single call chain with
+static method arguments. Calls with writes or unknown effects in the callee or
+arguments, shadowed/reassigned jQuery, transformed parameters, and larger
+helpers retain conservative findings.
+For same-named function declarations, simple local transfers use the summary
+of the declaration in that body and restore the enclosing summary afterward.
+This covers plain parameters forwarded by a single property assignment or
+returned as a parameter/literal, plus no-argument direct browser-source reads.
+Complex collisions retain the existing conservative approximation; this is
+not a complete lexical resolver. Cached declaration summaries are bounded.
 Within a webpack bundle, literal module IDs and supported getter exports
 connect imported calls to the exporting factory. Ambiguous or mutated bindings,
 unknown factory initialization, and separately loaded chunks remain outside

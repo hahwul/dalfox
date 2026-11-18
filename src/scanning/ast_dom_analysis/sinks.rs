@@ -748,6 +748,11 @@ impl<'a> DomXssVisitor<'a> {
                     continue;
                 }
                 if sink_name == "jQuery$"
+                    && self.selector_input_is_read_only(&call.callee)
+                    && call.arguments.iter().all(|arg| {
+                        arg.as_expression()
+                            .is_some_and(|expr| self.selector_input_is_read_only(expr))
+                    })
                     && !self.return_written_roots.contains("$")
                     && !self.return_written_roots.contains("jQuery")
                     && self

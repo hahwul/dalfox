@@ -1733,11 +1733,10 @@ fn nested_same_named_declarations_respect_the_work_budget() {
 
 #[test]
 fn colliding_declarations_bound_inference_without_skipping_direct_sources() {
-    assert_clean(&[
-        "function outer(){function show(x){el.innerHTML=x}} function main(){function show(x){const y=x;el.textContent=y} show(location.hash.slice(1))} main();",
-        "function outer(){function id(x){el.innerHTML=x}} function main(){function id(x){return normalize(x)} function normalize(x){return 0} id(location.hash.slice(1))} main();",
-    ]);
     assert_reported(&[
+        "function f(x){el.innerHTML=x} function main(){function f(x){const y=x;el.innerHTML=y} f(location.hash)} main();",
+        "function f(x){el.innerHTML=x} function main(){function f(x){if(ok)el.innerHTML=x} f(location.hash)} main();",
+        "function f(x){el.innerHTML=x} function main(){function f(x){g(x)} function g(y){el.innerHTML=y} f(location.hash)} main();",
         "function outer(){function show(x){el.textContent=x}} function main(){function show(x){log();el.innerHTML=location.hash} show('fixed')} main();",
         "function outer(){function id(x){return 'fixed'}} function main(){function id(x){return x} el.innerHTML=id(location.hash)} main();",
         "function outer(){function id(x){return x}} function main(){function id(x){return 'fixed'} id('fixed')} main();el.innerHTML=id(location.hash);",
@@ -1759,12 +1758,38 @@ fn unsupported_colliding_declarations_have_no_suppression_facts() {
         };
         let body = &main.body.as_ref().expect("main body").statements;
         let displaced = visitor.collect_function_declarations(body);
-        assert_eq!(displaced.len(), 1);
-        let own = visitor.summary("show").expect("scoped unknown summary");
+        assert!(displaced.is_empty());
+        let own = visitor
+            .summary("show")
+            .expect("conservative legacy summary");
         assert!(own.return_lead_ambiguous);
         assert!(own.return_url_lead.is_none());
         assert!(own.pinned_param_return_leads.is_empty());
         assert!(own.selector_param.is_none());
     })
     .expect("bounded source parses");
+}
+
+#[test]
+fn selector_helper_arguments_cannot_replace_jquery_before_the_body_runs() {
+    assert_clean(&[
+        "function u(t){$(t).addClass('x')}(0,u)('#'+location.hash.slice(1),'fixed');",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.substring(1));",
+        "function u(t){$(t).addClass('x')}u(`#${location.hash.substr(1)}`);",
+    ]);
+    assert_reported(&[
+        "function u(t){$(t).addClass('x')}u('#'+($=other,location.hash.slice(1)));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),$=other);",
+        "function u(t){jQuery(t).addClass('x')}u('#'+location.hash.slice(1),jQuery=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),window.$=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),window['$']=other);",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),Object.assign(window,{$:other}));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),Reflect.set(window,'$',other));",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),$=function(t){el.innerHTML=t.slice(1);return {addClass(){}}});",
+        "function u(t){$(t).addClass('x')}u('#'+location.hash.slice(1),unknown());",
+        "function u(t){$(t).addClass('x')}($=other,u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(u=other,u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(Object.assign(window,{$:other}),u)('#'+location.hash.slice(1));",
+        "function u(t){$(t).addClass('x')}(Reflect.set(window,'$',other),u)('#'+location.hash.slice(1));",
+    ]);
 }
