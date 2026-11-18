@@ -300,7 +300,9 @@ impl<'a> DomXssVisitor<'a> {
                 matches!(stmt.expression.without_parentheses(), Expression::AssignmentExpression(a)
                     if a.operator.is_assign() && local_value(&a.right)
                         && matches!(&a.left, AssignmentTarget::StaticMemberExpression(m)
-                            if matches!(m.object.without_parentheses(), Expression::Identifier(_))))
+                            if matches!(m.object.without_parentheses(), Expression::Identifier(id)
+                                if !func.params.items.iter().any(|p| matches!(&p.pattern,
+                                    BindingPattern::BindingIdentifier(param) if param.name == id.name)))))
             }
             _ => false,
         }

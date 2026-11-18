@@ -60,9 +60,10 @@ arguments, shadowed/reassigned jQuery, transformed parameters, and larger
 helpers retain conservative findings.
 For same-named function declarations, simple local transfers use the summary
 of the declaration in that body and restore the enclosing summary afterward.
-This covers plain parameters forwarded by a single property assignment or
-returned as a parameter/literal, plus no-argument direct browser-source reads.
-Complex collisions retain the existing conservative approximation; this is
+This covers plain parameters forwarded by a single property assignment to an
+outer object or returned as a parameter/literal, plus no-argument direct
+browser-source reads. Writes through object parameters and other complex
+collisions retain the existing conservative approximation; this is
 not a complete lexical resolver. Cached declaration summaries are bounded.
 Within a webpack bundle, literal module IDs and supported getter exports
 connect imported calls to the exporting factory. Ambiguous or mutated bindings,

@@ -1716,7 +1716,7 @@ fn a_declaration_summary_cache_is_bounded() {
 
 #[test]
 fn a_declaration_summary_restores_recursive_placeholders() {
-    let js = "function f(h){el.innerHTML=h} function outer(){function f(h){if(h)f(h);else el.textContent=h} f(location.hash.slice(1))} outer();f(location.hash.slice(1));";
+    let js = "function f(h){function outer(){function f(h){el.textContent=h} f('fixed')} if(h)f(h);else el.innerHTML=h} f(location.hash);";
     assert_eq!(flows(js), ["location.hash -> innerHTML"]);
 }
 
@@ -1734,6 +1734,7 @@ fn nested_same_named_declarations_respect_the_work_budget() {
 #[test]
 fn colliding_declarations_bound_inference_without_skipping_direct_sources() {
     assert_reported(&[
+        "function f(o,x){el.innerHTML=x} function main(){function f(o,x){o.value=x} var o={}; f(o,location.hash);el.innerHTML=o.value} main();",
         "function f(x){el.innerHTML=x} function main(){function f(x){const y=x;el.innerHTML=y} f(location.hash)} main();",
         "function f(x){el.innerHTML=x} function main(){function f(x){if(ok)el.innerHTML=x} f(location.hash)} main();",
         "function f(x){el.innerHTML=x} function main(){function f(x){g(x)} function g(y){el.innerHTML=y} f(location.hash)} main();",
