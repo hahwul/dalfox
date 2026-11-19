@@ -46,7 +46,7 @@ pub(crate) fn max_connections() -> usize {
 
 fn connections_for(nofile_soft_limit: Option<usize>) -> usize {
     nofile_soft_limit.map_or(FALLBACK_MAX_CONNECTIONS, |limit| {
-        (limit / 2).clamp(16, 65_536)
+        (limit / 2).clamp(1, 65_536)
     })
 }
 
@@ -368,9 +368,9 @@ mod tests {
         assert_eq!(connections_for(Some(1024)), 512);
         // Never more than the limit itself, never an unbounded number of tasks.
         assert_eq!(connections_for(Some(128)), 64);
-        assert_eq!(connections_for(Some(8)), 16);
+        assert_eq!(connections_for(Some(8)), 4);
         assert_eq!(connections_for(Some(1_048_576)), 65_536);
         assert_eq!(connections_for(None), FALLBACK_MAX_CONNECTIONS);
-        assert!(max_connections() >= 16);
+        assert!(max_connections() >= 1);
     }
 }

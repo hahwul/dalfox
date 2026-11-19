@@ -555,6 +555,7 @@ the moment of the `DELETE`:
   "target": "https://target.app?q=test",
   "url": "https://target.app?q=test",
   "results": [],
+  "pagination": { "total": 0, "offset": 0, "limit": 0, "returned": 0, "has_more": false },
   "error_message": null,
   "queued_at_ms": 1758700000000,
   "started_at_ms": 1758700000120,
@@ -568,7 +569,9 @@ reports. `error_message` is that endpoint's `error_message` too: `null` for a
 clean finish or a plain cancel, otherwise the reason (target unreachable, a
 `scan_timeout` expiry, lost session, worker panic, server shutdown). A `warnings` list is added
 when the job has one, exactly as `GET /scan/{id}` reports it. The four timing
-fields are that endpoint's too. `url` repeats `target` for subscribers written
+fields are that endpoint's too. `results` is the first page that endpoint
+serves, under the same 16 MiB budget: when `pagination.has_more` is `true`,
+fetch the rest from `GET /scan/{id}?offset=`. `url` repeats `target` for subscribers written
 against the older body. The POST goes through the
 scan's own proxy and TLS settings, times out after 10 seconds, and is not
 retried.

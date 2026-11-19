@@ -528,6 +528,7 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
   "target": "https://target.app?q=test",
   "url": "https://target.app?q=test",
   "results": [],
+  "pagination": { "total": 0, "offset": 0, "limit": 0, "returned": 0, "has_more": false },
   "error_message": null,
   "queued_at_ms": 1758700000000,
   "started_at_ms": 1758700000120,
@@ -539,7 +540,7 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
 `status`는 `done`, `error`, `cancelled` 중 하나로, `GET /scan/{id}`가 보고하는 값과
 같습니다. `error_message`도 그 엔드포인트의 값과 같아서, 정상 종료나 단순 취소에서는
 `null`이고 그 밖에는 사유(대상 접근 불가, `scan_timeout` 만료, 세션 소실, 워커 패닉, 서버 종료)입니다. 잡에 `warnings`가 있으면
-`GET /scan/{id}`와 같은 목록이 함께 붙습니다. 시간 필드 네 개도 그 엔드포인트의 값과 같습니다. `url`은 예전 본문에
+`GET /scan/{id}`와 같은 목록이 함께 붙습니다. 시간 필드 네 개도 그 엔드포인트의 값과 같습니다. `results`는 그 엔드포인트가 주는 첫 페이지이며 같은 16 MiB 예산을 따릅니다. `pagination.has_more`가 `true`면 나머지는 `GET /scan/{id}?offset=`으로 가져오세요. `url`은 예전 본문에
 맞춰 만든 수신 측을 위해 `target`을 한 번 더 싣는 필드입니다. 이 POST는 스캔 자신의
 프록시·TLS 설정을 따르며, 10초 뒤 타임아웃되고, 재시도하지 않습니다.
 

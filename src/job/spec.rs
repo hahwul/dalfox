@@ -219,7 +219,13 @@ impl ScanRequestSpec {
             silence: true,
             no_color: true,
 
-            param: self.param,
+            param: {
+                // Validation counts distinct names; store that many.
+                let mut seen = std::collections::HashSet::new();
+                let mut param = self.param;
+                param.retain(|p| seen.insert(p.clone()));
+                param
+            },
             data: self.data,
             headers: self.headers,
             cookies: self.cookies,

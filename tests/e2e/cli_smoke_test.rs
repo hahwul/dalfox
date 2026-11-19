@@ -1305,7 +1305,9 @@ fn test_mcp_outlives_a_closed_stderr() {
             ),
             id,
         );
-        if listed.contains("unreachable") || listed.contains("panicked") {
+        // An empty reply is a server that stopped answering: fail now, not
+        // after waiting out every remaining call.
+        if listed.is_empty() || listed.contains("unreachable") || listed.contains("panicked") {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));

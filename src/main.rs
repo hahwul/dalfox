@@ -232,6 +232,9 @@ async fn main() {
                 _ => String::new(),
             };
             utils::term::emit(true, format!("{info}{trace}\n"));
+            // A panic on the main thread ends the process next; give the
+            // writer a moment so the message is not lost with it.
+            utils::term::flush_daemon_output(std::time::Duration::from_millis(250));
             return;
         }
         default_panic_hook(info);

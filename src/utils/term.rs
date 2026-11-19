@@ -316,20 +316,29 @@ pub fn flush_daemon_output(wait: std::time::Duration) {
         return;
     }
     let deadline = std::time::Instant::now() + wait;
-    for stderr in [false, true] {
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        // A full queue is a reader that is behind, not one that is gone: keep
-        // offering the marker until the deadline.
-        while daemon_writer(stderr)
-            .try_send(DaemonOut::Flush(done_tx.clone()))
-            .is_err()
-        {
-            if std::time::Instant::now() >= deadline {
-                return;
+    let pending: Vec<_> = [false, true]
+        .into_iter()
+        .filter_map(|stderr| {
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            loop {
+                match daemon_writer(stderr).try_send(DaemonOut::Flush(done_tx.clone())) {
+                    Ok(()) => return Some(done_rx),
+                    // No writer thread: nothing queued will ever be written.
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return None,
+                    // A full queue is a reader that is behind, not one that
+                    // is gone: keep offering the marker until the deadline.
+                    Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                        if std::time::Instant::now() >= deadline {
+                            return None;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        let _ = done_rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
+        })
+        .collect();
+    for done in pending {
+        let _ = done.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
     }
 }
 
@@ -388,6 +397,14 @@ mod tests {
     /// inside a server or MCP job, where a direct `println!` / `eprintln!`
     /// panics the job when the log reader is gone. Those modules print through
     /// `cprintln!` / `ceprintln!`, which go through [`emit`].
+    #[test]
+    fn each_stream_has_its_own_daemon_queue() {
+        // One queue for both would let a stalled stderr reader fill it and
+        // cost stdout its lines.
+        assert!(!std::ptr::eq(daemon_writer(false), daemon_writer(true)));
+        assert!(std::ptr::eq(daemon_writer(true), daemon_writer(true)));
+    }
+
     #[test]
     fn job_reachable_modules_never_print_directly() {
         fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

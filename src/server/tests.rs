@@ -2012,6 +2012,13 @@ async fn test_run_scan_job_webhook_reports_done_status() {
         "successful scan must emit status=done (got payload: {})",
         payload
     );
+    // The webhook carries the page `GET /scan/{id}` serves, and says so.
+    assert_eq!(
+        payload["pagination"]["returned"],
+        payload["results"].as_array().map_or(0, Vec::len),
+        "{payload}"
+    );
+    assert_eq!(payload["pagination"]["has_more"], false, "{payload}");
 }
 
 /// The webhook is the only report a non-polling subscriber gets, so the job's
@@ -7016,13 +7023,13 @@ async fn test_get_result_pages_findings_and_bounds_the_response() {
         jobs.insert("big".into(), test_job(JobStatus::Done, Some(big), ""));
         jobs.insert("queued".into(), test_job(JobStatus::Queued, None, ""));
     }
-    let get = |id: &'static str, query: &'static [(&'static str, &'static str)]| {
+    let get = |id: &'static str, query: &[(&str, &str)]| {
         let state = state.clone();
+        let params: Map<String, String> = query
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         async move {
-            let params: Map<String, String> = query
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
             let resp = get_result_handler(
                 State(state),
                 HeaderMap::new(),
@@ -7071,8 +7078,18 @@ async fn test_get_result_pages_findings_and_bounds_the_response() {
         first["data"]["pagination"]["max_page_bytes"],
         MAX_RESULT_PAGE_BYTES
     );
-    let (_, rest) = get("big", &[("offset", "16")]).await;
-    assert_eq!(params_of(&rest).first().map(String::as_str), Some("p16"));
+    // Continuing from `offset + returned` covers every finding exactly once.
+    let mut seen = params_of(&first);
+    while seen.len() < 24 {
+        let offset = seen.len().to_string();
+        let (_, next) = get("big", &[("offset", &offset)]).await;
+        let page = params_of(&next);
+        assert_eq!(next["data"]["pagination"]["returned"], page.len());
+        assert!(!page.is_empty(), "page at {offset} is empty");
+        seen.extend(page);
+    }
+    let expected: Vec<String> = (0..24).map(|i| format!("p{i}")).collect();
+    assert_eq!(seen, expected);
 
     // A scan with no results yet has no page to describe.
     let (_, queued) = get("queued", &[]).await;

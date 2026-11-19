@@ -443,12 +443,17 @@ pub(crate) async fn send_terminal_webhook(
     }
     // `target` is the name every other surface uses; `url` is the original
     // spelling, kept for subscribers already reading it.
+    // The first page `GET /scan/{id}` would serve, under the same byte budget:
+    // the target sizes this list, and an unbounded one was built in memory
+    // twice over and then had ten seconds to upload.
+    let (page, pagination) = crate::job::page_results(results, 0, 0, MAX_RESULT_PAGE_BYTES);
     let mut payload = serde_json::json!({
         "scan_id": job_id,
         "status": status_label,
         "target": url,
         "url": url,
-        "results": results,
+        "results": &results[page],
+        "pagination": pagination,
         "error_message": error_message,
     });
     // The same timing `GET /scan/{id}` reports, so a subscriber that never
