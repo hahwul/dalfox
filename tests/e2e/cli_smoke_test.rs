@@ -1348,13 +1348,18 @@ fn test_server_outlives_a_stalled_log_reader() {
     assert!(up, "the server never came up");
 
     // Each refused request logs one AUTH line; 3000 of them are several times
-    // any pipe buffer.
-    let denied = "GET /scans HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
-    // Stops at the first request left unanswered: once the server is stuck,
+    // any pipe buffer. Pipelined 100 to a connection: 3000 short connections
+    // would leave that many sockets in TIME_WAIT and starve the tests that
+    // run next of ephemeral ports.
+    let denied = "GET /scans HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    let last = "GET /scans HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    let batch = format!("{}{last}", denied.repeat(99));
+    // Stops at the first batch left unanswered: once the server is stuck,
     // every further one would wait out its read timeout.
-    let refused = (0..3000)
-        .take_while(|_| http_once(port, denied).contains("401"))
-        .count();
+    let refused: usize = (0..30)
+        .map(|_| http_once(port, &batch).matches("HTTP/1.1 401").count())
+        .take_while(|answered| *answered == 100)
+        .sum();
     let after = http_once(port, health);
     assert_eq!(refused, 3000, "every request must be answered");
     assert!(after.contains("200 OK"), "{after}");
