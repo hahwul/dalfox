@@ -131,9 +131,10 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
 
     for entry in har.log.entries {
         if targets.len() >= MAX_HAR_TARGETS {
-            eprintln!(
+            crate::ceprintln!(
                 "[warn] HAR has {} entries; capping at {} targets to bound memory",
-                total_entries, MAX_HAR_TARGETS
+                total_entries,
+                MAX_HAR_TARGETS
             );
             break;
         }

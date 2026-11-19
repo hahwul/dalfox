@@ -580,11 +580,17 @@ retried.
 - `--max-body-bytes <n>`: request-body cap for `POST /scan` and `/preflight`
   (default `1048576` = 1 MiB). An oversized body is refused with `413` before
   the handler parses it.
-- Connections have fixed limits, with no flag: one that sends nothing for 60
-  seconds is closed (a request head or body that stalls, or a keep-alive
-  connection left idle), and at most 256 are open at once; past that, new ones
-  wait. A request the server is still working on, such as a long `/preflight`,
-  is not affected.
+- Connections have fixed limits, with no flag. Each gets 60 seconds to send a
+  request head (so an idle keep-alive connection is closed after 60 seconds),
+  60 seconds to send its whole body, and is dropped when it stops reading a
+  response for 60 seconds. A request the server is still working on, such as a
+  long `/preflight`, is not affected. Open connections are capped at half the
+  process's open-file limit (128 where the limit cannot be read); past the cap
+  new ones wait. A client that pools connections should expect idle ones to be
+  closed and retry on a fresh one.
+- Log lines go to stdout through a bounded queue, so a log reader that exits
+  or stops reading never stops the server; lines are dropped while it is not
+  keeping up. `--log-file` is written directly and keeps every line.
 - `--max-retained-scans <n>`: cap on finished scans kept in memory (default
   `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
   so without this a flood of quick scans holds every result (response bodies

@@ -1569,7 +1569,7 @@ pub async fn analyze_parameters(
             if let Some(ref pb) = pb {
                 pb.println(line);
             } else {
-                eprintln!("{}", line);
+                crate::ceprintln!("{}", line);
             }
         }
     }

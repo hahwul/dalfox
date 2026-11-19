@@ -6873,3 +6873,54 @@ async fn a_stalled_request_body_is_refused_instead_of_held_open() {
     assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
     assert!(reply.contains("invalid request body"), "{reply}");
 }
+
+/// The body deadline is on the whole body, not on the gap between chunks: a
+/// client dripping one byte at a time used to reset a per-chunk timer forever,
+/// before any API key was checked.
+#[tokio::test]
+async fn a_slowly_dripped_request_body_runs_out_of_time() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let state = make_state(None, None, false, false, "callback");
+    let app = build_router(state, 1_048_576, Duration::from_millis(400));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(serve_connections(
+        listener,
+        app,
+        std::future::pending(),
+        Duration::from_secs(30),
+        8,
+    ));
+
+    let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let (mut reader, mut writer) = conn.split();
+    writer
+        .write_all(
+            b"POST /scan HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n\
+              Content-Length: 100000\r\n\r\n",
+        )
+        .await
+        .expect("send the head");
+    // A byte every 100ms: each gap is well inside the timeout.
+    let drip = async {
+        loop {
+            if writer.write_all(b" ").await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    let mut reply = Vec::new();
+    tokio::select! {
+        _ = drip => {}
+        read = tokio::time::timeout(Duration::from_secs(5), reader.read_to_end(&mut reply)) => {
+            read.expect("the server must stop waiting for the body").ok();
+        }
+    }
+    let reply = String::from_utf8_lossy(&reply);
+    assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+    assert!(reply.contains("not received within"), "{reply}");
+}

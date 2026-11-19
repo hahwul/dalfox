@@ -399,7 +399,7 @@ async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> (String,
                 // to be ingested as a payload or wordlist entry — cached for
                 // the provider set, with the fetch still reported as a success.
                 Ok(resp) if !resp.status().is_success() => {
-                    eprintln!(
+                    crate::ceprintln!(
                         "[remote] {} returned HTTP {}; ignoring it",
                         url,
                         resp.status()
@@ -409,12 +409,12 @@ async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> (String,
                 Ok(resp) => match crate::utils::http::read_body(resp).await {
                     Ok(text) => Some(text),
                     Err(e) => {
-                        eprintln!("[remote] failed to read body from {}: {}", url, e);
+                        crate::ceprintln!("[remote] failed to read body from {}: {}", url, e);
                         None
                     }
                 },
                 Err(e) => {
-                    eprintln!("[remote] failed to fetch {}: {}", url, e);
+                    crate::ceprintln!("[remote] failed to fetch {}: {}", url, e);
                     None
                 }
             }

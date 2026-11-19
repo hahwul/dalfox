@@ -149,7 +149,7 @@ pub async fn probe_multipart_params(
             },
             move |text| {
                 if !silence {
-                    eprintln!("Discovered multipart field: {}", field_name);
+                    crate::ceprintln!("Discovered multipart field: {}", field_name);
                 }
                 Param::new(field_name, marker.to_string(), Location::MultipartBody)
                     .with_reflection_analysis(text)

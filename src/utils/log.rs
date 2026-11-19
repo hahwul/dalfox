@@ -2,7 +2,7 @@
 //!
 //! [`dbg_log!`](crate::dbg_log) is the single entry point for `--debug`
 //! diagnostics. It supersedes the ad-hoc
-//! `if crate::DEBUG.load(..) { eprintln!("[DBG] ..") }` pattern that was
+//! `if crate::DEBUG.load(..) { crate::ceprintln!("[DBG] ..") }` pattern that was
 //! duplicated ~20 times across the scanner, each with a hand-written `[DBG]`
 //! prefix and no timestamp.
 //!
@@ -74,6 +74,6 @@ pub(crate) fn eprintln_once(msg: String) {
         .unwrap_or_else(PoisonError::into_inner)
         .insert(msg.clone());
     if first {
-        eprintln!("{msg}");
+        crate::ceprintln!("{msg}");
     }
 }

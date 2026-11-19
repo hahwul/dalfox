@@ -607,7 +607,6 @@ dependencies = [
  "sha2 0.11.1",
  "tokio",
  "toml",
- "tower-http",
  "url",
  "urlencoding",
  "uuid",

@@ -221,9 +221,10 @@ pub async fn probe_response_id_params(
     if let Some(original) = capped_from
         && !args.silence
     {
-        eprintln!(
+        crate::ceprintln!(
             "[mining] DOM candidate params capped to {} (from {}); reduce reflected fields or use --skip-mining",
-            MAX_DOM_MINING_PARAMS, original
+            MAX_DOM_MINING_PARAMS,
+            original
         );
     }
 

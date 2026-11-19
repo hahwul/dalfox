@@ -127,9 +127,10 @@ pub(crate) fn log_waf_block_stats(target: &Target) {
     if crate::DEBUG.load(Ordering::Relaxed) {
         let total_waf_blocks = crate::WAF_BLOCK_COUNT.load(Ordering::Relaxed);
         if total_waf_blocks > 0 {
-            eprintln!(
+            crate::ceprintln!(
                 "[*] WAF block stats: {} total blocks detected during scan of {}",
-                total_waf_blocks, target.url,
+                total_waf_blocks,
+                target.url,
             );
         }
     }

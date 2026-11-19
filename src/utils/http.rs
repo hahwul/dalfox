@@ -902,9 +902,12 @@ pub async fn send_with_retry(
                     return result;
                 };
                 if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                    eprintln!(
+                    crate::ceprintln!(
                         "[retry] {:?} -> waiting {}ms before retry (429:{} transient:{})",
-                        outcome, ms, state.rl_done, state.tr_done
+                        outcome,
+                        ms,
+                        state.rl_done,
+                        state.tr_done
                     );
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(ms)).await;

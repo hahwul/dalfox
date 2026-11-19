@@ -1227,14 +1227,15 @@ fn test_server_outlives_its_log_reader() {
 }
 
 /// Same for `dalfox mcp`, whose log goes to stderr: a client that closes its
-/// end must not end the server on the next log line.
+/// end must not end the server on the next log line — nor, with `--debug`,
+/// fail every scan on the first debug line its worker prints.
 #[cfg(unix)]
 #[test]
 fn test_mcp_outlives_a_closed_stderr() {
     use std::io::{BufRead, BufReader};
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
-        .arg("mcp")
+        .args(["--debug", "mcp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1265,10 +1266,21 @@ fn test_mcp_outlives_a_closed_stderr() {
         ),
         2,
     );
-    let listed = call(
-        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_scans_dalfox","arguments":{}}}"#,
-        3,
-    );
+    // Nothing listens on port 1, so the scan ends `error` — for that reason,
+    // not because its worker panicked on a debug line.
+    let mut listed = String::new();
+    for id in 3..60 {
+        listed = call(
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"list_scans_dalfox","arguments":{{}}}}}}"#
+            ),
+            id,
+        );
+        if listed.contains("unreachable") || listed.contains("panicked") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let _ = child.kill();
     let _ = child.wait();
     assert!(
@@ -1276,7 +1288,47 @@ fn test_mcp_outlives_a_closed_stderr() {
         "the scan must be accepted: {queued}"
     );
     assert!(
-        listed.contains("\\\"total\\\":1") || listed.contains("\"total\":1"),
-        "the server must still answer after its stderr was closed: {listed}"
+        listed.contains("unreachable") && !listed.contains("panicked"),
+        "the scan must run to its own outcome after stderr was closed: {listed}"
     );
+}
+
+/// A log reader that stops reading without closing — a paused terminal, a
+/// stuck collector — must not freeze the server. Logging straight to stdout
+/// blocked every handler that logged once the pipe buffer was full.
+#[cfg(unix)]
+#[test]
+fn test_server_outlives_a_stalled_log_reader() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind probe listener")
+        .local_addr()
+        .expect("probe addr")
+        .port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["server", "--port", &port.to_string(), "--api-key", "k"])
+        // Held open and never read, for the life of the test.
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn dalfox server");
+    let health = "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    let up = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    });
+    assert!(up, "the server never came up");
+
+    // Each refused request logs one AUTH line; 3000 of them are several times
+    // any pipe buffer.
+    let denied = "GET /scans HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    // Stops at the first request left unanswered: once the server is stuck,
+    // every further one would wait out its read timeout.
+    let refused = (0..3000)
+        .take_while(|_| http_once(port, denied).contains("401"))
+        .count();
+    let after = http_once(port, health);
+    let _ = child.kill();
+    let _ = child.wait();
+    assert_eq!(refused, 3000, "every request must be answered");
+    assert!(after.contains("200 OK"), "{after}");
 }

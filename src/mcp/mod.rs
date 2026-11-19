@@ -116,10 +116,9 @@ impl DalfoxMcp {
         // forge a fabricated `[ts] [LVL] ...` line on the operator's console.
         let msg = crate::utils::log::sanitize_log_message(msg);
         let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-        // `writeln!`, not `eprintln!`: that one panics when the client closed
-        // its end of stderr, and a log line must not take the server down.
-        use std::io::Write;
-        let _ = writeln!(std::io::stderr(), "[{}] [{}] {}", ts, level, msg);
+        // Through `emit`, which neither panics nor blocks when the client has
+        // closed or stopped draining stderr.
+        crate::utils::term::emit(true, format!("[{}] [{}] {}\n", ts, level, msg));
     }
 
     /// Lock the jobs map, recovering from a poisoned mutex by taking the inner

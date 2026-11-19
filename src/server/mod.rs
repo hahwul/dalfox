@@ -82,7 +82,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         Ok(a) => a,
         Err(e) => {
             let msg = format!("Invalid bind address {}: {}", addr_str, e);
-            eprintln!("{}", msg);
+            crate::ceprintln!("{}", msg);
             return Err(msg);
         }
     };
@@ -137,7 +137,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         && let Err(e) = open_log_file(path)
     {
         let msg = format!("Cannot open --log-file {}: {}", path, e);
-        eprintln!("{}", msg);
+        crate::ceprintln!("{}", msg);
         return Err(msg);
     }
 
@@ -163,7 +163,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     };
 
-    let app = build_router(state.clone(), args.max_body_bytes, CONNECTION_READ_TIMEOUT);
+    let app = build_router(state.clone(), args.max_body_bytes, CONNECTION_TIMEOUT);
 
     // Loud warning for the most dangerous misconfiguration: a network-reachable
     // bind with auth disabled. The API scans any submitted URL and POSTs results
@@ -339,8 +339,8 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         listener,
         app,
         shutdown_signal,
-        CONNECTION_READ_TIMEOUT,
-        MAX_CONNECTIONS,
+        CONNECTION_TIMEOUT,
+        max_connections(),
     );
     if serve_with_drain_deadline(
         serve,
@@ -423,12 +423,12 @@ pub(crate) fn build_router(
         // 2 MiB default so the bound is documented and operator-tunable; a
         // body over the limit is rejected with 413 before handler code runs.
         .layer(axum::extract::DefaultBodyLimit::max(max_body_bytes))
-        // A body that stops arriving fails the read (a 400) instead of holding
-        // its connection open for good: the header timeout in
+        // A body that does not arrive in time fails the read (a 400) instead
+        // of holding its connection open for good: the header timeout in
         // `serve_connections` ends once the head is in.
-        .layer(tower_http::timeout::RequestBodyTimeoutLayer::new(
-            body_read_timeout,
-        ))
+        .layer(axum::middleware::from_fn(move |request, next| {
+            body_deadline(body_read_timeout, request, next)
+        }))
         .with_state(state)
 }
 
