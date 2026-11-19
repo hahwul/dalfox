@@ -580,6 +580,11 @@ retried.
 - `--max-body-bytes <n>`: request-body cap for `POST /scan` and `/preflight`
   (default `1048576` = 1 MiB). An oversized body is refused with `413` before
   the handler parses it.
+- Connections have fixed limits, with no flag: one that sends nothing for 60
+  seconds is closed (a request head or body that stalls, or a keep-alive
+  connection left idle), and at most 256 are open at once; past that, new ones
+  wait. A request the server is still working on, such as a long `/preflight`,
+  is not affected.
 - `--max-retained-scans <n>`: cap on finished scans kept in memory (default
   `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
   so without this a flood of quick scans holds every result (response bodies

@@ -55,6 +55,11 @@ toml = "1"
 # of exhausting memory. Only the deserializer is needed.
 serde-saphyr = { version = "2.0", default-features = false, features = ["deserialize"] }
 axum = "0.8"
+# Already in the tree through axum/reqwest; named here for the server's own
+# accept loop (`server::serve`) and the request-body read timeout.
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "service"] }
+tower-http = { version = "0.6", default-features = false, features = ["timeout"] }
 sha2 = "0.11"
 hex = "0.4"
 regex = "1"

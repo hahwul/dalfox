@@ -1203,10 +1203,13 @@ pub async fn active_probe_param(
         let mut handles = Vec::new();
         let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
         let invalid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
+        // One shared copy: a per-character clone held ~30 copies of the target
+        // (headers, cookies, body) for every parameter in fallback at once.
+        let shared_target = Arc::new(target.clone());
         for &c in &probe_chars {
             let sem = semaphore.clone();
             let client_clone = client.clone();
-            let target_clone = target.clone();
+            let target_clone = shared_target.clone();
             let param_clone = param.clone();
             let valid_ref = valid_specials.clone();
             let invalid_ref = invalid_specials.clone();

@@ -457,6 +457,11 @@ end
 # the wire it is an array even though the field is a String.
 ALIAS_WIRE_TYPES = {"cookies" => "array"}
 
+# Options whose type is the same Rust enum on both surfaces (`blind_oob` is
+# `job::spec::BlindOobRequest`: bool, list or CSV string). Its schema is an
+# `anyOf` with no single `type`, so there is nothing to compare by name.
+SHARED_COMPOSITE_OPTIONS = Set{"blind_oob"}
+
 # `type` from a JSON Schema property, collapsing the `["string","null"]` form
 # schemars emits for `Option<T>` down to its non-null member.
 def schema_type_of(prop : JSON::Any) : String
@@ -641,6 +646,16 @@ begin
     cancel_failures << "cycle #{i + 1}: post-cancel status #{status}" unless status == "cancelled"
     pct = after.try(&.dig?("progress", "estimated_completion_pct")).try(&.as_i64?)
     bogus_pct << "cycle #{i + 1}: #{pct}%" if pct == 100_i64
+
+    # A cancelled scan keeps its slot until its worker has stopped (documented:
+    # "a cancel does not free capacity instantly"), so give it a moment before
+    # the next submit. A slot that never comes back still fails the next cycle.
+    deadline = Sh.clock + 15.seconds
+    while Sh.clock < deadline
+      active = rest_request("GET", "/health").data.try(&.dig?("scans", "active")).try(&.as_i64?)
+      break if active.nil? || active < MAX_CONCURRENT
+      sleep 20.milliseconds
+    end
   end
   report.check_empty("#{CANCEL_CYCLES} sequential create/cancel cycles (cap #{MAX_CONCURRENT})", cancel_failures)
   report.check_empty("cancelled scans never report 100%", bogus_pct)
@@ -888,7 +903,7 @@ begin
     report.check_empty("no unexplained MCP-only scan options",
       mcp_only.to_a.sort!.map { |k| "#{k} (#{mcp_fields[k]}) missing from REST" }, limit: 20)
 
-    shared = (rest_fields.keys.to_set & mcp_fields.keys.to_set).to_a.sort!
+    shared = ((rest_fields.keys.to_set & mcp_fields.keys.to_set) - SHARED_COMPOSITE_OPTIONS).to_a.sort!
     type_mismatches = shared.compact_map do |k|
       rest_fields[k] == mcp_fields[k] ? nil : "#{k}: REST #{rest_fields[k]} vs MCP #{mcp_fields[k]}"
     end

@@ -210,7 +210,19 @@ pub(crate) fn log(state: &AppState, level: &str, message: &str) {
         "SERVER" => ("\x1b[36m", "SERVER"),
         other => ("\x1b[37m", other),
     };
-    crate::cprintln!("\x1b[90m{}\x1b[0m {}{}\x1b[0m {}", ts, color, lvl, message);
+    // `writeln!`, not `println!`: that one panics when stdout is a pipe whose
+    // reader went away (`dalfox server | tee`, a restarted log collector), and
+    // a daemon must outlive its log sink.
+    let line = format!("\x1b[90m{}\x1b[0m {}{}\x1b[0m {}", ts, color, lvl, message);
+    let line = if crate::utils::term::color_enabled() {
+        line
+    } else {
+        crate::utils::term::strip_ansi(&line)
+    };
+    {
+        use std::io::Write;
+        let _ = writeln!(std::io::stdout(), "{line}");
+    }
 
     if let Some(path) = &state.log_file {
         let line = format!("[{}] [{}] {}\n", ts, lvl, message);

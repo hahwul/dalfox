@@ -55,7 +55,6 @@ pub async fn check_path_discovery(
         bracket_url.set_path(&bracket_path);
 
         let client_clone = client.clone();
-        let data = target.data.clone();
         let parsed_method = target.parse_method();
         let target_clone = arc_target.clone();
         let delay = target.delay;
@@ -87,7 +86,7 @@ pub async fn check_path_discovery(
                     &target_clone,
                     m.clone(),
                     new_url,
-                    data.clone(),
+                    target_clone.data.clone(),
                 );
 
                 crate::record_outbound_request().await;
@@ -143,7 +142,7 @@ pub async fn check_path_discovery(
                                     &target_clone,
                                     m.clone(),
                                     bracket_url,
-                                    data.clone(),
+                                    target_clone.data.clone(),
                                 );
                                 crate::parameter_analysis::fetch_text(probe)
                                     .await

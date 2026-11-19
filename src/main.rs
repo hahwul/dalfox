@@ -181,6 +181,13 @@ fn explicit_args_for(matches: &clap::ArgMatches, name: &str) -> cmd::scan::Expli
         .unwrap_or_default()
 }
 
+/// Set once `server` / `mcp` starts. A daemon must outlive its log sink, so
+/// the "broken pipe means the reader is done, exit 0" rule below is for the
+/// one-shot commands only: with it, `dalfox server | tee` died — with status
+/// 0, so no supervisor restarted it — on the first line logged after `tee`
+/// went away, and `dalfox mcp` did the same when a client closed stderr.
+static DAEMON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Exit a daemon (`server` / `mcp`) once it has stopped serving.
 ///
 /// Scans run on `spawn_blocking` threads, and returning from `main` drops the
@@ -214,7 +221,9 @@ async fn main() {
             .downcast_ref::<String>()
             .map(String::as_str)
             .or_else(|| info.payload().downcast_ref::<&str>().copied());
-        if matches!(payload_str, Some(s) if s.contains("Broken pipe")) {
+        if !DAEMON.load(std::sync::atomic::Ordering::Relaxed)
+            && matches!(payload_str, Some(s) if s.contains("Broken pipe"))
+        {
             std::process::exit(0);
         }
         default_panic_hook(info);
@@ -467,10 +476,11 @@ async fn main() {
     };
     let outcome = match cli.command {
         Some(Commands::Server(args)) => {
-            // A server that never bound — or whose `axum::serve` failed —
-            // has to reach the exit code. A supervisor reads status, not
-            // stderr, so the hard-coded `Clean` made "the port was already
-            // in use" indistinguishable from a clean shutdown.
+            // A server that never bound has to reach the exit code. A
+            // supervisor reads status, not stderr, so the hard-coded `Clean`
+            // made "the port was already in use" indistinguishable from a
+            // clean shutdown.
+            DAEMON.store(true, std::sync::atomic::Ordering::Relaxed);
             exit_daemon(match server::run_server(args).await {
                 Ok(()) => ScanOutcome::Clean,
                 Err(_) => ScanOutcome::Error,
@@ -483,10 +493,12 @@ async fn main() {
             // reads status, not stderr, and a hard-coded `Clean` made "the
             // server never came up" indistinguishable from a clean
             // shutdown.
+            DAEMON.store(true, std::sync::atomic::Ordering::Relaxed);
             exit_daemon(match mcp::run_mcp_server().await {
                 Ok(()) => ScanOutcome::Clean,
                 Err(e) => {
-                    eprintln!("MCP server error: {e}");
+                    use std::io::Write;
+                    let _ = writeln!(std::io::stderr(), "MCP server error: {e}");
                     ScanOutcome::Error
                 }
             })

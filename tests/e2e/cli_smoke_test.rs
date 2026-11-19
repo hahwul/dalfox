@@ -1153,3 +1153,130 @@ fn test_server_exits_cleanly_on_sigterm() {
         "the in-flight scan must be cancelled, not abandoned: {rest:?}"
     );
 }
+
+/// One HTTP/1.1 request against a local server; returns the raw reply.
+#[cfg(unix)]
+fn http_once(port: u16, request: &str) -> String {
+    let mut conn =
+        std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect to the server");
+    conn.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .expect("set read timeout");
+    conn.write_all(request.as_bytes()).expect("send request");
+    let mut reply = String::new();
+    let _ = std::io::Read::read_to_string(&mut conn, &mut reply);
+    reply
+}
+
+/// A daemon must outlive its log sink. `log()` used `println!`, which panics
+/// on a pipe whose reader is gone, and the panic hook turned that into
+/// `exit(0)`: `dalfox server | tee` died, reporting success, on the first line
+/// logged after `tee` went away.
+#[cfg(unix)]
+#[test]
+fn test_server_outlives_its_log_reader() {
+    use std::io::{BufRead, BufReader};
+
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind probe listener")
+        .local_addr()
+        .expect("probe addr")
+        .port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["server", "--port", &port.to_string()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn dalfox server");
+    let mut stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
+    let mut line = String::new();
+    while !line.contains("listening on") {
+        line.clear();
+        assert!(
+            stdout.read_line(&mut line).expect("read stdout") > 0,
+            "the server never announced its listener"
+        );
+    }
+    // The reader goes away; every later log line is written to a broken pipe.
+    drop(stdout);
+
+    let body = r#"{"target":"http://127.0.0.1:1/?q=1"}"#;
+    let queued = http_once(
+        port,
+        &format!(
+            "POST /scan HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        ),
+    );
+    let health = http_once(
+        port,
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+    let exited = child.try_wait().expect("poll the server");
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        queued.contains("scan_id"),
+        "the scan must be accepted: {queued}"
+    );
+    assert!(
+        health.contains("200 OK"),
+        "the server must still answer after its log reader went away \
+         (exit status: {exited:?}): {health}"
+    );
+}
+
+/// Same for `dalfox mcp`, whose log goes to stderr: a client that closes its
+/// end must not end the server on the next log line.
+#[cfg(unix)]
+#[test]
+fn test_mcp_outlives_a_closed_stderr() {
+    use std::io::{BufRead, BufReader};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn dalfox mcp");
+    drop(child.stderr.take());
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let mut replies = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
+    let mut call = |message: &str, id: u64| -> String {
+        writeln!(stdin, "{message}").expect("write to the MCP server");
+        replies
+            .by_ref()
+            .map_while(Result::ok)
+            .find(|line| line.contains(&format!("\"id\":{id}")))
+            .unwrap_or_default()
+    };
+
+    call(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#,
+        1,
+    );
+    // The scan submission logs a `queued` line to the closed stderr.
+    let queued = call(
+        concat!(
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scan_with_dalfox","arguments":{"target":"http://127.0.0.1:1/?q=1","skip_mining":true}}}"#
+        ),
+        2,
+    );
+    let listed = call(
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_scans_dalfox","arguments":{}}}"#,
+        3,
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        queued.contains("scan_id"),
+        "the scan must be accepted: {queued}"
+    );
+    assert!(
+        listed.contains("\\\"total\\\":1") || listed.contains("\"total\":1"),
+        "the server must still answer after its stderr was closed: {listed}"
+    );
+}

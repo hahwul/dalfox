@@ -35,7 +35,7 @@ Primary modules:
 - `src/target_parser/`: URL/file/raw-HTTP target normalization
 - `src/waf/`: WAF fingerprinting + bypass strategies. `bypass/` splits into `types.rs`, `strategy.rs`, and per-family mutators in `mutate.rs`
 - `src/utils/`: shared CLI helpers (banner, color, logging)
-- `src/server/`: async scan API server, split into focused submodules — `mod.rs` (router + `ServerArgs`), `types.rs` (`ScanOptions` + request/response bodies), `handlers.rs` (route handlers), `job_runner.rs` (`run_scan_job`), `auth.rs` (API key), `cors.rs`, `response.rs` (JSON/JSONP rendering), `util.rs` (option validation + logging)
+- `src/server/`: async scan API server, split into focused submodules — `mod.rs` (router + `ServerArgs`), `types.rs` (`ScanOptions` + request/response bodies), `handlers.rs` (route handlers), `job_runner.rs` (`run_scan_job`), `auth.rs` (API key), `cors.rs`, `response.rs` (JSON/JSONP rendering), `serve.rs` (accept loop: connection read timeout + connection cap), `util.rs` (option validation + logging)
 - `src/job/`: shared job model — `JobStatus` enum, `Job` record, progress counters, retention/cap purging, and bounds helpers (`effective_rate_limit`, `effective_scan_timeout`) used by server + MCP
 - `src/mcp/`: MCP stdio tool server — `mod.rs` keeps the `#[tool_router]` impl with the six tool handlers (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`); `params.rs` holds the `*Params` input structs + serde defaults, `outputs.rs` the published `outputSchema` mirror types, `job_runtime.rs` / `pagination.rs` the helpers
 
@@ -105,6 +105,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 - Both server and MCP support real cancellation via `AtomicBool` flags checked in scan loops.
 - Both include progress tracking (params_total/tested, requests_sent, findings_so_far).
 - Use shared error codes from `cmd::error_codes` for application-level errors.
+- A daemon outlives its log sink: server/MCP log lines are written with `writeln!` and the error ignored, never `println!`/`eprintln!` (those panic on a broken pipe, and the CLI's exit-0-on-broken-pipe panic hook is off in daemon mode).
 
 6. Remote resource initialization is process-cached.
 - Remote payload/wordlist fetches use OnceLock cache.

@@ -6834,3 +6834,42 @@ async fn test_run_scan_job_reads_the_page_past_a_honoured_range() {
     let found = job.results.as_ref().map_or(0, |r| r.len());
     assert!(found > 0, "the flow past the first 8 KiB must be reported");
 }
+
+/// A `POST /scan` whose body stops arriving used to hold its connection open
+/// for good: the header timeout ends once the head is in, and the `Json`
+/// extractor waits on the body with no deadline. Driven through the real
+/// router and accept loop, with both timeouts shortened.
+#[tokio::test]
+async fn a_stalled_request_body_is_refused_instead_of_held_open() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let state = make_state(None, None, false, false, "callback");
+    let app = build_router(state, 1_048_576, Duration::from_millis(200));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(serve_connections(
+        listener,
+        app,
+        std::future::pending(),
+        Duration::from_millis(200),
+        8,
+    ));
+
+    let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    conn.write_all(
+        b"POST /scan HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n\
+          Content-Length: 1000\r\n\r\n{\"target\":",
+    )
+    .await
+    .expect("send the head and a partial body");
+    let mut reply = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), conn.read_to_end(&mut reply))
+        .await
+        .expect("the server must answer and close, not wait for the rest of the body")
+        .ok();
+    let reply = String::from_utf8_lossy(&reply);
+    assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+    assert!(reply.contains("invalid request body"), "{reply}");
+}

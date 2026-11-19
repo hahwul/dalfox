@@ -48,6 +48,7 @@ mod cors;
 mod handlers;
 mod job_runner;
 mod response;
+mod serve;
 pub(crate) mod types;
 mod util;
 
@@ -58,6 +59,7 @@ pub(crate) use cors::*;
 pub(crate) use handlers::*;
 pub(crate) use job_runner::*;
 pub(crate) use response::*;
+pub(crate) use serve::*;
 pub(crate) use types::*;
 pub(crate) use util::*;
 
@@ -70,7 +72,7 @@ const MIN_RECOMMENDED_API_KEY_LEN: usize = 24;
 /// Run the REST API server until it shuts down gracefully.
 ///
 /// Returns `Err` when the server never came up (an unparseable bind address, a
-/// port already in use) or when `axum::serve` itself failed. A supervisor —
+/// port already in use). A supervisor —
 /// systemd, a container runtime, `dalfox server || alert` — reads the exit
 /// status, not stderr, so a failed start that exits 0 is indistinguishable from
 /// a clean shutdown.
@@ -161,26 +163,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     };
 
-    let app = Router::new()
-        .route("/scan", post(start_scan_handler))
-        .route("/scan", get(get_scan_handler))
-        .route("/scan", options(options_scan_handler))
-        .route("/scans", get(list_scans_handler))
-        .route("/scans", options(options_scan_handler))
-        .route("/preflight", post(preflight_handler))
-        .route("/preflight", options(options_scan_handler))
-        .route("/result/{id}", get(get_result_handler))
-        .route("/result/{id}", options(options_scan_handler))
-        .route("/scan/{id}", get(get_result_handler))
-        .route("/scan/{id}", axum::routing::delete(cancel_scan_handler))
-        .route("/scan/{id}", options(options_scan_handler))
-        .route("/health", get(health_handler))
-        .route("/health", options(options_scan_handler))
-        // Explicit request-body cap for every route. Replaces axum's implicit
-        // 2 MiB default so the bound is documented and operator-tunable; a
-        // body over the limit is rejected with 413 before handler code runs.
-        .layer(axum::extract::DefaultBodyLimit::max(args.max_body_bytes))
-        .with_state(state.clone());
+    let app = build_router(state.clone(), args.max_body_bytes, CONNECTION_READ_TIMEOUT);
 
     // Loud warning for the most dangerous misconfiguration: a network-reachable
     // bind with auth disabled. The API scans any submitted URL and POSTs results
@@ -330,9 +313,8 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
     // requests before returning; previously the server ignored Ctrl-C
     // outright and required SIGKILL, leaking any in-flight scans and
     // their webhook subscribers' terminal callbacks.
-    // Clone for the shutdown future: `state` is borrowed again below for the
-    // serve-error log, so the future can't take it by reference (it outlives
-    // this point) or by move.
+    // Clone for the shutdown future: `state` is used again below, so the
+    // future can't take it by move.
     let shutdown_state = state.clone();
     let (signalled_tx, signalled_rx) = tokio::sync::oneshot::channel::<()>();
     let shutdown_signal = async move {
@@ -353,27 +335,26 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         }
         let _ = signalled_tx.send(());
     };
-    let serve = std::future::IntoFuture::into_future(
-        axum::serve(listener, app).with_graceful_shutdown(shutdown_signal),
+    let serve = serve_connections(
+        listener,
+        app,
+        shutdown_signal,
+        CONNECTION_READ_TIMEOUT,
+        MAX_CONNECTIONS,
     );
-    match serve_with_drain_deadline(
+    if serve_with_drain_deadline(
         serve,
         signalled_rx,
         Duration::from_secs(SHUTDOWN_DRAIN_GRACE_SECS),
     )
     .await
+    .is_none()
     {
-        Some(Err(e)) => {
-            let msg = format!("server error: {}", e);
-            log(&state, "ERR", &msg);
-            return Err(msg);
-        }
-        Some(Ok(())) => {}
-        None => log(
+        log(
             &state,
             "SERVER",
             "drain grace elapsed — exiting with requests still in flight",
-        ),
+        );
     }
     // Exiting kills the scan workers where they stand. Give the ones just
     // cancelled the time to store their partial results and fire their
@@ -415,6 +396,40 @@ impl ScanDrain {
             ScanDrain::Interrupted => Some("second signal — exiting without waiting for scans"),
         }
     }
+}
+
+/// The API's routes and request-body limits.
+pub(crate) fn build_router(
+    state: AppState,
+    max_body_bytes: usize,
+    body_read_timeout: Duration,
+) -> Router {
+    Router::new()
+        .route("/scan", post(start_scan_handler))
+        .route("/scan", get(get_scan_handler))
+        .route("/scan", options(options_scan_handler))
+        .route("/scans", get(list_scans_handler))
+        .route("/scans", options(options_scan_handler))
+        .route("/preflight", post(preflight_handler))
+        .route("/preflight", options(options_scan_handler))
+        .route("/result/{id}", get(get_result_handler))
+        .route("/result/{id}", options(options_scan_handler))
+        .route("/scan/{id}", get(get_result_handler))
+        .route("/scan/{id}", axum::routing::delete(cancel_scan_handler))
+        .route("/scan/{id}", options(options_scan_handler))
+        .route("/health", get(health_handler))
+        .route("/health", options(options_scan_handler))
+        // Explicit request-body cap for every route. Replaces axum's implicit
+        // 2 MiB default so the bound is documented and operator-tunable; a
+        // body over the limit is rejected with 413 before handler code runs.
+        .layer(axum::extract::DefaultBodyLimit::max(max_body_bytes))
+        // A body that stops arriving fails the read (a 400) instead of holding
+        // its connection open for good: the header timeout in
+        // `serve_connections` ends once the head is in.
+        .layer(tower_http::timeout::RequestBodyTimeoutLayer::new(
+            body_read_timeout,
+        ))
+        .with_state(state)
 }
 
 /// Wait for the scan workers, for at most `grace`, unless `interrupt` resolves.
