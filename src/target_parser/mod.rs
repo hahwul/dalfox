@@ -321,11 +321,11 @@ impl Target {
             // --debug), even though `--proxy` is now validated up front and this
             // path is only reachable on a rarer, non-proxy build failure.
             if self.proxy.as_deref().is_some_and(|p| !p.trim().is_empty()) {
-                eprintln!(
+                crate::ceprintln!(
                     "[warn] HTTP client build failed ({e}); the configured proxy is NOT in effect and requests will go direct"
                 );
             } else if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[warn] failed to build client: {}, using default", e);
+                crate::ceprintln!("[warn] failed to build client: {}, using default", e);
             }
             Client::new()
         })

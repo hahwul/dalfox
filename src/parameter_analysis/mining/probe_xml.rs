@@ -103,7 +103,7 @@ pub async fn probe_xml_body_params(
             },
             move |text| {
                 if !silence {
-                    eprintln!("Discovered XML injection point: {}", name);
+                    crate::ceprintln!("Discovered XML injection point: {}", name);
                 }
                 Param {
                     pre_encoding_pipeline: Some(pipeline),

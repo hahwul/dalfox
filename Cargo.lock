@@ -584,6 +584,8 @@ dependencies = [
  "ctr",
  "futures",
  "hex",
+ "hyper",
+ "hyper-util",
  "indicatif",
  "oxc_allocator",
  "oxc_ast",

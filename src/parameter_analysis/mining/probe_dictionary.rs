@@ -32,7 +32,7 @@ pub async fn probe_dictionary_params(
         .await
             && !args.silence
         {
-            eprintln!("Error initializing remote wordlists: {}", e);
+            crate::ceprintln!("Error initializing remote wordlists: {}", e);
         }
         // The cache is process-global; use this scan's provider set and proxy.
         if let Some(words) = crate::payload::get_remote_words_for_with_proxy(

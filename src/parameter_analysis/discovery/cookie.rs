@@ -31,8 +31,6 @@ pub async fn check_cookie_discovery(
         }
         let client_clone = client.clone();
         let url = target.url.clone();
-        let cookies = target.cookies.clone();
-        let data = target.data.clone();
         let parsed_method = target.parse_method();
         let cookie_name = cookie_name.clone();
         let cookie_value = cookie_value.clone();
@@ -45,8 +43,10 @@ pub async fn check_cookie_discovery(
             None,
             move || {
                 // Compose cookie header overriding the probed cookie while preserving others
-                let others =
-                    crate::utils::compose_cookie_header_excluding(&cookies, Some(&probed_name));
+                let others = crate::utils::compose_cookie_header_excluding(
+                    &target_clone.cookies,
+                    Some(&probed_name),
+                );
                 let cookie_header = match others {
                     Some(s) => format!("{}; {}={}", s, probed_name, test_value),
                     None => format!("{}={}", probed_name, test_value),
@@ -56,7 +56,7 @@ pub async fn check_cookie_discovery(
                     &target_clone,
                     parsed_method,
                     url,
-                    data,
+                    target_clone.data.clone(),
                     Some(cookie_header),
                 ))
             },

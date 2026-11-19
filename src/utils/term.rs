@@ -229,54 +229,232 @@ pub(crate) fn sanitize_display_block(s: &str) -> String {
     out
 }
 
+/// Set once `server` / `mcp` starts; see [`emit`].
+static DAEMON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Switch this process's output to daemon rules. Called by `main` before a
+/// daemon starts serving.
+pub fn enter_daemon_mode() {
+    DAEMON.store(true, Ordering::Relaxed);
+}
+
+/// Whether [`enter_daemon_mode`] was called.
+pub fn daemon_mode() -> bool {
+    DAEMON.load(Ordering::Relaxed)
+}
+
+enum DaemonOut {
+    Text(String),
+    Flush(std::sync::mpsc::Sender<()>),
+}
+
+/// Lines a daemon may have queued for its log reader before new ones are
+/// dropped. ponytail: dropped silently; count and report them if operators
+/// ever need to know a stalled reader lost lines.
+const DAEMON_OUT_QUEUE: usize = 1024;
+
+/// The queue feeding `stderr`'s writer thread, or stdout's. One each: a reader
+/// that stalls on one stream must not cost the other its lines.
+fn daemon_writer(stderr: bool) -> &'static std::sync::mpsc::SyncSender<DaemonOut> {
+    static WRITERS: [std::sync::OnceLock<std::sync::mpsc::SyncSender<DaemonOut>>; 2] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    WRITERS[usize::from(stderr)].get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel(DAEMON_OUT_QUEUE);
+        // If the thread cannot be spawned the queue fills and lines are
+        // dropped, which is the same outcome as a reader that never reads.
+        let _ = std::thread::Builder::new()
+            .name("dalfox-log".to_string())
+            .spawn(move || {
+                use std::io::Write;
+                for out in rx {
+                    match out {
+                        DaemonOut::Text(text) if stderr => {
+                            let _ = std::io::stderr().write_all(text.as_bytes());
+                        }
+                        DaemonOut::Text(text) => {
+                            let mut stdout = std::io::stdout();
+                            let _ = stdout.write_all(text.as_bytes());
+                            let _ = stdout.flush();
+                        }
+                        DaemonOut::Flush(done) => {
+                            let _ = done.send(());
+                        }
+                    }
+                }
+            });
+        tx
+    })
+}
+
+/// Write `text` to stdout or stderr.
+///
+/// A one-shot command prints directly: a reader that went away
+/// (`dalfox payload … | head`) panics the print, and `main`'s panic hook turns
+/// that into a quiet exit.
+///
+/// A daemon must outlive its log reader instead. Printing directly, `dalfox
+/// server | tee` exited — with status 0, so no supervisor restarted it — on the
+/// first line logged after `tee` went away, and a reader that merely stopped
+/// reading (a paused terminal, an MCP client that never drains stderr) blocked
+/// every handler that logged once the pipe filled. So in daemon mode the text
+/// goes to a writer thread through a bounded queue: the caller never blocks
+/// and never panics, and lines are dropped while the reader is not keeping up.
+pub fn emit(stderr: bool, text: String) {
+    if daemon_mode() {
+        let _ = daemon_writer(stderr).try_send(DaemonOut::Text(text));
+    } else if stderr {
+        eprint!("{text}");
+    } else {
+        print!("{text}");
+    }
+}
+
+/// Give the daemon's queued output up to `wait` to reach its reader. Called
+/// before the process exits, which would otherwise cut the last lines off.
+pub fn flush_daemon_output(wait: std::time::Duration) {
+    if !daemon_mode() {
+        return;
+    }
+    let deadline = std::time::Instant::now() + wait;
+    let pending: Vec<_> = [false, true]
+        .into_iter()
+        .filter_map(|stderr| {
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            loop {
+                match daemon_writer(stderr).try_send(DaemonOut::Flush(done_tx.clone())) {
+                    Ok(()) => return Some(done_rx),
+                    // No writer thread: nothing queued will ever be written.
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return None,
+                    // A full queue is a reader that is behind, not one that
+                    // is gone: keep offering the marker until the deadline.
+                    Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                        if std::time::Instant::now() >= deadline {
+                            return None;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+            }
+        })
+        .collect();
+    for done in pending {
+        let _ = done.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
+    }
+}
+
+/// Body of [`cprintln!`] / [`cprint!`] / [`ceprintln!`]: apply the color
+/// policy, then [`emit`].
+#[doc(hidden)]
+pub fn emit_styled(stderr: bool, mut text: String, newline: bool) {
+    if !color_enabled() {
+        text = strip_ansi(&text);
+    }
+    if newline {
+        text.push('\n');
+    }
+    emit(stderr, text);
+}
+
 /// `println!`-shaped macro that conditionally strips ANSI escape codes
 /// from its rendered output when `--no-color` / `NO_COLOR` is in effect.
 /// Use anywhere we currently hand-roll `\x1b[…m` color literals.
 #[macro_export]
 macro_rules! cprintln {
-    ($($arg:tt)*) => {{
-        let s = ::std::format!($($arg)*);
-        if $crate::utils::term::color_enabled() {
-            ::std::println!("{}", s);
-        } else {
-            ::std::println!("{}", $crate::utils::term::strip_ansi(&s));
-        }
-    }};
+    ($($arg:tt)*) => {
+        $crate::utils::term::emit_styled(false, ::std::format!($($arg)*), true)
+    };
 }
 
 /// `print!`-shaped sibling of [`cprintln!`] for spinner-style updates
 /// that don't terminate with a newline.
 #[macro_export]
 macro_rules! cprint {
-    ($($arg:tt)*) => {{
-        let s = ::std::format!($($arg)*);
-        if $crate::utils::term::color_enabled() {
-            ::std::print!("{}", s);
-        } else {
-            ::std::print!("{}", $crate::utils::term::strip_ansi(&s));
-        }
-    }};
+    ($($arg:tt)*) => {
+        $crate::utils::term::emit_styled(false, ::std::format!($($arg)*), false)
+    };
 }
 
 /// `eprintln!`-shaped sibling of [`cprintln!`] for diagnostics that
 /// belong on stderr (`UNREACHABLE`, validation errors, etc.). Stderr
 /// is just as likely to be redirected to a logfile as stdout, so the
 /// same `--no-color` / `NO_COLOR` policy applies.
+///
+/// Also what every module a server/MCP job can reach uses instead of
+/// `eprintln!`, which would panic the job on a closed stderr
+/// (`job_reachable_modules_never_print_directly`).
 #[macro_export]
 macro_rules! ceprintln {
-    ($($arg:tt)*) => {{
-        let s = ::std::format!($($arg)*);
-        if $crate::utils::term::color_enabled() {
-            ::std::eprintln!("{}", s);
-        } else {
-            ::std::eprintln!("{}", $crate::utils::term::strip_ansi(&s));
-        }
-    }};
+    ($($arg:tt)*) => {
+        $crate::utils::term::emit_styled(true, ::std::format!($($arg)*), true)
+    };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Outside the CLI (`cmd/`, `main.rs`, the banner) everything can run
+    /// inside a server or MCP job, where a direct `println!` / `eprintln!`
+    /// panics the job when the log reader is gone. Those modules print through
+    /// `cprintln!` / `ceprintln!`, which go through [`emit`].
+    #[test]
+    fn each_stream_has_its_own_daemon_queue() {
+        // One queue for both would let a stalled stderr reader fill it and
+        // cost stdout its lines.
+        assert!(!std::ptr::eq(daemon_writer(false), daemon_writer(true)));
+        assert!(std::ptr::eq(daemon_writer(true), daemon_writer(true)));
+    }
+
+    #[test]
+    fn job_reachable_modules_never_print_directly() {
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        rs_files(std::path::Path::new("src"), &mut files);
+        assert!(!files.is_empty(), "should have found source files");
+
+        let mut offenders = Vec::new();
+        for path in files {
+            let name = path.to_string_lossy().replace('\\', "/");
+            let cli_only = name.starts_with("src/cmd/")
+                || ["src/main.rs", "src/utils/term.rs", "src/utils/banner.rs"]
+                    .contains(&name.as_str());
+            let test_file =
+                name.ends_with("tests.rs") || name.contains("/tests/") || name.contains("_test");
+            if cli_only || test_file {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            for (i, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for mac in ["println!(", "print!(", "eprintln!(", "eprint!("] {
+                    let direct = line.match_indices(mac).any(|(at, _)| {
+                        !line[..at].ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                    });
+                    if direct {
+                        offenders.push(format!("{name}:{}: {}", i + 1, line.trim()));
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "direct print in a module a server/MCP job can reach — use \
+             crate::cprintln! / crate::ceprintln!:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
 
     #[test]
     fn strip_ansi_removes_color_codes() {

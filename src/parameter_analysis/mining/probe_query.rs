@@ -174,7 +174,7 @@ pub(super) async fn probe_query_candidates(
     if sentinel_eligible {
         if let Some(text) = pre_collapse_query_probe(&client_for_sentinel, ctx.target).await {
             if !silence {
-                eprintln!(
+                crate::ceprintln!(
                     "[mining-collapse] sentinel pre-probe collapsed {stage_label} mining: \
                      every random param name reflected; adding single 'any' param"
                 );
@@ -289,9 +289,11 @@ pub(super) async fn probe_query_candidates(
 
     let collapsed = stats.should_collapse();
     if collapsed && !silence {
-        eprintln!(
+        crate::ceprintln!(
             "[mining-collapse] high reflection EWMA {:.2} after {} attempts ({} reflections)",
-            stats.ewma_ratio, stats.attempts, stats.reflections
+            stats.ewma_ratio,
+            stats.attempts,
+            stats.reflections
         );
     }
     if collapsed {
@@ -312,7 +314,7 @@ pub(super) async fn probe_query_candidates(
             )
             .await;
         } else if !silence {
-            eprintln!(
+            crate::ceprintln!(
                 "[mining-collapse] high reflection EWMA, but the sentinels did not \
                  reflect: keeping the mined params instead of folding them into 'any'"
             );

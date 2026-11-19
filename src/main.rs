@@ -191,6 +191,7 @@ fn explicit_args_for(matches: &clap::ArgMatches, name: &str) -> cmd::scan::Expli
 /// `dalfox server` cancels its scans and gives them a bounded grace before it
 /// gets here (`server::run_server`); whatever is still running then is cut off.
 fn exit_daemon(outcome: ScanOutcome) -> ! {
+    utils::term::flush_daemon_output(std::time::Duration::from_secs(1));
     std::process::exit(outcome.exit_code())
 }
 
@@ -214,8 +215,27 @@ async fn main() {
             .downcast_ref::<String>()
             .map(String::as_str)
             .or_else(|| info.payload().downcast_ref::<&str>().copied());
-        if matches!(payload_str, Some(s) if s.contains("Broken pipe")) {
+        // One-shot commands only: a daemon must outlive its log reader
+        // (`utils::term::emit`).
+        if !utils::term::daemon_mode()
+            && matches!(payload_str, Some(s) if s.contains("Broken pipe"))
+        {
             std::process::exit(0);
+        }
+        if utils::term::daemon_mode() {
+            // The default hook writes straight to stderr, which blocks the
+            // panicking thread for good when the reader has stalled — and the
+            // job it was running then never settles.
+            let backtrace = std::backtrace::Backtrace::capture();
+            let trace = match backtrace.status() {
+                std::backtrace::BacktraceStatus::Captured => format!("\n{backtrace}"),
+                _ => String::new(),
+            };
+            utils::term::emit(true, format!("{info}{trace}\n"));
+            // A panic on the main thread ends the process next; give the
+            // writer a moment so the message is not lost with it.
+            utils::term::flush_daemon_output(std::time::Duration::from_millis(250));
+            return;
         }
         default_panic_hook(info);
     }));
@@ -467,10 +487,11 @@ async fn main() {
     };
     let outcome = match cli.command {
         Some(Commands::Server(args)) => {
-            // A server that never bound — or whose `axum::serve` failed —
-            // has to reach the exit code. A supervisor reads status, not
-            // stderr, so the hard-coded `Clean` made "the port was already
-            // in use" indistinguishable from a clean shutdown.
+            // A server that never bound has to reach the exit code. A
+            // supervisor reads status, not stderr, so the hard-coded `Clean`
+            // made "the port was already in use" indistinguishable from a
+            // clean shutdown.
+            utils::term::enter_daemon_mode();
             exit_daemon(match server::run_server(args).await {
                 Ok(()) => ScanOutcome::Clean,
                 Err(_) => ScanOutcome::Error,
@@ -483,10 +504,11 @@ async fn main() {
             // reads status, not stderr, and a hard-coded `Clean` made "the
             // server never came up" indistinguishable from a clean
             // shutdown.
+            utils::term::enter_daemon_mode();
             exit_daemon(match mcp::run_mcp_server().await {
                 Ok(()) => ScanOutcome::Clean,
                 Err(e) => {
-                    eprintln!("MCP server error: {e}");
+                    utils::term::emit(true, format!("MCP server error: {e}\n"));
                     ScanOutcome::Error
                 }
             })

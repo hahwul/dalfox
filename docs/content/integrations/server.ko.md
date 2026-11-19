@@ -232,6 +232,12 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan
 }
 ```
 
+- `results`에는 `pagination` 객체(`{total, offset, limit, returned, has_more}`)가
+  함께 옵니다. `?offset=`과 `?limit=`으로 탐지 결과를 나눠 읽습니다(`limit=0`이 기본이며
+  `offset`부터 전부 반환). 응답 하나에 담기는 탐지 결과는 최대 16 MiB입니다. 이 때문에
+  페이지가 잘리면 `pagination`에 `truncated_by_size: true`와 `max_page_bytes`가 붙고
+  `has_more`가 `true`가 됩니다. `has_more`가 `false`가 될 때까지 `offset + returned`부터
+  이어서 읽으세요. `deep_scan`에서 `include_response`를 켠 결과는 이 크기에 이릅니다.
 - `results`는 스캔의 워커가 끝난 뒤에 나타납니다. `done` 스캔의 탐지 결과이거나,
   `error` / `cancelled` 스캔의 부분 탐지 결과입니다. 대상에 끝내 닿지 못했거나 시작
   전에 취소된 스캔에는 `results` 자체가 없습니다. 실행 중에 취소한 스캔은 곧바로
@@ -522,6 +528,7 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
   "target": "https://target.app?q=test",
   "url": "https://target.app?q=test",
   "results": [],
+  "pagination": { "total": 0, "offset": 0, "limit": 0, "returned": 0, "has_more": false },
   "error_message": null,
   "queued_at_ms": 1758700000000,
   "started_at_ms": 1758700000120,
@@ -533,7 +540,7 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
 `status`는 `done`, `error`, `cancelled` 중 하나로, `GET /scan/{id}`가 보고하는 값과
 같습니다. `error_message`도 그 엔드포인트의 값과 같아서, 정상 종료나 단순 취소에서는
 `null`이고 그 밖에는 사유(대상 접근 불가, `scan_timeout` 만료, 세션 소실, 워커 패닉, 서버 종료)입니다. 잡에 `warnings`가 있으면
-`GET /scan/{id}`와 같은 목록이 함께 붙습니다. 시간 필드 네 개도 그 엔드포인트의 값과 같습니다. `url`은 예전 본문에
+`GET /scan/{id}`와 같은 목록이 함께 붙습니다. 시간 필드 네 개도 그 엔드포인트의 값과 같습니다. `results`는 그 엔드포인트가 주는 첫 페이지이며 같은 16 MiB 예산을 따릅니다. `pagination.has_more`가 `true`면 나머지는 `GET /scan/{id}?offset=`으로 가져오세요. `url`은 예전 본문에
 맞춰 만든 수신 측을 위해 `target`을 한 번 더 싣는 필드입니다. 이 POST는 스캔 자신의
 프록시·TLS 설정을 따르며, 10초 뒤 타임아웃되고, 재시도하지 않습니다.
 
@@ -551,6 +558,15 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
 - `--max-body-bytes <n>`: `POST /scan`과 `/preflight`의 요청 본문 상한
   (기본값 `1048576` = 1 MiB). 크기를 초과하는 본문은 핸들러가 파싱하기 전에
   `413`으로 거부됩니다.
+- 연결에는 플래그 없이 고정된 제한이 있습니다. 연결마다 요청 헤더를 보내는 데 60초
+  (따라서 유휴 keep-alive 연결은 60초 뒤 닫힘), 본문 전체를 보내는 데 60초가 주어지며,
+  응답을 60초 동안 읽지 않으면 끊깁니다. 긴 `/preflight`처럼 서버가 처리 중인 요청은
+  영향을 받지 않습니다. 열린 연결 수는 프로세스 open-file 한도의 절반(한도를 읽을 수
+  없으면 128)으로 제한되며, 넘으면 새 연결은 대기합니다. 연결을 풀링하는 클라이언트는
+  유휴 연결이 닫힐 수 있으니 새 연결로 재시도해야 합니다.
+- 로그는 유한한 큐를 거쳐 stdout으로 나가므로, 로그를 읽는 쪽이 종료되거나 읽기를
+  멈춰도 서버는 멈추지 않습니다. 읽는 쪽이 따라오지 못하는 동안의 줄은 버려집니다.
+  `--log-file`은 직접 기록하므로 모든 줄이 남습니다.
 - `--max-retained-scans <n>`: 메모리에 보관하는 종료된 스캔 수 상한(기본값 `1000`,
   `0` = 무제한). `--max-concurrent-scans`는 활성 스캔만 세기 때문에, 이 상한이 없으면
   짧은 스캔이 몰릴 때 모든 결과가(`include_response`를 켰다면 응답 본문까지)
@@ -587,7 +603,8 @@ queued → cancelled
 스캔 하나가 테스트하는 파라미터는 최대 512개입니다. 그보다 많은 파라미터를 드러내는
 대상에서는 발견한 목록이 잘리고 스캔은 그대로 `done`으로 끝납니다. 이때 `warnings`와 서버
 로그에 `discovered params capped to 512 (dropped N)` 항목이 남습니다. 모든 파라미터가
-중요하다면 `param`으로 나눠서 스캔하세요.
+중요하다면 `param`으로 나눠서 스캔하세요. 512개를 넘는 `param` 목록은 `400`으로
+거부됩니다.
 
 반사되는 페이로드마다 finding을 남기는 `deep_scan` 스캔은 finding이 2000개 안팎에 이르면
 멈춥니다(이미 보낸 요청에서 몇 개가 더 붙을 수 있습니다). 그래도 `done`으로 끝나며,

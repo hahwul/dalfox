@@ -56,7 +56,6 @@ pub async fn check_query_discovery(
             continue;
         };
         let client_clone = client.clone();
-        let data = target.data.clone();
         let parsed_method = target.parse_method();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
@@ -73,8 +72,13 @@ pub async fn check_query_discovery(
                     .await
                     .expect("acquire semaphore permit");
                 let m = parsed_method;
-                let request =
-                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
+                let request = crate::utils::build_request(
+                    &client_clone,
+                    &target_clone,
+                    m,
+                    url,
+                    target_clone.data.clone(),
+                );
                 crate::record_outbound_request().await;
                 let mut discovered: Option<Param> = None;
                 if let Ok(resp) = crate::utils::http::send_counted(request).await {

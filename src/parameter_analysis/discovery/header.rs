@@ -115,7 +115,6 @@ pub async fn check_header_discovery(
     for (header_name, header_value) in &headers_to_test {
         let client_clone = client.clone();
         let url = target.url.clone();
-        let data = target.data.clone();
         let parsed_method = target.parse_method();
         let header_name = header_name.clone();
         let header_value = header_value.clone();
@@ -132,7 +131,7 @@ pub async fn check_header_discovery(
                     &target_clone,
                     parsed_method,
                     url,
-                    data,
+                    target_clone.data.clone(),
                 );
                 let overrides = vec![(override_name, test_value.to_string())];
                 Some(crate::utils::apply_header_overrides(base, &overrides))

@@ -137,9 +137,12 @@ pub async fn probe_body_params(
                                 .with_reflection_analysis(&text),
                             );
                             if !silence {
-                                eprintln!(
+                                crate::ceprintln!(
                                     "Discovered body param: {} (EWMA {:.2}, {}/{})",
-                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
+                                    param_name_cloned,
+                                    st.ewma_ratio,
+                                    st.reflections,
+                                    st.attempts
                                 );
                             }
                         } else {

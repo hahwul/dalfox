@@ -239,6 +239,14 @@ Response (while running):
 }
 ```
 
+- `results` comes with a `pagination` object: `{total, offset, limit,
+  returned, has_more}`. `?offset=` and `?limit=` page through the findings
+  (`limit=0`, the default, returns everything from `offset` on). One response
+  carries at most 16 MiB of findings; when that cuts a page short,
+  `pagination` adds `truncated_by_size: true` and `max_page_bytes`, and
+  `has_more` is `true`. Read `has_more` and continue from
+  `offset + returned` until it is `false`: findings with `include_response`
+  from a `deep_scan` reach that size.
 - `results` appears once the scan's worker has finished: the findings of a
   `done` scan, or the partial findings of an `error` / `cancelled` one. To read
   the findings so far while a scan is still running, add `?partial=1`: the
@@ -547,6 +555,7 @@ the moment of the `DELETE`:
   "target": "https://target.app?q=test",
   "url": "https://target.app?q=test",
   "results": [],
+  "pagination": { "total": 0, "offset": 0, "limit": 0, "returned": 0, "has_more": false },
   "error_message": null,
   "queued_at_ms": 1758700000000,
   "started_at_ms": 1758700000120,
@@ -560,7 +569,9 @@ reports. `error_message` is that endpoint's `error_message` too: `null` for a
 clean finish or a plain cancel, otherwise the reason (target unreachable, a
 `scan_timeout` expiry, lost session, worker panic, server shutdown). A `warnings` list is added
 when the job has one, exactly as `GET /scan/{id}` reports it. The four timing
-fields are that endpoint's too. `url` repeats `target` for subscribers written
+fields are that endpoint's too. `results` is the first page that endpoint
+serves, under the same 16 MiB budget: when `pagination.has_more` is `true`,
+fetch the rest from `GET /scan/{id}?offset=`. `url` repeats `target` for subscribers written
 against the older body. The POST goes through the
 scan's own proxy and TLS settings, times out after 10 seconds, and is not
 retried.
@@ -580,6 +591,17 @@ retried.
 - `--max-body-bytes <n>`: request-body cap for `POST /scan` and `/preflight`
   (default `1048576` = 1 MiB). An oversized body is refused with `413` before
   the handler parses it.
+- Connections have fixed limits, with no flag. Each gets 60 seconds to send a
+  request head (so an idle keep-alive connection is closed after 60 seconds),
+  60 seconds to send its whole body, and is dropped when it stops reading a
+  response for 60 seconds. A request the server is still working on, such as a
+  long `/preflight`, is not affected. Open connections are capped at half the
+  process's open-file limit (128 where the limit cannot be read); past the cap
+  new ones wait. A client that pools connections should expect idle ones to be
+  closed and retry on a fresh one.
+- Log lines go to stdout through a bounded queue, so a log reader that exits
+  or stops reading never stops the server; lines are dropped while it is not
+  keeping up. `--log-file` is written directly and keeps every line.
 - `--max-retained-scans <n>`: cap on finished scans kept in memory (default
   `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
   so without this a flood of quick scans holds every result (response bodies
@@ -622,7 +644,8 @@ A second signal skips the wait and exits at once.
 A single scan tests at most 512 parameters. On a target that exposes more, the
 discovered set is truncated and the scan still ends `done`, with a
 `discovered params capped to 512 (dropped N)` entry in `warnings` and in the
-server log. Split such a target with `param` if every parameter matters.
+server log. Split such a target with `param` if every parameter matters. A
+`param` list longer than 512 names is refused with `400`.
 
 A `deep_scan` scan, which records one finding per reflecting payload, stops once
 it has about 2000 findings (requests already in flight can add a few more). It

@@ -1884,6 +1884,7 @@ async fn soft_failures_surface_as_job_warnings() {
             status: j.status.clone(),
             partial: false,
             results: None,
+            pagination: None,
             error_message: None,
             warnings: &j.warnings,
             progress: None,

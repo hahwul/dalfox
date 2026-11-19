@@ -81,7 +81,7 @@ pub async fn probe_graphql_params(
             },
             move |text| {
                 if !silence {
-                    eprintln!("Discovered GraphQL variable: {}", name);
+                    crate::ceprintln!("Discovered GraphQL variable: {}", name);
                 }
                 Param {
                     pre_encoding_pipeline: Some(pipeline),

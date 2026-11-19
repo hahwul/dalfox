@@ -2239,7 +2239,7 @@ pub async fn run_scanning(
             }
             // Sanitized for the same reason as the sibling sites: the panic
             // message can embed response bytes.
-            eprintln!(
+            crate::ceprintln!(
                 "[!] scanning task failed: {}",
                 crate::utils::log::sanitize_log_message(&e.to_string())
             );

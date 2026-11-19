@@ -334,6 +334,10 @@ pub(crate) struct ResultPayload<'a> {
     /// `results` is a mid-scan read (`?partial=1`), not the settled list.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(crate) partial: bool,
+    /// Which part of the finding list `results` is; present whenever
+    /// `results` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) pagination: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error_message: Option<String>,
     /// Non-fatal conditions the caller must weigh before calling the scan

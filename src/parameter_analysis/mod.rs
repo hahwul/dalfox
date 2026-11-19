@@ -1019,8 +1019,17 @@ fn transport_invalid_chars(target: &Target, param: &Param) -> Vec<char> {
     }
 }
 
-pub async fn active_probe_param(
-    target: &Target,
+pub async fn active_probe_param(target: &Target, param: Param, semaphore: Arc<Semaphore>) -> Param {
+    active_probe_param_shared(&Arc::new(target.clone()), param, semaphore).await
+}
+
+/// [`active_probe_param`] on a target the caller already shares. Stage 3 runs
+/// one of these per discovered parameter, before the parameter cap, and the
+/// per-character fallback spawns a task per character: with its own copy of
+/// the target (headers, cookies, body) each, 2,000 parameters in fallback
+/// against a 500 KiB body held a gigabyte.
+async fn active_probe_param_shared(
+    target: &Arc<Target>,
     mut param: Param,
     semaphore: Arc<Semaphore>,
 ) -> Param {
@@ -1512,7 +1521,7 @@ pub async fn analyze_parameters(
         let sem = probe_semaphore.clone();
         param_handles.push(tokio::spawn(crate::with_job_scopes(
             crate::JobScopes::capture(),
-            async move { active_probe_param(target_ref.as_ref(), p, sem).await },
+            async move { active_probe_param_shared(&target_ref, p, sem).await },
         )));
     }
     let mut probed = Vec::with_capacity(param_handles.len());
@@ -1566,7 +1575,7 @@ pub async fn analyze_parameters(
             if let Some(ref pb) = pb {
                 pb.println(line);
             } else {
-                eprintln!("{}", line);
+                crate::ceprintln!("{}", line);
             }
         }
     }

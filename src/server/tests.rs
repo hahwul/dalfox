@@ -2012,6 +2012,13 @@ async fn test_run_scan_job_webhook_reports_done_status() {
         "successful scan must emit status=done (got payload: {})",
         payload
     );
+    // The webhook carries the page `GET /scan/{id}` serves, and says so.
+    assert_eq!(
+        payload["pagination"]["returned"],
+        payload["results"].as_array().map_or(0, Vec::len),
+        "{payload}"
+    );
+    assert_eq!(payload["pagination"]["has_more"], false, "{payload}");
 }
 
 /// The webhook is the only report a non-polling subscriber gets, so the job's
@@ -6833,4 +6840,261 @@ async fn test_run_scan_job_reads_the_page_past_a_honoured_range() {
     assert_eq!(job.status, JobStatus::Done, "{:?}", job.error_message);
     let found = job.results.as_ref().map_or(0, |r| r.len());
     assert!(found > 0, "the flow past the first 8 KiB must be reported");
+}
+
+/// A `POST /scan` whose body stops arriving used to hold its connection open
+/// for good: the header timeout ends once the head is in, and the `Json`
+/// extractor waits on the body with no deadline. Driven through the real
+/// router and accept loop, with both timeouts shortened.
+#[tokio::test]
+async fn a_stalled_request_body_is_refused_instead_of_held_open() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let state = make_state(None, None, false, false, "callback");
+    let app = build_router(state, 1_048_576, Duration::from_millis(200));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(serve_connections(
+        listener,
+        app,
+        std::future::pending(),
+        Duration::from_millis(200),
+        8,
+    ));
+
+    let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    conn.write_all(
+        b"POST /scan HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n\
+          Content-Length: 1000\r\n\r\n{\"target\":",
+    )
+    .await
+    .expect("send the head and a partial body");
+    let mut reply = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), conn.read_to_end(&mut reply))
+        .await
+        .expect("the server must answer and close, not wait for the rest of the body")
+        .ok();
+    let reply = String::from_utf8_lossy(&reply);
+    assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+    assert!(reply.contains("invalid request body"), "{reply}");
+}
+
+/// The body deadline is on the whole body, not on the gap between chunks: a
+/// client dripping one byte at a time used to reset a per-chunk timer forever,
+/// before any API key was checked.
+#[tokio::test]
+async fn a_slowly_dripped_request_body_runs_out_of_time() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let state = make_state(None, None, false, false, "callback");
+    let app = build_router(state, 1_048_576, Duration::from_millis(400));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(serve_connections(
+        listener,
+        app,
+        std::future::pending(),
+        Duration::from_secs(30),
+        8,
+    ));
+
+    let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let (mut reader, mut writer) = conn.split();
+    writer
+        .write_all(
+            b"POST /scan HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n\
+              Content-Length: 100000\r\n\r\n",
+        )
+        .await
+        .expect("send the head");
+    // A byte every 100ms: each gap is well inside the timeout.
+    let drip = async {
+        loop {
+            if writer.write_all(b" ").await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    let mut reply = Vec::new();
+    tokio::select! {
+        _ = drip => {}
+        read = tokio::time::timeout(Duration::from_secs(5), reader.read_to_end(&mut reply)) => {
+            read.expect("the server must stop waiting for the body").ok();
+        }
+    }
+    let reply = String::from_utf8_lossy(&reply);
+    assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+    assert!(reply.contains("not received within"), "{reply}");
+}
+
+/// A preflight in flight when the server starts shutting down ends then. Left
+/// running, each one held the process for the whole drain grace.
+#[tokio::test]
+async fn test_preflight_handler_ends_when_the_server_shuts_down() {
+    // Accepts and never answers, so the analysis would run for `timeout`.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hold = tokio::spawn(async move {
+        let mut socks = Vec::new();
+        while let Ok((sock, _)) = listener.accept().await {
+            socks.push(sock);
+        }
+    });
+    let state = make_state(None, None, false, false, "cb");
+    let shutting_down = state.shutting_down.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        shutting_down.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    let started = std::time::Instant::now();
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1"),
+            options: Some(ScanOptions {
+                timeout: Some(10),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    hold.abort();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+/// More explicit `param` names than a scan can test are refused up front:
+/// each one is probed before the parameter cap drops the excess.
+#[test]
+fn test_validate_scan_options_caps_the_param_list() {
+    let max = crate::parameter_analysis::MAX_DISCOVERED_PARAMS;
+    let names = |n: usize| Some((0..n).map(|i| format!("p{i}")).collect::<Vec<_>>());
+    let mut at_cap = ScanOptions {
+        param: names(max),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut at_cap).is_ok());
+    let mut over = ScanOptions {
+        param: names(max + 1),
+        ..ScanOptions::default()
+    };
+    let err = validate_scan_options(&mut over).expect_err("over the cap");
+    assert!(err.contains("at most 512"), "{err}");
+}
+
+/// `GET /scan/{id}` pages its findings: `offset` / `limit` like `/scans`, and
+/// a byte budget on every page so the target cannot size the response.
+#[tokio::test]
+async fn test_get_result_pages_findings_and_bounds_the_response() {
+    let finding = |i: usize, response_bytes: usize| {
+        let mut f = crate::scanning::result::Result::builder(
+            crate::scanning::result::FindingType::Reflected,
+        )
+        .inject_type("inHTML")
+        .method("GET")
+        .data("http://t/?q=x")
+        .param(format!("p{i}"))
+        .payload("x")
+        .evidence("e")
+        .severity("Low")
+        .build();
+        f.response = Some("x".repeat(response_bytes));
+        f.to_sanitized(false, true)
+    };
+    let state = make_state(None, None, false, false, "cb");
+    {
+        let mut jobs = state.jobs.lock().await;
+        let small = (0..5).map(|i| finding(i, 10)).collect();
+        jobs.insert("small".into(), test_job(JobStatus::Done, Some(small), ""));
+        // 24 findings of 1 MiB each: more than one page's budget.
+        let big = (0..24).map(|i| finding(i, 1024 * 1024)).collect();
+        jobs.insert("big".into(), test_job(JobStatus::Done, Some(big), ""));
+        jobs.insert("queued".into(), test_job(JobStatus::Queued, None, ""));
+    }
+    let get = |id: &'static str, query: &[(&str, &str)]| {
+        let state = state.clone();
+        let params: Map<String, String> = query
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        async move {
+            let resp = get_result_handler(
+                State(state),
+                HeaderMap::new(),
+                Path(id.to_string()),
+                Query(params),
+            )
+            .await
+            .into_response();
+            let status = resp.status();
+            let body: serde_json::Value =
+                serde_json::from_str(&response_body_string(resp).await).expect("json");
+            (status, body)
+        }
+    };
+    let params_of = |body: &serde_json::Value| -> Vec<String> {
+        body["data"]["results"]
+            .as_array()
+            .expect("results")
+            .iter()
+            .map(|f| f["param"].as_str().unwrap_or_default().to_string())
+            .collect()
+    };
+
+    // No paging asked for and nothing over budget: the whole list, as before.
+    let (_, all) = get("small", &[]).await;
+    assert_eq!(params_of(&all).len(), 5);
+    assert_eq!(all["data"]["pagination"]["total"], 5);
+    assert_eq!(all["data"]["pagination"]["has_more"], false);
+    assert!(all["data"]["pagination"].get("truncated_by_size").is_none());
+
+    let (_, page) = get("small", &[("offset", "1"), ("limit", "2")]).await;
+    assert_eq!(params_of(&page), ["p1", "p2"]);
+    assert_eq!(page["data"]["pagination"]["returned"], 2);
+    assert_eq!(page["data"]["pagination"]["has_more"], true);
+
+    // Over the budget the page is cut, says so, and the rest is reachable.
+    let (_, first) = get("big", &[]).await;
+    let served = params_of(&first).len();
+    assert!(
+        (1..24).contains(&served),
+        "{served} of 24 MiB-sized findings"
+    );
+    assert_eq!(first["data"]["pagination"]["truncated_by_size"], true);
+    assert_eq!(first["data"]["pagination"]["has_more"], true);
+    assert_eq!(
+        first["data"]["pagination"]["max_page_bytes"],
+        MAX_RESULT_PAGE_BYTES
+    );
+    // Continuing from `offset + returned` covers every finding exactly once.
+    let mut seen = params_of(&first);
+    while seen.len() < 24 {
+        let offset = seen.len().to_string();
+        let (_, next) = get("big", &[("offset", &offset)]).await;
+        let page = params_of(&next);
+        assert_eq!(next["data"]["pagination"]["returned"], page.len());
+        assert!(!page.is_empty(), "page at {offset} is empty");
+        seen.extend(page);
+    }
+    let expected: Vec<String> = (0..24).map(|i| format!("p{i}")).collect();
+    assert_eq!(seen, expected);
+
+    // A scan with no results yet has no page to describe.
+    let (_, queued) = get("queued", &[]).await;
+    assert!(queued["data"].get("pagination").is_none());
+
+    let (status, _) = get("small", &[("limit", "many")]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

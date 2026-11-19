@@ -4214,7 +4214,8 @@ async fn a_session_marker_beyond_the_preflight_range_does_not_fail_the_scan() {
     assert_eq!(
         outcome,
         ScanOutcome::Clean,
-        "the check marker is present on the full response, outside the preflight Range sample"
+        "the check marker is present on the full response, outside the preflight Range sample: {}",
+        report["meta"]
     );
     assert_eq!(report["meta"]["incomplete"], false);
     assert_eq!(report["meta"]["target_summary"][0]["status"], "clean");
