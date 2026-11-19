@@ -633,7 +633,8 @@ A second signal skips the wait and exits at once.
 A single scan tests at most 512 parameters. On a target that exposes more, the
 discovered set is truncated and the scan still ends `done`, with a
 `discovered params capped to 512 (dropped N)` entry in `warnings` and in the
-server log. Split such a target with `param` if every parameter matters.
+server log. Split such a target with `param` if every parameter matters. A
+`param` list longer than 512 names is refused with `400`.
 
 A `deep_scan` scan, which records one finding per reflecting payload, stops once
 it has about 2000 findings (requests already in flight can add a few more). It

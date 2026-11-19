@@ -651,6 +651,16 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
             validate_cookie_pairs("cookie", cookie)?;
         }
         validate_param_specs(self.params)?;
+        // Every named parameter is synthesized and probed before the scan's
+        // parameter cap drops the excess: 20,000 names cost 100,000 requests
+        // and most of a gigabyte to end up testing the first 512.
+        let max_params = crate::parameter_analysis::MAX_DISCOVERED_PARAMS;
+        if self.params.len() > max_params {
+            return Err(format!(
+                "param names {} parameters; a scan tests at most {max_params}",
+                self.params.len()
+            ));
+        }
         if let Some(p) = self.proxy {
             *p = p.as_deref().map(normalize_proxy).transpose()?.flatten();
         }

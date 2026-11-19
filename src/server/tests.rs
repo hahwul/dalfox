@@ -6924,3 +6924,65 @@ async fn a_slowly_dripped_request_body_runs_out_of_time() {
     assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
     assert!(reply.contains("not received within"), "{reply}");
 }
+
+/// A preflight in flight when the server starts shutting down ends then. Left
+/// running, each one held the process for the whole drain grace.
+#[tokio::test]
+async fn test_preflight_handler_ends_when_the_server_shuts_down() {
+    // Accepts and never answers, so the analysis would run for `timeout`.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hold = tokio::spawn(async move {
+        let mut socks = Vec::new();
+        while let Ok((sock, _)) = listener.accept().await {
+            socks.push(sock);
+        }
+    });
+    let state = make_state(None, None, false, false, "cb");
+    let shutting_down = state.shutting_down.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        shutting_down.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    let started = std::time::Instant::now();
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1"),
+            options: Some(ScanOptions {
+                timeout: Some(10),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    hold.abort();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+/// More explicit `param` names than a scan can test are refused up front:
+/// each one is probed before the parameter cap drops the excess.
+#[test]
+fn test_validate_scan_options_caps_the_param_list() {
+    let max = crate::parameter_analysis::MAX_DISCOVERED_PARAMS;
+    let names = |n: usize| Some((0..n).map(|i| format!("p{i}")).collect::<Vec<_>>());
+    let mut at_cap = ScanOptions {
+        param: names(max),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut at_cap).is_ok());
+    let mut over = ScanOptions {
+        param: names(max + 1),
+        ..ScanOptions::default()
+    };
+    let err = validate_scan_options(&mut over).expect_err("over the cap");
+    assert!(err.contains("at most 512"), "{err}");
+}

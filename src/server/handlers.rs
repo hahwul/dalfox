@@ -643,6 +643,8 @@ enum PreflightError {
     TaskPanicked,
     /// The analysis outlived the effective scan budget (`--scan-timeout` cap).
     TimedOut(u64),
+    /// The server began shutting down while the analysis was running.
+    ShuttingDown,
 }
 
 // POST /preflight — parameter discovery without attack payloads
@@ -724,6 +726,10 @@ pub(crate) async fn preflight_handler(
     // (and any in-flight probes) and returns `_preflight_permit` to the pool
     // instead of holding a slot until the target finishes or times out.
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+    // A shutdown ends the analysis too. Left running, it held its request —
+    // and with it the whole process — for the full drain grace, which is as
+    // long as `docker stop` waits before it kills.
+    let shutting_down = state.shutting_down.clone();
 
     // Run the analysis on tokio's blocking pool (reused across calls) with a
     // current_thread runtime inside because analyze_parameters and scraper-
@@ -806,6 +812,11 @@ pub(crate) async fn preflight_handler(
                     _ = cancel_rx.wait_for(|cancelled| *cancelled) => {
                         Ok(serde_json::Value::Null)
                     }
+                    _ = async {
+                        while !shutting_down.load(std::sync::atomic::Ordering::Relaxed) {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    } => Err(PreflightError::ShuttingDown),
                     res = budgeted => res,
                 }
             })
@@ -835,6 +846,9 @@ pub(crate) async fn preflight_handler(
             StatusCode::GATEWAY_TIMEOUT,
             format!("preflight exceeded the {secs}s scan timeout"),
         ),
+        Err(PreflightError::ShuttingDown) => {
+            r.err(StatusCode::SERVICE_UNAVAILABLE, "server is shutting down")
+        }
         Err(PreflightError::TaskPanicked) => {
             log(&state, "ERR", "preflight task panicked");
             r.err(StatusCode::INTERNAL_SERVER_ERROR, "preflight task panicked")
