@@ -232,6 +232,12 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan
 }
 ```
 
+- `results`에는 `pagination` 객체(`{total, offset, limit, returned, has_more}`)가
+  함께 옵니다. `?offset=`과 `?limit=`으로 탐지 결과를 나눠 읽습니다(`limit=0`이 기본이며
+  `offset`부터 전부 반환). 응답 하나에 담기는 탐지 결과는 최대 16 MiB입니다. 이 때문에
+  페이지가 잘리면 `pagination`에 `truncated_by_size: true`와 `max_page_bytes`가 붙고
+  `has_more`가 `true`가 됩니다. `has_more`가 `false`가 될 때까지 `offset + returned`부터
+  이어서 읽으세요. `deep_scan`에서 `include_response`를 켠 결과는 이 크기에 이릅니다.
 - `results`는 스캔의 워커가 끝난 뒤에 나타납니다. `done` 스캔의 탐지 결과이거나,
   `error` / `cancelled` 스캔의 부분 탐지 결과입니다. 대상에 끝내 닿지 못했거나 시작
   전에 취소된 스캔에는 `results` 자체가 없습니다. 실행 중에 취소한 스캔은 곧바로

@@ -46,7 +46,7 @@ pub(crate) fn max_connections() -> usize {
 
 fn connections_for(nofile_soft_limit: Option<usize>) -> usize {
     nofile_soft_limit.map_or(FALLBACK_MAX_CONNECTIONS, |limit| {
-        (limit / 2).clamp(FALLBACK_MAX_CONNECTIONS, 65_536)
+        (limit / 2).clamp(16, 65_536)
     })
 }
 
@@ -185,7 +185,10 @@ pub(crate) async fn serve_connections(
                     e.kind(),
                     ConnectionAborted | ConnectionRefused | ConnectionReset
                 ) {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    tokio::select! {
+                        _ = &mut shutdown => break,
+                        _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                    }
                 }
                 continue;
             }
@@ -363,10 +366,11 @@ mod tests {
         assert_eq!(nofile_soft_limit(""), None);
 
         assert_eq!(connections_for(Some(1024)), 512);
-        // Never below the fallback, never an unbounded number of tasks.
-        assert_eq!(connections_for(Some(64)), FALLBACK_MAX_CONNECTIONS);
+        // Never more than the limit itself, never an unbounded number of tasks.
+        assert_eq!(connections_for(Some(128)), 64);
+        assert_eq!(connections_for(Some(8)), 16);
         assert_eq!(connections_for(Some(1_048_576)), 65_536);
         assert_eq!(connections_for(None), FALLBACK_MAX_CONNECTIONS);
-        assert!(max_connections() >= FALLBACK_MAX_CONNECTIONS);
+        assert!(max_connections() >= 16);
     }
 }

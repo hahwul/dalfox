@@ -116,6 +116,15 @@ pub(crate) async fn get_result_handler(
         return refused;
     }
 
+    // `offset` / `limit` page through the findings, as on `/scans`.
+    let (offset, limit): (usize, usize) = match (
+        parse_num_query::<usize>(&params, "offset"),
+        parse_num_query::<usize>(&params, "limit"),
+    ) {
+        (Ok(o), Ok(l)) => (o.unwrap_or(0), l.unwrap_or(0)),
+        (Err(msg), _) | (_, Err(msg)) => return r.err(StatusCode::BAD_REQUEST, msg),
+    };
+
     let snapshot = || async { state.jobs.lock().await.get(&id).cloned() };
     let mut job = snapshot().await;
 
@@ -145,11 +154,21 @@ pub(crate) async fn get_result_handler(
         Some(j) => {
             let progress_data = j.progress_payload(0);
             let duration_ms = j.duration_ms();
+            let all = live.as_deref().or(j.results.as_deref().map(Vec::as_slice));
+            let (results, pagination) = match all {
+                Some(all) => {
+                    let (page, pagination) =
+                        crate::job::page_results(all, offset, limit, MAX_RESULT_PAGE_BYTES);
+                    (Some(&all[page]), Some(pagination))
+                }
+                None => (None, None),
+            };
             let payload = ResultPayload {
                 target: j.target_url.clone(),
                 status: j.status.clone(),
                 partial: live.is_some(),
-                results: live.as_deref().or(j.results.as_deref().map(Vec::as_slice)),
+                results,
+                pagination,
                 error_message: j.error_message.clone(),
                 warnings: &j.warnings,
                 progress: progress_data,
@@ -170,6 +189,17 @@ pub(crate) async fn get_result_handler(
         None => r.err(StatusCode::NOT_FOUND, "not found"),
     }
 }
+
+/// Byte budget for the findings in one `GET /scan/{id}` response.
+///
+/// The response used to carry every finding, and the target decides how many
+/// there are and how large each is: a `deep_scan` with `include_response`
+/// against an echo-everything page produced a 64 MiB body, serialized again on
+/// every poll — twenty concurrent polls took the server to 2.7 GiB. A page
+/// that hits the budget says so in `pagination` (`has_more`,
+/// `truncated_by_size`) and the rest is one `?offset=` away. Larger than MCP's
+/// 2 MiB because nothing here encodes the page twice.
+pub(crate) const MAX_RESULT_PAGE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Whether `?partial=1` has anything to add: a scan that started, whose worker
 /// is still running, and whose settled results are not stored yet. A queued

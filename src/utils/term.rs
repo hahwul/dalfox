@@ -244,7 +244,7 @@ pub fn daemon_mode() -> bool {
 }
 
 enum DaemonOut {
-    Text { stderr: bool, text: String },
+    Text(String),
     Flush(std::sync::mpsc::Sender<()>),
 }
 
@@ -253,10 +253,12 @@ enum DaemonOut {
 /// ever need to know a stalled reader lost lines.
 const DAEMON_OUT_QUEUE: usize = 1024;
 
-fn daemon_writer() -> &'static std::sync::mpsc::SyncSender<DaemonOut> {
-    static WRITER: std::sync::OnceLock<std::sync::mpsc::SyncSender<DaemonOut>> =
-        std::sync::OnceLock::new();
-    WRITER.get_or_init(|| {
+/// The queue feeding `stderr`'s writer thread, or stdout's. One each: a reader
+/// that stalls on one stream must not cost the other its lines.
+fn daemon_writer(stderr: bool) -> &'static std::sync::mpsc::SyncSender<DaemonOut> {
+    static WRITERS: [std::sync::OnceLock<std::sync::mpsc::SyncSender<DaemonOut>>; 2] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    WRITERS[usize::from(stderr)].get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::sync_channel(DAEMON_OUT_QUEUE);
         // If the thread cannot be spawned the queue fills and lines are
         // dropped, which is the same outcome as a reader that never reads.
@@ -266,13 +268,10 @@ fn daemon_writer() -> &'static std::sync::mpsc::SyncSender<DaemonOut> {
                 use std::io::Write;
                 for out in rx {
                     match out {
-                        DaemonOut::Text { stderr: true, text } => {
+                        DaemonOut::Text(text) if stderr => {
                             let _ = std::io::stderr().write_all(text.as_bytes());
                         }
-                        DaemonOut::Text {
-                            stderr: false,
-                            text,
-                        } => {
+                        DaemonOut::Text(text) => {
                             let mut stdout = std::io::stdout();
                             let _ = stdout.write_all(text.as_bytes());
                             let _ = stdout.flush();
@@ -302,7 +301,7 @@ fn daemon_writer() -> &'static std::sync::mpsc::SyncSender<DaemonOut> {
 /// and never panics, and lines are dropped while the reader is not keeping up.
 pub fn emit(stderr: bool, text: String) {
     if daemon_mode() {
-        let _ = daemon_writer().try_send(DaemonOut::Text { stderr, text });
+        let _ = daemon_writer(stderr).try_send(DaemonOut::Text(text));
     } else if stderr {
         eprint!("{text}");
     } else {
@@ -316,9 +315,21 @@ pub fn flush_daemon_output(wait: std::time::Duration) {
     if !daemon_mode() {
         return;
     }
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
-    if daemon_writer().try_send(DaemonOut::Flush(done_tx)).is_ok() {
-        let _ = done_rx.recv_timeout(wait);
+    let deadline = std::time::Instant::now() + wait;
+    for stderr in [false, true] {
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        // A full queue is a reader that is behind, not one that is gone: keep
+        // offering the marker until the deadline.
+        while daemon_writer(stderr)
+            .try_send(DaemonOut::Flush(done_tx.clone()))
+            .is_err()
+        {
+            if std::time::Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let _ = done_rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
     }
 }
 

@@ -222,6 +222,18 @@ async fn main() {
         {
             std::process::exit(0);
         }
+        if utils::term::daemon_mode() {
+            // The default hook writes straight to stderr, which blocks the
+            // panicking thread for good when the reader has stalled — and the
+            // job it was running then never settles.
+            let backtrace = std::backtrace::Backtrace::capture();
+            let trace = match backtrace.status() {
+                std::backtrace::BacktraceStatus::Captured => format!("\n{backtrace}"),
+                _ => String::new(),
+            };
+            utils::term::emit(true, format!("{info}{trace}\n"));
+            return;
+        }
         default_panic_hook(info);
     }));
 

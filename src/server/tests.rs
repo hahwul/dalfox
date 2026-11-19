@@ -6986,3 +6986,98 @@ fn test_validate_scan_options_caps_the_param_list() {
     let err = validate_scan_options(&mut over).expect_err("over the cap");
     assert!(err.contains("at most 512"), "{err}");
 }
+
+/// `GET /scan/{id}` pages its findings: `offset` / `limit` like `/scans`, and
+/// a byte budget on every page so the target cannot size the response.
+#[tokio::test]
+async fn test_get_result_pages_findings_and_bounds_the_response() {
+    let finding = |i: usize, response_bytes: usize| {
+        let mut f = crate::scanning::result::Result::builder(
+            crate::scanning::result::FindingType::Reflected,
+        )
+        .inject_type("inHTML")
+        .method("GET")
+        .data("http://t/?q=x")
+        .param(format!("p{i}"))
+        .payload("x")
+        .evidence("e")
+        .severity("Low")
+        .build();
+        f.response = Some("x".repeat(response_bytes));
+        f.to_sanitized(false, true)
+    };
+    let state = make_state(None, None, false, false, "cb");
+    {
+        let mut jobs = state.jobs.lock().await;
+        let small = (0..5).map(|i| finding(i, 10)).collect();
+        jobs.insert("small".into(), test_job(JobStatus::Done, Some(small), ""));
+        // 24 findings of 1 MiB each: more than one page's budget.
+        let big = (0..24).map(|i| finding(i, 1024 * 1024)).collect();
+        jobs.insert("big".into(), test_job(JobStatus::Done, Some(big), ""));
+        jobs.insert("queued".into(), test_job(JobStatus::Queued, None, ""));
+    }
+    let get = |id: &'static str, query: &'static [(&'static str, &'static str)]| {
+        let state = state.clone();
+        async move {
+            let params: Map<String, String> = query
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            let resp = get_result_handler(
+                State(state),
+                HeaderMap::new(),
+                Path(id.to_string()),
+                Query(params),
+            )
+            .await
+            .into_response();
+            let status = resp.status();
+            let body: serde_json::Value =
+                serde_json::from_str(&response_body_string(resp).await).expect("json");
+            (status, body)
+        }
+    };
+    let params_of = |body: &serde_json::Value| -> Vec<String> {
+        body["data"]["results"]
+            .as_array()
+            .expect("results")
+            .iter()
+            .map(|f| f["param"].as_str().unwrap_or_default().to_string())
+            .collect()
+    };
+
+    // No paging asked for and nothing over budget: the whole list, as before.
+    let (_, all) = get("small", &[]).await;
+    assert_eq!(params_of(&all).len(), 5);
+    assert_eq!(all["data"]["pagination"]["total"], 5);
+    assert_eq!(all["data"]["pagination"]["has_more"], false);
+    assert!(all["data"]["pagination"].get("truncated_by_size").is_none());
+
+    let (_, page) = get("small", &[("offset", "1"), ("limit", "2")]).await;
+    assert_eq!(params_of(&page), ["p1", "p2"]);
+    assert_eq!(page["data"]["pagination"]["returned"], 2);
+    assert_eq!(page["data"]["pagination"]["has_more"], true);
+
+    // Over the budget the page is cut, says so, and the rest is reachable.
+    let (_, first) = get("big", &[]).await;
+    let served = params_of(&first).len();
+    assert!(
+        (1..24).contains(&served),
+        "{served} of 24 MiB-sized findings"
+    );
+    assert_eq!(first["data"]["pagination"]["truncated_by_size"], true);
+    assert_eq!(first["data"]["pagination"]["has_more"], true);
+    assert_eq!(
+        first["data"]["pagination"]["max_page_bytes"],
+        MAX_RESULT_PAGE_BYTES
+    );
+    let (_, rest) = get("big", &[("offset", "16")]).await;
+    assert_eq!(params_of(&rest).first().map(String::as_str), Some("p16"));
+
+    // A scan with no results yet has no page to describe.
+    let (_, queued) = get("queued", &[]).await;
+    assert!(queued["data"].get("pagination").is_none());
+
+    let (status, _) = get("small", &[("limit", "many")]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

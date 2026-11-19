@@ -655,10 +655,14 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
         // parameter cap drops the excess: 20,000 names cost 100,000 requests
         // and most of a gigabyte to end up testing the first 512.
         let max_params = crate::parameter_analysis::MAX_DISCOVERED_PARAMS;
-        if self.params.len() > max_params {
+        let named = self
+            .params
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        if named > max_params {
             return Err(format!(
-                "param names {} parameters; a scan tests at most {max_params}",
-                self.params.len()
+                "param names {named} parameters; a scan tests at most {max_params}"
             ));
         }
         if let Some(p) = self.proxy {
@@ -1379,6 +1383,72 @@ pub(crate) fn scan_list_json(
         },
         "scans": scans,
     })
+}
+
+/// Page a finding list by `(offset, limit)` and a byte budget: the range to
+/// serve and the `pagination` descriptor a client continues from. Shared by
+/// MCP `get_results_dalfox` and REST `GET /scan/{id}`.
+///
+/// - `offset` past the end yields an empty page (not an error).
+/// - `limit == 0` means "everything from offset onward", bounded by
+///   `max_page_bytes`.
+///
+/// The budget is what bounds a response: how many findings a scan produces,
+/// and how large each is, is decided by the target.
+pub(crate) fn page_results(
+    all: &[SanitizedResult],
+    offset: usize,
+    limit: usize,
+    max_page_bytes: usize,
+) -> (std::ops::Range<usize>, serde_json::Value) {
+    let total = all.len();
+    let start = offset.min(total);
+    let requested_end = if limit == 0 {
+        total
+    } else {
+        start.saturating_add(limit).min(total)
+    };
+
+    // Trim the page to the byte budget. Measured by serializing each candidate
+    // rather than estimating from its string fields: the exact number can't
+    // drift when a field is added to `SanitizedResult`, and the work is bounded
+    // by the budget itself (one extra pass over at most `max_page_bytes`).
+    let mut used = 0usize;
+    let mut end = start;
+    for r in &all[start..requested_end] {
+        let bytes = match serde_json::to_vec(r) {
+            Ok(v) => v.len(),
+            // `SanitizedResult` has no serialization failure mode today — no
+            // non-string map keys, no non-finite floats. Should one ever
+            // appear, charge the whole budget rather than counting the finding
+            // as free: an unmeasurable page must not become an unbounded one.
+            Err(_) => max_page_bytes,
+        };
+        // Always emit at least one finding, however oversized. A page that came
+        // back empty because its first finding alone busts the budget would
+        // leave the client paging forever against the same offset.
+        if end > start && used.saturating_add(bytes) > max_page_bytes {
+            break;
+        }
+        used = used.saturating_add(bytes);
+        end += 1;
+    }
+
+    let mut pagination = serde_json::json!({
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "returned": end - start,
+        "has_more": end < total,
+    });
+    if end < requested_end {
+        // Distinguish "your `limit` was satisfied" from "the page was cut
+        // short because the findings are large", so a client that asked for
+        // N and got fewer knows the remainder is still there.
+        pagination["truncated_by_size"] = serde_json::json!(true);
+        pagination["max_page_bytes"] = serde_json::json!(max_page_bytes);
+    }
+    (start..end, pagination)
 }
 
 /// Text of a caught panic payload, for the job's error message.

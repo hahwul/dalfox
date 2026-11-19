@@ -239,6 +239,14 @@ Response (while running):
 }
 ```
 
+- `results` comes with a `pagination` object: `{total, offset, limit,
+  returned, has_more}`. `?offset=` and `?limit=` page through the findings
+  (`limit=0`, the default, returns everything from `offset` on). One response
+  carries at most 16 MiB of findings; when that cuts a page short,
+  `pagination` adds `truncated_by_size: true` and `max_page_bytes`, and
+  `has_more` is `true`. Read `has_more` and continue from
+  `offset + returned` until it is `false`: findings with `include_response`
+  from a `deep_scan` reach that size.
 - `results` appears once the scan's worker has finished: the findings of a
   `done` scan, or the partial findings of an `error` / `cancelled` one. To read
   the findings so far while a scan is still running, add `?partial=1`: the

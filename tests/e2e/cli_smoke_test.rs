@@ -1154,14 +1154,28 @@ fn test_server_exits_cleanly_on_sigterm() {
     );
 }
 
-/// One HTTP/1.1 request against a local server; returns the raw reply.
+/// Kills the daemon under test when the test ends, however it ends: a failed
+/// assertion must not leave a `dalfox` process listening.
+#[cfg(unix)]
+struct KillOnDrop(std::process::Child);
+
+#[cfg(unix)]
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// One HTTP/1.1 request against a local server; returns the raw reply, or
+/// nothing when the server cannot be reached.
 #[cfg(unix)]
 fn http_once(port: u16, request: &str) -> String {
-    let mut conn =
-        std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect to the server");
-    conn.set_read_timeout(Some(std::time::Duration::from_secs(10)))
-        .expect("set read timeout");
-    conn.write_all(request.as_bytes()).expect("send request");
+    let Ok(mut conn) = std::net::TcpStream::connect(("127.0.0.1", port)) else {
+        return String::new();
+    };
+    let _ = conn.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let _ = conn.write_all(request.as_bytes());
     let mut reply = String::new();
     let _ = std::io::Read::read_to_string(&mut conn, &mut reply);
     reply
@@ -1181,13 +1195,15 @@ fn test_server_outlives_its_log_reader() {
         .local_addr()
         .expect("probe addr")
         .port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
-        .args(["server", "--port", &port.to_string()])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn dalfox server");
-    let mut stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
+    let mut child = KillOnDrop(
+        Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .args(["server", "--port", &port.to_string()])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn dalfox server"),
+    );
+    let mut stdout = BufReader::new(child.0.stdout.take().expect("piped stdout"));
     let mut line = String::new();
     while !line.contains("listening on") {
         line.clear();
@@ -1212,9 +1228,7 @@ fn test_server_outlives_its_log_reader() {
         port,
         "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
     );
-    let exited = child.try_wait().expect("poll the server");
-    let _ = child.kill();
-    let _ = child.wait();
+    let exited = child.0.try_wait().expect("poll the server");
     assert!(
         queued.contains("scan_id"),
         "the scan must be accepted: {queued}"
@@ -1234,23 +1248,38 @@ fn test_server_outlives_its_log_reader() {
 fn test_mcp_outlives_a_closed_stderr() {
     use std::io::{BufRead, BufReader};
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
-        .args(["--debug", "mcp"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn dalfox mcp");
-    drop(child.stderr.take());
-    let mut stdin = child.stdin.take().expect("piped stdin");
-    let mut replies = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
+    let mut child = KillOnDrop(
+        Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .args(["--debug", "mcp"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn dalfox mcp"),
+    );
+    drop(child.0.stderr.take());
+    let mut stdin = child.0.stdin.take().expect("piped stdin");
+    // Replies are read on a thread so a server that stops answering fails the
+    // test instead of hanging it.
+    let stdout = child.0.stdout.take().expect("piped stdout");
+    let (reply_tx, replies) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if reply_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
     let mut call = |message: &str, id: u64| -> String {
-        writeln!(stdin, "{message}").expect("write to the MCP server");
-        replies
-            .by_ref()
-            .map_while(Result::ok)
-            .find(|line| line.contains(&format!("\"id\":{id}")))
-            .unwrap_or_default()
+        let _ = writeln!(stdin, "{message}");
+        let wanted = format!("\"id\":{id}");
+        loop {
+            match replies.recv_timeout(std::time::Duration::from_secs(20)) {
+                Ok(line) if line.contains(&wanted) => return line,
+                Ok(_) => {}
+                Err(_) => return String::new(),
+            }
+        }
     };
 
     call(
@@ -1281,8 +1310,6 @@ fn test_mcp_outlives_a_closed_stderr() {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    let _ = child.kill();
-    let _ = child.wait();
     assert!(
         queued.contains("scan_id"),
         "the scan must be accepted: {queued}"
@@ -1304,13 +1331,15 @@ fn test_server_outlives_a_stalled_log_reader() {
         .local_addr()
         .expect("probe addr")
         .port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
-        .args(["server", "--port", &port.to_string(), "--api-key", "k"])
-        // Held open and never read, for the life of the test.
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn dalfox server");
+    // stdout is held open and never read, for the life of the test.
+    let _child = KillOnDrop(
+        Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .args(["server", "--port", &port.to_string(), "--api-key", "k"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn dalfox server"),
+    );
     let health = "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
     let up = (0..100).any(|_| {
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -1327,8 +1356,6 @@ fn test_server_outlives_a_stalled_log_reader() {
         .take_while(|_| http_once(port, denied).contains("401"))
         .count();
     let after = http_once(port, health);
-    let _ = child.kill();
-    let _ = child.wait();
     assert_eq!(refused, 3000, "every request must be answered");
     assert!(after.contains("200 OK"), "{after}");
 }

@@ -98,54 +98,6 @@ pub(super) fn paginate_results(
             }),
         );
     };
-    let total = all.len();
-    let start = offset.min(total);
-    let requested_end = if limit == 0 {
-        total
-    } else {
-        start.saturating_add(limit).min(total)
-    };
-
-    // Trim the page to the byte budget. Measured by serializing each candidate
-    // rather than estimating from its string fields: the exact number can't
-    // drift when a field is added to `SanitizedResult`, and the work is bounded
-    // by the budget itself (one extra pass over at most `MAX_RESULTS_PAGE_BYTES`).
-    let mut used = 0usize;
-    let mut end = start;
-    for r in &all[start..requested_end] {
-        let bytes = match serde_json::to_vec(r) {
-            Ok(v) => v.len(),
-            // `SanitizedResult` has no serialization failure mode today — no
-            // non-string map keys, no non-finite floats. Should one ever
-            // appear, charge the whole budget rather than counting the finding
-            // as free: an unmeasurable page must not become an unbounded one.
-            Err(_) => MAX_RESULTS_PAGE_BYTES,
-        };
-        // Always emit at least one finding, however oversized. A page that came
-        // back empty because its first finding alone busts the budget would
-        // leave the client paging forever against the same offset.
-        if end > start && used.saturating_add(bytes) > MAX_RESULTS_PAGE_BYTES {
-            break;
-        }
-        used = used.saturating_add(bytes);
-        end += 1;
-    }
-
-    let slice = all[start..end].to_vec();
-    let returned = slice.len();
-    let mut pagination = serde_json::json!({
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-        "returned": returned,
-        "has_more": end < total,
-    });
-    if end < requested_end {
-        // Distinguish "your `limit` was satisfied" from "the page was cut
-        // short because the findings are large", so a client that asked for
-        // N and got fewer knows the remainder is still there.
-        pagination["truncated_by_size"] = serde_json::json!(true);
-        pagination["max_page_bytes"] = serde_json::json!(MAX_RESULTS_PAGE_BYTES);
-    }
-    (Some(slice), pagination)
+    let (page, pagination) = crate::job::page_results(all, offset, limit, MAX_RESULTS_PAGE_BYTES);
+    (Some(all[page].to_vec()), pagination)
 }

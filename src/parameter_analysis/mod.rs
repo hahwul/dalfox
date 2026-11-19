@@ -1019,8 +1019,17 @@ fn transport_invalid_chars(target: &Target, param: &Param) -> Vec<char> {
     }
 }
 
-pub async fn active_probe_param(
-    target: &Target,
+pub async fn active_probe_param(target: &Target, param: Param, semaphore: Arc<Semaphore>) -> Param {
+    active_probe_param_shared(&Arc::new(target.clone()), param, semaphore).await
+}
+
+/// [`active_probe_param`] on a target the caller already shares. Stage 3 runs
+/// one of these per discovered parameter, before the parameter cap, and the
+/// per-character fallback spawns a task per character: with its own copy of
+/// the target (headers, cookies, body) each, 2,000 parameters in fallback
+/// against a 500 KiB body held a gigabyte.
+async fn active_probe_param_shared(
+    target: &Arc<Target>,
     mut param: Param,
     semaphore: Arc<Semaphore>,
 ) -> Param {
@@ -1203,13 +1212,10 @@ pub async fn active_probe_param(
         let mut handles = Vec::new();
         let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
         let invalid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
-        // One shared copy: a per-character clone held ~30 copies of the target
-        // (headers, cookies, body) for every parameter in fallback at once.
-        let shared_target = Arc::new(target.clone());
         for &c in &probe_chars {
             let sem = semaphore.clone();
             let client_clone = client.clone();
-            let target_clone = shared_target.clone();
+            let target_clone = target.clone();
             let param_clone = param.clone();
             let valid_ref = valid_specials.clone();
             let invalid_ref = invalid_specials.clone();
@@ -1515,7 +1521,7 @@ pub async fn analyze_parameters(
         let sem = probe_semaphore.clone();
         param_handles.push(tokio::spawn(crate::with_job_scopes(
             crate::JobScopes::capture(),
-            async move { active_probe_param(target_ref.as_ref(), p, sem).await },
+            async move { active_probe_param_shared(&target_ref, p, sem).await },
         )));
     }
     let mut probed = Vec::with_capacity(param_handles.len());
