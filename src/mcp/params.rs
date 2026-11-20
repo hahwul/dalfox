@@ -305,8 +305,9 @@ pub(crate) struct ScanWithDalfoxParams {
 
     /// Finding confidence floor: "low" keeps every finding; "high" drops
     /// findings graded low (every R, plus AST flows dalfox cannot stand
-    /// behind) from the results. Informational (I) findings carry no grade and
-    /// are always kept. Default: none (same as "low").
+    /// behind, and low-graded V findings such as direct header/cookie reflections
+    /// or CSP-blocked inline payloads) from the results. Informational (I) findings
+    /// carry no grade and are always kept. Default: none (same as "low").
     #[serde(default)]
     pub min_confidence: Option<String>,
     /// Finding tiers: legacy (default) preserves V/A/R; confidence maps high to V,

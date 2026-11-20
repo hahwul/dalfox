@@ -133,7 +133,8 @@ Sanitizers are not a grading signal because they already act as a *filter*: the 
 only. Four things act on it:
 
 - `--min-confidence high` drops every `low` finding (every `R`, plus AST
-  flows Dalfox cannot stand behind) before anything else sees it: output in
+  flows Dalfox cannot stand behind, and low-graded `V` findings such as direct
+  header/cookie reflections or CSP-blocked inline payloads) before anything else sees it: output in
   every format, `--stream-findings`, per-target counts in `target_summary`,
   `--baseline`, `--limit` (the early stop and the display cut), and the exit
   code. `I` findings carry no grade (they are not XSS claims) and are always

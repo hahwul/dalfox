@@ -220,7 +220,7 @@ dalfox scan https://target.app --only-poc v     # only V (Vulnerable)
 dalfox scan https://target.app --only-poc v,a   # V + AST
 ```
 
-Drop findings Dalfox cannot stand behind (every `R`, plus `low`-graded AST flows):
+Drop findings Dalfox cannot stand behind (every `R`, plus `low`-graded AST flows and `V` findings such as direct header/cookie reflections or CSP-blocked inline payloads):
 
 ```bash
 dalfox scan https://target.app --min-confidence high

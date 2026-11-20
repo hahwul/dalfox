@@ -216,7 +216,7 @@ dalfox scan https://target.app --only-poc v     # V(Vulnerable)만
 dalfox scan https://target.app --only-poc v,a   # V + AST
 ```
 
-Dalfox가 확신할 수 없는 탐지 결과(모든 `R`, 그리고 `low` 등급 AST 흐름)를 제외합니다.
+Dalfox가 확신할 수 없는 탐지 결과를 제외합니다. 모든 `R`, `low` 등급 AST 흐름, 헤더·쿠키 반사나 CSP에 차단된 인라인 페이로드처럼 `low` 등급인 `V` 결과가 해당합니다.
 
 ```bash
 dalfox scan https://target.app --min-confidence high

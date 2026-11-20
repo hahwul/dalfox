@@ -114,8 +114,9 @@ pub(crate) const BASELINE_MODE_FILTER: &str = "filter";
 pub(crate) const BASELINE_MODE_ANNOTATE: &str = "annotate";
 pub const BASELINE_MODE_VALUES: &[&str] = &[BASELINE_MODE_FILTER, BASELINE_MODE_ANNOTATE];
 /// `--min-confidence high`: drop every finding graded `low` (every `R`, plus
-/// AST flows dalfox cannot stand behind). `low` is the floor every graded
-/// finding already meets, so it filters nothing.
+/// AST flows dalfox cannot stand behind, and low-graded `V` findings such as
+/// direct header/cookie reflections or CSP-blocked inline payloads). `low`
+/// is the floor every graded finding already meets, so it filters nothing.
 pub(crate) const MIN_CONFIDENCE_HIGH: &str = "high";
 pub const MIN_CONFIDENCE_VALUES: &[&str] = &["low", MIN_CONFIDENCE_HIGH];
 /// `--fail-on high`: exit 1 only when a reported finding is graded `high`.

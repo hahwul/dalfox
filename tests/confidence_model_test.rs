@@ -88,8 +88,12 @@ async fn reflection_delivery_grades_header_cookie_query_and_stored_header() {
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let payload = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("target/header-cookie-confidence-payload.txt");
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let payload = std::env::temp_dir().join(format!(
+        "dalfox-header-cookie-confidence-{}-{}.txt",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     std::fs::write(&payload, "<img src=x onerror=alert(1)>").unwrap();
     let read = format!("http://{addr}/read");
     for (path, options, grade, surface) in [

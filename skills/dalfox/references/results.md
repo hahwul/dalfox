@@ -93,7 +93,8 @@ What reads `confidence`:
 
 - **`--min-confidence high`** (config `min_confidence`, REST/MCP
   `min_confidence`) drops every `low` finding — every `R`, plus AST flows dalfox
-  cannot stand behind — from output in every format, `--stream-findings`,
+  cannot stand behind, and low-graded `V` findings such as direct header/cookie
+  reflections or CSP-blocked inline payloads — from output in every format, `--stream-findings`,
   `target_summary` counts, `--baseline`, `--limit` (both the early stop and the
   display cut), and the exit code. `I` findings carry no grade and are kept.
   The default (`low`) keeps everything. When set, `meta.min_confidence`

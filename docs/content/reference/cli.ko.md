@@ -83,7 +83,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--only-poc` |  | 쉼표로 구분된 필터: `v`(취약), `r`(반사됨), `a`(AST), `i`(정보성), 대소문자 무관 |
 | `--baseline` |  | 이전 Dalfox JSON/JSONL 리포트와 비교해 그 이후 새로 생긴 건만 보고합니다. 평범한 `-f json -o` 리포트가 그대로 베이스라인입니다 |
 | `--baseline-mode` | `filter` | `filter`는 알려진 건을 제거하고(카운트와 종료 코드가 신규 기준), `annotate`는 유지한 채 각각에 `new`를 표시합니다 |
-| `--min-confidence` | `low` | `high`는 `low` 등급 탐지 결과(모든 `R`, 그리고 Dalfox가 확신할 수 없는 AST 흐름)를 출력, `target_summary` 개수, `--baseline`, 종료 코드보다 먼저 제거합니다. `I`는 등급이 없으므로 유지됩니다. `low`는 모두 유지합니다 |
+| `--min-confidence` | `low` | `high`는 `low` 등급 탐지 결과(모든 `R`, Dalfox가 확신할 수 없는 AST 흐름, 헤더·쿠키 반사나 CSP에 차단된 인라인 페이로드처럼 `low` 등급인 `V` 결과)를 출력, `target_summary` 개수, `--baseline`, 종료 코드보다 먼저 제거합니다. `I`는 등급이 없으므로 유지됩니다. `low`는 모두 유지합니다 |
 | `--tier-model` | `legacy` | `confidence`는 high를 `V`/`High`, low를 `R`/`Info`로 매핑합니다. AST는 `detection_method`에 남으며 `--only-poc a`와 `--limit-result-type a`는 AST 전체를 고릅니다. 설정·REST·MCP: `tier_model` |
 | `--fail-on` | `any` | `high`는 보고된 결과 중 `high` 등급이 있을 때만 `1`로 끝냅니다. `high`가 아닌 결과(`R`, `I`, `low` 등급의 `V`나 AST 흐름)는 리포트에 남지만 실행을 실패시키지 않습니다. 종료 코드만 바꾸며 `--only-poc`, `--baseline`, `--min-confidence` 다음에 적용됩니다 |
 
