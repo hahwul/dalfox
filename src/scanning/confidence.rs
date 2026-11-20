@@ -1,9 +1,35 @@
-//! CSP grading for injected payloads; parser verification and legacy tiers stay unchanged.
+//! Reflection grading; parser verification and legacy tiers stay unchanged.
 
 use super::ast_integration::PageSecurityPosture;
 use super::result::Confidence;
+use crate::parameter_analysis::{Location, Param};
+use crate::target_parser::Target;
 use reqwest::header::HeaderMap;
 use std::sync::OnceLock;
+
+/// Stored values can reach another viewer independently of the write request.
+/// Direct header/cookie reflections need a separate delivery mechanism.
+pub(crate) fn reflection_grade(
+    grade: (Confidence, String),
+    target: &Target,
+    param: &Param,
+    stored: bool,
+) -> (Confidence, String) {
+    if stored || param.location != Location::Header {
+        return grade;
+    }
+    let reason = if super::url_inject::param_is_cookie(target, param) {
+        "injected through a cookie; a link or form cannot deliver it"
+    } else {
+        "injected through a request header; a link or form cannot deliver it"
+    };
+    let reason = if grade.0 == Confidence::Low {
+        format!("{}; {reason}", grade.1)
+    } else {
+        reason.to_string()
+    };
+    (Confidence::Low, reason)
+}
 
 /// Prefer the policy on the response that supplied the evidence, including
 /// retrieval responses under --sxss. Absence/report-only leaves confidence high.
@@ -127,6 +153,67 @@ pub(crate) fn verified_grade(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reflection_delivery_grades_headers_and_cookies_and_preserves_blockers() {
+        let mut target = crate::target_parser::parse_target("https://example.com/").unwrap();
+        target.cookies.push(("q".into(), "seed".into()));
+        for (name, identity, surface) in [
+            ("q", Some(false), "request header"),
+            ("Referer", None, "request header"),
+            ("User-Agent", None, "request header"),
+            ("q", Some(true), "cookie"),
+            ("q", None, "cookie"),
+        ] {
+            let mut param = Param::new(name, "seed", Location::Header);
+            param.is_cookie = identity;
+            let reason = format!("injected through a {surface}; a link or form cannot deliver it");
+            assert_eq!(
+                reflection_grade(
+                    (Confidence::High, "executable".into()),
+                    &target,
+                    &param,
+                    false
+                ),
+                (Confidence::Low, reason.clone())
+            );
+            for blocker in ["CSP does not permit inline script", "bare echo"] {
+                let grade = (Confidence::Low, blocker.to_string());
+                assert_eq!(
+                    reflection_grade(grade.clone(), &target, &param, false),
+                    (Confidence::Low, format!("{blocker}; {reason}"))
+                );
+                assert_eq!(
+                    reflection_grade(grade.clone(), &target, &param, true),
+                    grade
+                );
+            }
+            let grade = (Confidence::High, "stored evidence".into());
+            assert_eq!(
+                reflection_grade(grade.clone(), &target, &param, true),
+                grade
+            );
+        }
+        for location in [
+            Location::Query,
+            Location::Body,
+            Location::JsonBody,
+            Location::MultipartBody,
+            Location::GraphqlBody,
+            Location::XmlBody,
+            Location::Path,
+            Location::Fragment,
+        ] {
+            let param = Param::new("q", "seed", location);
+            for confidence in [Confidence::High, Confidence::Low] {
+                let grade = (confidence, "existing reason".into());
+                assert_eq!(
+                    reflection_grade(grade.clone(), &target, &param, false),
+                    grade
+                );
+            }
+        }
+    }
 
     #[test]
     fn csp_grades_inline_shapes_without_changing_verification() {

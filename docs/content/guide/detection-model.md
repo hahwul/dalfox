@@ -114,6 +114,8 @@ This also explains a result that looks like a gap but isn't. In a pure client-si
 
 Every XSS finding carries a `confidence` of `high` or `low`, plus a `confidence_reason` naming the deciding signals. For request-based methods it follows the parser evidence and the evidence response's CSP header. A verified inline handler, inline `<script>` body or `javascript:` URL grades `low` under an enforcing CSP that blocks inline script, with reason `CSP does not permit inline script`. Known CSP-bypass candidates retain `high`. No policy, report-only policies retain the previous grade. Stored-XSS uses the retrieval response's policy. Only the grade changes under the default tier model. For AST findings it is graded from the flow's shape.
 
+Reflected findings injected through a request header or cookie grade `low`, including `Referer` and `User-Agent`: a link or form cannot deliver the payload. The reason names the injection surface and keeps any existing low-confidence reason. Stored XSS (`--sxss`), blind/OOB, AST and informational findings are unaffected by this rule. The default `legacy` view keeps the type, severity and injection type.
+
 `high` requires all of:
 
 - **A source an attacker can reach with a link.** `location.*`, `document.URL`, and `URLSearchParams` carry the payload in the URL directly. Sources that would otherwise need an attacker-controlled driver page (`window.name`, `document.referrer`, `postMessage`, storage, `history.state`) grade `low`, *unless* the page seeds that source from a query parameter itself, which a link can also drive. That case grades `high` with the reason `non-URL source seeded from a query parameter by the page`.
@@ -242,6 +244,6 @@ The full rule is in [Exit codes](../output/#exit-codes).
 | Drop findings Dalfox cannot stand behind | `--min-confidence high` (`I` is kept) |
 | Fail CI only on `high` claims, keep the rest in the report | `--fail-on high` |
 
-Request-based confidence keeps existing-script JS-context evidence high. CSP meta policies (whose position relative to execution is not established) and unsupported `script-src-attr` / `script-src-elem` overrides conservatively retain high.
+CSP grading keeps existing-script JS-context evidence high. CSP meta policies (whose position relative to execution is not established) and unsupported `script-src-attr` / `script-src-elem` overrides conservatively retain high.
 
 A matching nonce on an injected script retains high. Script hash permission and `unsafe-hashes` authorization are not resolved here and conservatively retain high.

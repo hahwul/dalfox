@@ -122,6 +122,8 @@ dalfox scan https://target.app --only-discovery
 | `--skip-reflection-cookie` | 요청에 담긴 쿠키 프로빙 |
 | `--skip-reflection-path` | 경로 세그먼트 반사 확인 |
 
+헤더나 쿠키로 주입한 반사형 탐지 결과는 링크나 폼으로 전달할 수 없어 `low`이며, 저장형 XSS(`--sxss`)는 기존 등급을 유지합니다.
+
 명시적으로 지정한 것은 이 플래그들의 영향을 받지 않습니다. `-d` 본문 파라미터는 `--skip-mining`에서도 프로빙되고, `-p name:header`나 `-p name:cookie`는 짝이 되는 `--skip-reflection-*` 플래그가 있어도 프로빙됩니다. 페이로드 쪽 건너뛰기 플래그(`--skip-xss-scanning`, `--skip-ast-analysis`, `--skip-waf-probe`)는 [CLI 레퍼런스](../../reference/cli/)에 있습니다.
 
 > `--skip-mining-dom`은 응답 HTML에서 파라미터 *이름*을 수집하는 동작만 멈춥니다. DOM-XSS 탐지 자체를 끄지는 않습니다. 인라인 `<script>` 블록을 정적 분석해 `location.hash` → `innerHTML` 같은 source→sink 흐름을 찾아 `[A]`(AST 탐지) 결과를 내는 패스는 [`--skip-ast-analysis`](../payloads/#페이로드-단계-건너뛰기)가 제어하는 별개의 단계입니다. 결과에서 이 항목만 걸러내려면 `--only-poc v,r`을 사용하세요. 두 서브시스템의 차이와 각 증거 등급의 의미는 [탐지 모델](../detection-model/) 문서를 참고하세요.
