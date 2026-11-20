@@ -32,13 +32,13 @@
   "high_confidence": {
     "cases": 809,
     "expected": 753,
-    "tp": 695,
+    "tp": 619,
     "fp": 1,
-    "fn": 58,
+    "fn": 134,
     "tn": 55,
-    "precision": 99.86,
-    "recall": 92.3,
-    "f1": 95.93
+    "precision": 99.84,
+    "recall": 82.2,
+    "f1": 90.17
   },
   "by_method_confidence": [
     {
@@ -77,13 +77,28 @@
       "metrics": {
         "cases": 809,
         "expected": 753,
-        "tp": 72,
+        "tp": 68,
         "fp": 0,
-        "fn": 681,
+        "fn": 685,
         "tn": 56,
         "precision": 100.0,
-        "recall": 9.56,
-        "f1": 17.45
+        "recall": 9.03,
+        "f1": 16.56
+      }
+    },
+    {
+      "detection_method": "dom-verification",
+      "confidence": "low",
+      "metrics": {
+        "cases": 809,
+        "expected": 753,
+        "tp": 4,
+        "fp": 0,
+        "fn": 749,
+        "tn": 56,
+        "precision": 100.0,
+        "recall": 0.53,
+        "f1": 1.05
       }
     },
     {
@@ -92,13 +107,13 @@
       "metrics": {
         "cases": 809,
         "expected": 753,
-        "tp": 546,
+        "tp": 474,
         "fp": 1,
-        "fn": 207,
+        "fn": 279,
         "tn": 55,
-        "precision": 99.82,
-        "recall": 72.51,
-        "f1": 84.0
+        "precision": 99.79,
+        "recall": 62.95,
+        "f1": 77.2
       }
     },
     {
@@ -107,13 +122,13 @@
       "metrics": {
         "cases": 809,
         "expected": 753,
-        "tp": 1,
+        "tp": 73,
         "fp": 0,
-        "fn": 752,
+        "fn": 680,
         "tn": 56,
         "precision": 100.0,
-        "recall": 0.13,
-        "f1": 0.26
+        "recall": 9.69,
+        "f1": 17.67
       }
     }
   ],
@@ -160,10 +175,10 @@
         "precision": 100.0
       },
       "high_confidence": {
-        "tp": 33,
+        "tp": 0,
         "fp": 0,
-        "recall": 86.84,
-        "precision": 100.0
+        "recall": 0.0,
+        "precision": 0.0
       }
     },
     {
@@ -208,10 +223,10 @@
         "precision": 100.0
       },
       "high_confidence": {
-        "tp": 43,
+        "tp": 0,
         "fp": 0,
-        "recall": 89.58,
-        "precision": 100.0
+        "recall": 0.0,
+        "precision": 0.0
       }
     },
     {
