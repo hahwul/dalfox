@@ -116,6 +116,8 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
 
 반사·DOM 검증은 근거가 나온 응답의 CSP 헤더를 함께 봅니다. 인라인 스크립트를 막는 강제 정책 아래의 인라인 핸들러·`<script>` 본문·`javascript:` URL은 `low`이며 이유는 `CSP does not permit inline script`입니다. 알려진 CSP 우회 후보는 `high`를 유지합니다. 정책이 없거나 report-only인 경우 기존 등급을 유지합니다. 저장형 XSS는 조회 응답의 CSP 헤더 정책을 씁니다. 기본 티어 모델에서는 등급만 바뀝니다.
 
+요청 헤더나 쿠키로 주입한 반사형 탐지 결과는 `low`입니다. `Referer`와 `User-Agent`도 포함하며, 링크나 폼으로 페이로드를 전달할 수 없기 때문입니다. 판단 근거에는 주입 위치를 적고 기존 low 등급의 이유도 유지합니다. 저장형 XSS(`--sxss`), blind/OOB, AST, 정보성 탐지 결과에는 이 규칙을 적용하지 않습니다. 기본 `legacy` 모델에서는 타입, 심각도, 주입 유형을 유지합니다.
+
 `high`가 되려면 다음을 모두 만족해야 합니다.
 
 - **링크만으로 공격자가 도달할 수 있는 소스.** `location.*`, `document.URL`, `URLSearchParams`는 페이로드를 URL에 직접 싣습니다. 원래라면 공격자가 제어하는 구동 페이지가 필요한 소스(`window.name`, `document.referrer`, `postMessage`, 스토리지, `history.state`)는 `low`입니다. 다만 페이지가 그 소스를 쿼리 파라미터에서 스스로 채워 넣으면 링크만으로도 구동되므로 `high`가 되고, 근거에 `non-URL source seeded from a query parameter by the page`가 붙습니다.
@@ -133,7 +135,8 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
 보여 줍니다. 등급에 반응하는 동작은 네 가지입니다.
 
 - `--min-confidence high`는 `low` 탐지 결과(모든 `R`, 그리고 Dalfox가
-  확신할 수 없는 AST 흐름)를 가장 먼저 걸러 냅니다. 모든 형식의 출력,
+  확신할 수 없는 AST 흐름, 헤더·쿠키 반사나 CSP에 차단된 인라인 페이로드처럼
+  `low` 등급인 `V` 결과)를 가장 먼저 걸러 냅니다. 모든 형식의 출력,
   `--stream-findings`, `target_summary`의 대상별 개수, `--baseline`, `--limit`
   (스캔 중 조기 종료와 표시 개수 모두), 종료 코드가 모두 걸러진 뒤의 집합을
   봅니다. `I`는 XSS 주장이 아니라 등급이 없으므로 항상 남습니다. 기본값 `low`는
@@ -241,6 +244,6 @@ AST 패스, 오래된 라이브러리, OOB 콜백에서 나온 결과는 최종 
 | Dalfox가 확신할 수 없는 결과 제외 | `--min-confidence high` (`I`는 유지) |
 | `high` 주장에만 CI 실패, 나머지는 리포트에 유지 | `--fail-on high` |
 
-반사·DOM confidence는 기존 스크립트 안의 JS 주입을 인라인 삽입으로 낮추지 않습니다. 위치 순서를 검증하지 못하는 CSP meta와 아직 해석하지 못하는 `script-src-attr`/`script-src-elem` 세부 정책은 보수적으로 high를 유지합니다.
+CSP 등급 규칙은 기존 스크립트 안의 JS 주입을 인라인 삽입으로 낮추지 않습니다. 위치 순서를 검증하지 못하는 CSP meta와 아직 해석하지 못하는 `script-src-attr`/`script-src-elem` 세부 정책은 보수적으로 high를 유지합니다.
 
 주입한 script의 nonce가 CSP와 일치하면 high를 유지합니다. 아직 확인하지 못하는 script hash 및 `unsafe-hashes` 권한도 보수적으로 high로 둡니다.

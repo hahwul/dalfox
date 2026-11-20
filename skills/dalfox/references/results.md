@@ -80,18 +80,21 @@ Every XSS finding carries `confidence` (`"high"` / `"low"`) plus a
 `confidence_reason` naming the deciding signals. It is absent on `I`.
 
 Under the default `legacy` tier model `type` and `confidence` can legitimately disagree
-(`type: "V"`, `confidence: "low"` from two legacy AST promotions). That is the
+(`type: "V"`, `confidence: "low"` for direct header/cookie reflections, CSP-blocked inline payloads or legacy AST promotions). That is the
 preview signal, not a bug.
 
 `--tier-model confidence` (config/REST/MCP `tier_model`) maps high to `V`/`High` and low to `R`/`Info` before dedup and filters. The default `legacy` view is unchanged. In the confidence view, `a` selects AST method for both `--only-poc` and `--limit-result-type`; informational severity is preserved. SARIF level follows the resulting severity.
 
 Reflection and DOM verification grade inline handlers, inline script bodies and `javascript:` URLs low when the evidence response's enforcing CSP header blocks inline script. Stored XSS uses the retrieval response. Report-only, absent policies and known CSP-bypass candidates keep their previous grade.
 
+Direct reflections injected through request headers or cookies grade `low`, including `Referer` and `User-Agent`, because a link or form cannot deliver them. `confidence_reason` names the surface and retains existing low-confidence reasons. This rule does not affect stored XSS (`--sxss`), blind/OOB, AST or `I` findings. Under `legacy`, type, severity and `inject_type` stay unchanged.
+
 What reads `confidence`:
 
 - **`--min-confidence high`** (config `min_confidence`, REST/MCP
   `min_confidence`) drops every `low` finding — every `R`, plus AST flows dalfox
-  cannot stand behind — from output in every format, `--stream-findings`,
+  cannot stand behind, and low-graded `V` findings such as direct header/cookie
+  reflections or CSP-blocked inline payloads — from output in every format, `--stream-findings`,
   `target_summary` counts, `--baseline`, `--limit` (both the early stop and the
   display cut), and the exit code. `I` findings carry no grade and are kept.
   The default (`low`) keeps everything. When set, `meta.min_confidence`
@@ -237,7 +240,7 @@ signal. Off by default, plain format only, and auto-disabled with `--output`,
 
 **Caveat**: streaming happens *before* end-of-target post-processing, so an `R`
 finding can appear in the stream and then be absent from the final report — a
-`V` on the same `(param, inject_type)` collapses it (see below). Report the
+`V` on the same `(param, location, inject_type)` collapses it (see below). Report the
 final results, not the stream, when the two disagree.
 
 ## Why the counts don't add up
@@ -246,9 +249,11 @@ Two post-processing passes run before output, so summed tiers are not the number
 of findings recorded during the scan:
 
 - **Redundant `R` collapse** — an `R` is dropped when a `V` exists for the same
-  `(param, inject_type)` on that target. `V` and `A` are never dropped.
+  `(param, location, inject_type)` on that target. `V` and `A` are never dropped.
 - **AST dedup** — one finding per equivalent AST fingerprint survives, the
-  strongest by `type` then `severity`. `confidence` does not participate.
+  strongest by `type`, then `severity`, then `confidence` (`high` before `low`).
+  Reflection findings do not enter AST dedup, so a header finding cannot replace
+  a query finding with the same parameter name.
 
 The plain headline `XSS found N XSS` counts `V` only; other tiers are appended
 as `(+3 A, 1 R)` so the number agrees with the POC blocks printed under it.
@@ -373,6 +378,6 @@ A `done` scan can still carry `warnings` (a string list, absent when empty; dedu
    fetch the payload.
 6. Offer to re-run with `--deep-scan`, specific `--poc-type`, or WAF bypass options if the first pass was noisy or blocked.
 
-Request-based confidence keeps existing-script JS-context evidence high. CSP meta policies (whose position relative to execution is not established) and unsupported `script-src-attr` / `script-src-elem` overrides conservatively retain high.
+CSP grading keeps existing-script JS-context evidence high. CSP meta policies (whose position relative to execution is not established) and unsupported `script-src-attr` / `script-src-elem` overrides conservatively retain high.
 
 A matching nonce on an injected script retains high. Script hash permission and `unsafe-hashes` authorization are not resolved here and conservatively retain high.

@@ -91,7 +91,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 - JSON/JSONL envelope `meta` includes `target_summary` (per-target status/findings/error_code).
 - All findings include `type_description` alongside the single-letter `type` code.
 - `--dry-run` outputs a preflight summary instead of scan results.
-- `--tier-model` defaults to `legacy`. The opt-in `confidence` view maps high→V/High and low→R/Info before dedup/filtering on CLI, REST and MCP; preserve detection method and informational severity. In that view, `a` selects AST method in both PoC and limit filters. CSP grading uses the evidence response (retrieval response for stored XSS) without changing producer tiers.
+- `--tier-model` defaults to `legacy`. The opt-in `confidence` view maps high→V/High and low→R/Info before dedup/filtering on CLI, REST and MCP; preserve detection method and informational severity. In that view, `a` selects AST method in both PoC and limit filters. CSP grading uses the evidence response (retrieval response for stored XSS) without changing producer tiers. Direct header/cookie reflections grade low; this delivery rule exempts stored XSS, OOB, AST and informational findings.
 - POC output type (`--poc-type`): `plain`, `curl`, `httpie`, `http-request`.
 
 4. Respect concurrency boundaries.

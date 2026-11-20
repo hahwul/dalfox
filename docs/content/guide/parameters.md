@@ -122,6 +122,8 @@ To move faster or work around a fragile target, skip parts of the pipeline:
 | `--skip-reflection-cookie` | Probing the cookies the request carries |
 | `--skip-reflection-path` | Path-segment reflection checks |
 
+Reflections injected through headers or cookies grade `low` because a link or form cannot deliver them; stored XSS (`--sxss`) keeps its existing grade.
+
 What you name explicitly survives these flags. Body parameters from `-d` are probed even under `--skip-mining`, and a `-p name:header` or `-p name:cookie` is probed even under the matching `--skip-reflection-*` flag. The payload-side skips (`--skip-xss-scanning`, `--skip-ast-analysis`, `--skip-waf-probe`) are listed in the [CLI reference](../../reference/cli/).
 
 > `--skip-mining-dom` only stops Dalfox from collecting parameter *names* from the response HTML. It does not turn off DOM-XSS detection. The static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/#skipping-payload-stages). To filter those findings out of the output instead, use `--only-poc v,r`. See [Detection Model](../detection-model/) for how the two subsystems differ and what each evidence tier proves.

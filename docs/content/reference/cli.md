@@ -83,7 +83,7 @@ See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-inter
 | `--only-poc` |  | Comma-separated filter: `v` (vulnerable), `r` (reflected), `a` (AST), `i` (informational), case-insensitive |
 | `--baseline` |  | Diff against a previous Dalfox JSON/JSONL report and report only findings new since it. An ordinary `-f json -o` report is the baseline |
 | `--baseline-mode` | `filter` | `filter` drops known findings (counts and exit code describe only what is new), `annotate` keeps them and marks each `new` |
-| `--min-confidence` | `low` | `high` drops every `low`-confidence finding (every `R`, plus AST flows Dalfox cannot stand behind) before output, `target_summary` counts, `--baseline`, and the exit code. `I` findings carry no grade and are kept. `low` keeps everything |
+| `--min-confidence` | `low` | `high` drops every `low`-confidence finding (every `R`, plus AST flows Dalfox cannot stand behind, and low-graded `V` findings such as direct header/cookie reflections or CSP-blocked inline payloads) before output, `target_summary` counts, `--baseline`, and the exit code. `I` findings carry no grade and are kept. `low` keeps everything |
 | `--tier-model` | `legacy` | `confidence` maps high to `V`/`High`, low to `R`/`Info`. Detection method stays unchanged; `--only-poc a` and `--limit-result-type a` select all AST findings. Config/REST/MCP: `tier_model` |
 | `--fail-on` | `any` | `high` exits `1` only when a reported finding is graded `high`. Anything not graded `high` (`R`, `I`, a `low` `V` or AST flow) stays in the report but does not fail the run. Changes only the exit code, after `--only-poc`, `--baseline` and `--min-confidence` |
 

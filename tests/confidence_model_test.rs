@@ -22,7 +22,7 @@ async fn scan(url: &str, extra: &[&str]) -> (i32, serde_json::Value) {
             "--skip-mining",
             "--skip-discovery",
             "-p",
-            "q:query",
+            "q",
             "--skip-reflection-header",
             "--skip-reflection-cookie",
             "--skip-reflection-path",
@@ -50,6 +50,188 @@ async fn scan(url: &str, extra: &[&str]) -> (i32, serde_json::Value) {
         )
     });
     (output.status.code().unwrap(), report)
+}
+
+#[tokio::test]
+async fn reflection_delivery_grades_header_cookie_query_and_stored_header() {
+    use axum::{extract::State, http::HeaderMap};
+    use std::sync::Arc;
+    let stored = Arc::new(tokio::sync::Mutex::new(String::new()));
+    let app = Router::new()
+        .route(
+            "/",
+            get(|Query(q): Query<HashMap<String, String>>, headers: HeaderMap| async move {
+                let value = format!("{} {} {}",
+                    q.get("q").map(String::as_str).unwrap_or(""),
+                    headers.get("q").and_then(|v| v.to_str().ok()).unwrap_or(""),
+                    headers.get("cookie").and_then(|v| v.to_str().ok()).unwrap_or("")
+                );
+                Html(format!("<html><body>{value}</body></html>"))
+            }),
+        )
+        .route(
+            "/write",
+            get(|State(stored): State<Arc<tokio::sync::Mutex<String>>>, headers: HeaderMap| async move {
+                *stored.lock().await = headers.get("q").unwrap().to_str().unwrap().to_string();
+                Html("<html>saved</html>")
+            }),
+        )
+        .route(
+            "/read",
+            get(|State(stored): State<Arc<tokio::sync::Mutex<String>>>| async move {
+                Html(format!("<html><body>{}</body></html>", *stored.lock().await))
+            }),
+        )
+        .with_state(stored);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let payload = std::env::temp_dir().join(format!(
+        "dalfox-header-cookie-confidence-{}-{}.txt",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::write(&payload, "<img src=x onerror=alert(1)>").unwrap();
+    let read = format!("http://{addr}/read");
+    for (path, options, grade, surface) in [
+        (
+            "/",
+            vec!["-H", "q: seed", "-p", "q:header"],
+            "low",
+            "request header",
+        ),
+        (
+            "/",
+            vec!["--cookies", "q=seed", "-p", "q:cookie"],
+            "low",
+            "cookie",
+        ),
+        ("/?q=seed", vec![], "high", ""),
+        (
+            "/write",
+            vec![
+                "-H",
+                "q: seed",
+                "-p",
+                "q:header",
+                "--sxss",
+                "--sxss-url",
+                &read,
+                "--sxss-retries",
+                "1",
+            ],
+            "high",
+            "",
+        ),
+    ] {
+        let mut options = options;
+        options.extend([
+            "--custom-payload",
+            payload.to_str().unwrap(),
+            "--only-custom-payload",
+            "--fail-on",
+            "high",
+        ]);
+        let url = format!("http://{addr}{path}");
+        let (code, report) = scan(&url, &options).await;
+        assert_eq!(
+            code,
+            if grade == "high" { 1 } else { 0 },
+            "{path}: {report}"
+        );
+        let rows = report["findings"].as_array().unwrap();
+        assert!(!rows.is_empty(), "{path}: {report}");
+        for row in rows {
+            assert_eq!(row["type"], "V", "{row}");
+            assert_eq!(row["severity"], "High", "{row}");
+            assert_eq!(row["confidence"], grade, "{row}");
+            if grade == "low" {
+                assert_eq!(
+                    row["confidence_reason"],
+                    format!("injected through a {surface}; a link or form cannot deliver it")
+                );
+                assert_eq!(row["inject_type"], "inHTML");
+            } else {
+                assert!(
+                    !row["confidence_reason"]
+                        .as_str()
+                        .unwrap()
+                        .contains("a link or form")
+                );
+            }
+        }
+        if grade == "low" {
+            let mut mapped_options = options.clone();
+            mapped_options.extend(["--tier-model", "confidence"]);
+            let (_, mapped) = scan(&url, &mapped_options).await;
+            assert!(
+                !mapped["findings"].as_array().unwrap().is_empty(),
+                "{mapped}"
+            );
+            assert!(
+                mapped["findings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|f| f["type"] == "R" && f["severity"] == "Info")
+            );
+            let mut filtered_options = options.clone();
+            filtered_options.extend(["--min-confidence", "high", "--limit", "1"]);
+            let (code, filtered) = scan(&url, &filtered_options).await;
+            assert_eq!(code, 0, "{filtered}");
+            assert!(filtered["findings"].as_array().unwrap().is_empty());
+            let baseline = payload.with_extension("json");
+            let mut previous = report.clone();
+            for row in previous["findings"].as_array_mut().unwrap() {
+                row["confidence"] = "high".into();
+                row["confidence_reason"] = "previous grade".into();
+            }
+            std::fs::write(&baseline, previous.to_string()).unwrap();
+            let mut baseline_options = options.clone();
+            baseline_options.extend(["--baseline", baseline.to_str().unwrap()]);
+            let (_, compared) = scan(&url, &baseline_options).await;
+            assert!(
+                compared["findings"].as_array().unwrap().is_empty(),
+                "{compared}"
+            );
+            std::fs::remove_file(baseline).unwrap();
+        }
+    }
+    // Both injection slots must survive, even though their display names match.
+    let url = format!("http://{addr}/?q=seed");
+    let options = [
+        "-H",
+        "q: seed",
+        "-p",
+        "q:header",
+        "--custom-payload",
+        payload.to_str().unwrap(),
+        "--only-custom-payload",
+    ];
+    let (_, report) = scan(&url, &options).await;
+    let rows = report["findings"].as_array().unwrap();
+    assert!(
+        rows.iter()
+            .any(|f| f["location"] == "Header" && f["confidence"] == "low"),
+        "{report}"
+    );
+    assert!(
+        rows.iter()
+            .any(|f| f["location"] == "Query" && f["confidence"] == "high"),
+        "{report}"
+    );
+    let mut filtered_options = options.to_vec();
+    filtered_options.extend(["--min-confidence", "high", "--limit", "1"]);
+    let (code, filtered) = scan(&url, &filtered_options).await;
+    assert_eq!(code, 1, "{filtered}");
+    let rows = filtered["findings"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{filtered}");
+    assert_eq!(rows[0]["location"], "Query");
+    std::fs::remove_file(payload).unwrap();
+    server.abort();
 }
 
 #[tokio::test]

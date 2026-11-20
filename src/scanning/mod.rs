@@ -1289,6 +1289,15 @@ impl ScanWorkerCtx {
             crate::scanning::url_inject::build_injected_url(&base, param, &poc_payload);
         let exploit = crate::scanning::csti::sandbox_escape_payload(&tech);
 
+        let (confidence, confidence_reason) = confidence::reflection_grade(
+            (
+                crate::scanning::result::Confidence::Low,
+                "framework template interpolation reflected into the compiled DOM region; client-side execution not browser-confirmed (no headless engine)".to_string(),
+            ),
+            &self.target,
+            param,
+            self.args.sxss,
+        );
         let mut result = crate::scanning::result::Result::builder(FindingType::Reflected)
             .inject_type(inject_type_for_payload_with_sink(
                 self.args.sxss,
@@ -1300,10 +1309,7 @@ impl ScanWorkerCtx {
                 param,
             ))
             .detection_method(crate::scanning::result::FindingMethod::Reflection)
-            .confidence(
-                crate::scanning::result::Confidence::Low,
-                "framework template interpolation reflected into the compiled DOM region; client-side execution not browser-confirmed (no headless engine)",
-            )
+            .confidence(confidence, confidence_reason)
             .data(result_url)
             .param(param.name.clone())
             .payload(probe.to_string())
@@ -1555,6 +1561,12 @@ impl ScanWorkerCtx {
                                 .to_string(),
                         )
                     };
+                    let (confidence, confidence_reason) = confidence::reflection_grade(
+                        (confidence, confidence_reason),
+                        &self.target,
+                        param,
+                        self.args.sxss,
+                    );
                     let mut result = crate::scanning::result::Result::builder(finding_type)
                         .inject_type(inject_type_for_payload_with_sink(
                             self.args.sxss,
@@ -1745,6 +1757,12 @@ impl ScanWorkerCtx {
                             ),
                         );
                         // DOM-verified => Vulnerability (the legacy tier is unchanged).
+                        let (confidence, confidence_reason) = confidence::reflection_grade(
+                            (confidence, confidence_reason),
+                            &self.target,
+                            param,
+                            self.args.sxss,
+                        );
                         let mut result =
                             crate::scanning::result::Result::builder(FindingType::Verified)
                                 .confidence(confidence, confidence_reason)
@@ -1897,12 +1915,19 @@ impl ScanWorkerCtx {
                         };
                         let reflection_note = reflection_kind_note(kind);
 
+                        let (confidence, confidence_reason) = confidence::reflection_grade(
+                            (
+                                crate::scanning::result::Confidence::Low,
+                                "duplicated-parameter echo; no executable position confirmed"
+                                    .to_string(),
+                            ),
+                            &self.target,
+                            param,
+                            self.args.sxss,
+                        );
                         let mut result =
                             crate::scanning::result::Result::builder(FindingType::Reflected)
-                                .confidence(
-                                    crate::scanning::result::Confidence::Low,
-                                    "duplicated-parameter echo; no executable position confirmed",
-                                )
+                                .confidence(confidence, confidence_reason)
                                 .inject_type("inHTML-HPP")
                                 .method(self.target.method.clone())
                                 .data(hpp_url.clone())
