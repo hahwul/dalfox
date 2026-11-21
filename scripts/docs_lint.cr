@@ -139,20 +139,25 @@ class Page
   def live_body : String
     @live ||= begin
       buf = String::Builder.new
-      fenced = false
+      fence = nil
       @body.each_line(chomp: false) do |line|
-        if line.lstrip.starts_with?("```") || line.lstrip.starts_with?("~~~")
-          fenced = !fenced
-          buf << "\n"
-          next
-        end
-        if fenced
-          buf << "\n"
+        candidate = line.lstrip.match(/\A(`{3,}|~{3,})([^\r\n]*)/)
+        if opener = fence
+          # A closer must use the opener's delimiter, be at least as long,
+          # and have no trailing text beyond spaces or tabs.
+          if candidate && candidate[1][0] == opener[0] && candidate[1].size >= opener.size &&
+             candidate[2].matches?(/\A[ \t]*\z/)
+            fence = nil
+          end
+        elsif candidate && (candidate[1][0] == '~' || !candidate[2].includes?('`'))
+          fence = candidate[1]
         else
           # Blank the inside of every inline code span, keeping the length so
           # column offsets in a report still point at the right place.
           buf << line.gsub(/`[^`\n]*`/) { |m| " " * m.size }
+          next
         end
+        buf << '\n'
       end
       buf.to_s
     end
