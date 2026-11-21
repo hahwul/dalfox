@@ -15,6 +15,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Validate manual image tag
+        id: manual-tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
+          LC_ALL: C
+        run: |
+          if [[ ! "$MANUAL_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo '::error::Enter a valid Docker image tag (1–128 characters).'
+            exit 1
+          fi
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
@@ -23,10 +35,10 @@ jobs:
           # An explicit prefix survives the action's prerelease fallback.
           # The alias rules retain the existing unprefixed prerelease tag.
           tags: |
-            type=semver,pattern=v{{major}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern={{version}},prefix=v
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern=v{{major}},enable=${{ github.event_name == 'push' }}
+            type=semver,pattern=v{{major}}.{{minor}},enable=${{ github.event_name == 'push' }}
+            type=semver,pattern={{version}},prefix=v,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
         with:
