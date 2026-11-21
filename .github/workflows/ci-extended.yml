@@ -3,10 +3,12 @@ name: Extended CI
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml,
+            .github/workflows/cd-snapcraft.yml, .github/workflows/cd-release.yml, .github/workflows/cd-release-asset.yml]
   pull_request:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml,
+            .github/workflows/cd-snapcraft.yml, .github/workflows/cd-release.yml, .github/workflows/cd-release-asset.yml]
   schedule:
     # Weekly: exercise the slower, normally-#[ignore]d functional suite so it
     # can't silently rot between releases.
@@ -99,6 +101,8 @@ jobs:
         run: crystal run scripts/version_check.cr
       - name: Release tooling regressions
         run: crystal spec scripts/spec/version_update_spec.cr scripts/spec/dockerhub_release_spec.cr
+      - name: SBOM release regression
+        run: crystal spec scripts/spec/sbom_release_spec.cr
       - run: cargo build --release
       # All green, so all blocking. `effectiveness` fails when recall drops or
       # the FP count rises against docs/data/effectiveness.json; `perf-budget`

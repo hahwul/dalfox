@@ -7,6 +7,8 @@ jobs:
   generate-sbom:
     runs-on: ubuntu-latest
     name: Generate and Upload SBOM
+    env:
+      SBOM_PATH: dalfox.cdx.xml
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -17,10 +19,17 @@ jobs:
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx
       - name: Generate SBOM
-        run: cargo cyclonedx --format xml --override-filename dalfox.cdx
+        shell: bash
+        run: |
+          cargo cyclonedx --format xml --override-filename "${SBOM_PATH%.xml}"
+          if [[ ! -f "$SBOM_PATH" || ! -s "$SBOM_PATH" ]]; then
+            printf '::error::Generated SBOM %s is missing, empty, or not a file.\n' "$SBOM_PATH"
+            exit 1
+          fi
       - name: Upload SBOM to release
         uses: softprops/action-gh-release@v3
         with:
-          files: dalfox.cdx.xml
+          files: ${{ env.SBOM_PATH }}
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.DALFOX_PUBLISH_TOKEN }}
