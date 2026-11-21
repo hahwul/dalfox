@@ -63,10 +63,9 @@ pub(crate) fn term_cols_stderr() -> usize {
 /// via OSC 52 — clipboard writes; DCS / SOS / PM / APC are the other string
 /// sequences. A response body dalfox echoes into a finding line is
 /// target-controlled, so leaving those to pass through handed the page a
-/// channel to the operator's terminal. Two-byte forms (`ESC c`, `ESC 7`, …)
-/// take the character after the `ESC` with them, and a trailing `ESC` is
-/// dropped on its own — letting one survive would re-arm the following byte
-/// as an escape introducer downstream.
+/// channel to the operator's terminal. Other forms include an optional run
+/// of intermediate bytes before a final byte (e.g., `ESC ( B`), and a
+/// trailing `ESC` is dropped on its own.
 ///
 /// Printable characters are never touched — payloads contain `<`, `>` and
 /// `"` and must stay readable.
@@ -135,9 +134,19 @@ fn skip_escape_sequence(bytes: &[u8], i: usize) -> usize {
             }
             j
         }
-        // Two-byte escapes (`ESC c`, `ESC 7`, `ESC ( B`, …): drop the ESC and
-        // the character after it. Stepping by *character* rather than byte
-        // keeps the result on a UTF-8 boundary for `ESC` + multi-byte input.
+        // ESC with intermediates, e.g. character set designation `ESC ( B`.
+        0x20..=0x2f => {
+            let mut j = i + 2;
+            while matches!(bytes.get(j), Some(0x20..=0x2f)) {
+                j += 1;
+            }
+            if matches!(bytes.get(j), Some(0x30..=0x7e)) {
+                j += 1;
+            }
+            j
+        }
+        // Two-byte escapes (`ESC c`, `ESC 7`, …). Stepping by character
+        // also keeps the result on a UTF-8 boundary after malformed input.
         _ => {
             let mut j = i + 2;
             while j < bytes.len() && (bytes[j] & 0b1100_0000) == 0b1000_0000 {
@@ -493,6 +502,12 @@ mod tests {
         // would re-arm the following byte as an escape introducer downstream.
         assert_eq!(strip_ansi("\x1bABC"), "BC");
         assert_eq!(strip_ansi("tail\x1b"), "tail");
+    }
+
+    #[test]
+    fn strip_ansi_removes_escape_sequences_with_intermediates() {
+        assert_eq!(strip_ansi("a\x1b(Bb\x1b$)Cc"), "abc");
+        assert_eq!(strip_ansi("a\x1b(한글\x1b("), "a한글");
     }
 
     #[test]
