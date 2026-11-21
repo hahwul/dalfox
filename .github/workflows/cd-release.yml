@@ -68,12 +68,20 @@ jobs:
 
       - name: Determine version
         shell: bash
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+          LC_ALL: C
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          if [[ "$GITHUB_EVENT_NAME" == release ]]; then
+            version="$GITHUB_REF_NAME"
           else
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+            version="$MANUAL_VERSION"
           fi
+          if [[ ! "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+            echo '::error::Release version must start with a letter or number and use only letters, numbers, dots, underscores, plus signs, or hyphens.'
+            exit 1
+          fi
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
