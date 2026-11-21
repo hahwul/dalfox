@@ -301,7 +301,12 @@ fn build_remote_client(opts: &RemoteFetchOptions) -> Result<Client, Box<dyn std:
         .timeout(Duration::from_secs(
             opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
         ))
-        .danger_accept_invalid_certs(true);
+        // Remote lists are control-plane input: verify their certificates and
+        // never let a provider-selected redirect leave the requested origin.
+        // Environment proxies are not an operator choice for this fetch; an
+        // explicit scan proxy is applied below after disabling them.
+        .no_proxy()
+        .redirect(crate::target_parser::same_host_redirect_policy(10));
     if let Some(pxy) = opts.proxy.as_ref()
         && let Ok(proxy) = reqwest::Proxy::all(pxy)
     {
