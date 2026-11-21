@@ -25,12 +25,9 @@ fn unique_temp_dir(label: &str) -> PathBuf {
 
 fn run_payload_with_config(path: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_dalfox"))
-        .args([
-            "--config",
-            path.to_str().expect("utf8 path"),
-            "payload",
-            "event-handlers",
-        ])
+        .arg("--config")
+        .arg(path)
+        .args(["payload", "event-handlers"])
         .output()
         .expect("run dalfox with explicit --config")
 }
@@ -60,6 +57,45 @@ fn run_scan_with_config(path: &Path) -> Output {
 }
 
 const BANNER_MARK: &str = "████";
+
+#[cfg(unix)]
+#[test]
+fn test_non_utf8_config_path_is_accepted() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = unique_temp_dir("cfg-native-path");
+    let path = dir.join(OsStr::from_bytes(b"config-\xff.json"));
+    let output = run_payload_with_config(&path);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let contents = std::fs::read(&path).expect("config created at the native path");
+    serde_json::from_slice::<serde_json::Value>(&contents).expect("created config is JSON");
+}
+
+#[test]
+fn test_help_flag_after_separator_does_not_print_banner() {
+    let dir = unique_temp_dir("cli-literal-help");
+    let path = dir.join("config.toml");
+    std::fs::write(&path, "[scan]\n").expect("write empty config");
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(&path)
+        .args(["scan", "--input-type=file", "--format=json", "--", "-h"])
+        .current_dir(&dir)
+        .output()
+        .expect("run dalfox with a literal -h input path");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = serde_json::from_slice::<serde_json::Value>(&output.stderr)
+        .expect("missing file emits a JSON error");
+    assert_eq!(stderr["code"], "FILE_READ_ERROR");
+    assert!(output.stdout.is_empty(), "a literal -h cannot show help");
+}
 
 #[test]
 fn test_missing_json_config_path_is_created() {

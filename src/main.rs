@@ -7,6 +7,7 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use dalfox::cmd::scan::ScanOutcome;
 use dalfox::{DEBUG, cmd, config, mcp, server, utils};
+use std::path::PathBuf;
 
 /// Binary name, shared by the clap definition, the completion command tree and
 /// the `bin_name` the generated scripts key off, so the three cannot drift.
@@ -31,7 +32,7 @@ struct Cli {
 
     /// Config file path (TOML or JSON); overrides the default search path
     #[arg(long = "config", global = true, value_name = "FILE")]
-    config: Option<String>,
+    config: Option<PathBuf>,
 
     /// Enable debug logging
     #[arg(long = "debug", global = true)]
@@ -240,17 +241,15 @@ async fn main() {
         default_panic_hook(info);
     }));
 
-    // Determine color policy from TTY + `NO_COLOR` env var. The CLI
-    // `--no-color` / `-S` flags are inspected via raw argv because clap
-    // hasn't parsed yet — the banner is emitted before `Cli::parse()`.
-    // We need the color decision before `Cli::parse()` so the -h/--help
-    // banner can pick the right palette — clap's auto-help writes to
-    // stdout and exits before our normal post-parse banner block runs.
-    let __args: Vec<String> = std::env::args().collect();
-    let has_flag =
-        |needles: &[&str]| -> bool { __args.iter().any(|a| needles.iter().any(|n| a == n)) };
-    let no_color_env = std::env::var("NO_COLOR").is_ok();
-    let no_color_flag = has_flag(&["--no-color"]);
+    // Determine the color policy before parsing so the help banner can
+    // honor `--no-color` even when clap exits early.
+    let raw_args: Vec<_> = std::env::args_os().collect();
+    let no_color_env = std::env::var_os("NO_COLOR").is_some();
+    let no_color_flag = raw_args
+        .iter()
+        .skip(1)
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--no-color");
     let stdout_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let color_enabled = stdout_is_tty && !no_color_env && !no_color_flag;
     // Wire the *global* color decision now so every downstream module
@@ -262,10 +261,6 @@ async fn main() {
     if !color_enabled {
         dalfox::NO_COLOR.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    if __args.iter().any(|a| a == "-h" || a == "--help") {
-        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
-    }
-
     // Parsed via `ArgMatches` rather than `Cli::parse()` so the raw matches
     // survive: they are the only record of *which* flags the operator actually
     // typed, which `ExplicitArgs` needs to keep a config file from overriding
@@ -277,7 +272,14 @@ async fn main() {
     // on user input — everything reachable from `from_arg_matches` is a
     // definition/access mismatch — but the two must not diverge in how they
     // report.)
-    let matches = Cli::command().get_matches();
+    let matches = Cli::command()
+        .try_get_matches_from(raw_args)
+        .unwrap_or_else(|error| {
+            if error.kind() == clap::error::ErrorKind::DisplayHelp {
+                utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+            }
+            error.exit();
+        });
     let cli =
         Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.format(&mut Cli::command()).exit());
 
@@ -336,7 +338,7 @@ async fn main() {
 
     // Load configuration with optional --config override
     let mut config_load = match &cli.config {
-        Some(cfg_path) => config::load_path(std::path::Path::new(cfg_path)),
+        Some(cfg_path) => config::load_path(cfg_path),
         // Default path behavior: $XDG_CONFIG_HOME/dalfox/config.* or $HOME/.config/dalfox/config.*
         None => config::load_or_init(),
     };
@@ -348,7 +350,11 @@ async fn main() {
     // `encoders = […]` settings had no effect. Implicit default-path
     // loading is covered separately below, and only for a file that exists.
     if let (Some(cfg_path), Err(e)) = (&cli.config, &config_load) {
-        eprintln!("Warning: failed to load --config {}: {}", cfg_path, e);
+        eprintln!(
+            "Warning: failed to load --config {}: {}",
+            cfg_path.display(),
+            e
+        );
     }
     // The implicit default-path file gets the same visibility when it exists
     // and is unreadable or malformed: one wrong-typed value drops the whole
@@ -383,7 +389,7 @@ async fn main() {
     {
         eprintln!(
             "Notice: --config {} did not exist — created it with a default template and ran with built-in defaults (check the path if you meant to load an existing config)",
-            cfg_path
+            cfg_path.display()
         );
     }
 
