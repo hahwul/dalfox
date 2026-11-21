@@ -13,6 +13,7 @@ use super::poc::render_finding_block;
 use super::postprocess::dedupe_ast_results;
 use crate::scanning::result::{FindingType, Result};
 use crate::target_parser::Target;
+use crate::utils::term::sanitize_display;
 
 /// Every distinct input target was skipped (unreachable, content-type
 /// mismatch, per-host cap, ...): nothing was or would be scanned. Shared by the
@@ -198,8 +199,8 @@ pub(crate) async fn render_dry_run(
             let _ = writeln!(
                 out,
                 "    - {} {} ({})",
-                e["target"].as_str().unwrap_or("?"),
-                e["method"].as_str().unwrap_or("?"),
+                sanitize_display(e["target"].as_str().unwrap_or("?")),
+                sanitize_display(e["method"].as_str().unwrap_or("?")),
                 e["error_code"].as_str().unwrap_or("?")
             );
         }
@@ -229,7 +230,7 @@ pub(crate) async fn render_dry_run(
         if !warnings.is_empty() {
             let _ = writeln!(out, "  Warnings:");
             for w in &warnings {
-                let _ = writeln!(out, "    - {}", w);
+                let _ = writeln!(out, "    - {}", sanitize_display(w));
             }
         }
         let _ = writeln!(out);
@@ -237,15 +238,15 @@ pub(crate) async fn render_dry_run(
             let _ = writeln!(
                 out,
                 "  {} ({}):",
-                t["target"].as_str().unwrap_or("?"),
-                t["method"].as_str().unwrap_or("?")
+                sanitize_display(t["target"].as_str().unwrap_or("?")),
+                sanitize_display(t["method"].as_str().unwrap_or("?"))
             );
             if let Some(params) = t["params"].as_array() {
                 for p in params {
                     let _ = writeln!(
                         out,
                         "    - {} ({})",
-                        p["name"].as_str().unwrap_or("?"),
+                        sanitize_display(p["name"].as_str().unwrap_or("?")),
                         p["location"].as_str().unwrap_or("?")
                     );
                 }
@@ -344,8 +345,8 @@ pub(crate) async fn render_only_discovery(
                 let _ = writeln!(
                     out,
                     "[{}] {} ({})",
-                    e["url"].as_str().unwrap_or(""),
-                    e["param"].as_str().unwrap_or(""),
+                    sanitize_display(e["url"].as_str().unwrap_or("")),
+                    sanitize_display(e["param"].as_str().unwrap_or("")),
                     e["location"].as_str().unwrap_or("")
                 );
             }
@@ -968,8 +969,8 @@ pub(crate) async fn render_results(
             // the terminal or a report file.
             output.push_str(&format!(
                 "Found XSS: {} - {}\n",
-                crate::utils::term::sanitize_display(&result.param),
-                crate::utils::term::sanitize_display(&result.payload)
+                sanitize_display(&result.param),
+                sanitize_display(&result.payload)
             ));
         }
         output
