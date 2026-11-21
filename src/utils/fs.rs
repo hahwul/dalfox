@@ -64,30 +64,7 @@ pub fn read_bounded(path: &Path, max_bytes: u64, label: &str) -> std::io::Result
             ),
         ));
     }
-    let mut f = std::fs::File::open(path)?;
-    let mut buf = String::new();
-    // `take(N)` enforces the cap during the read itself — even when
-    // metadata lied (pseudo-files like `/dev/zero` report size 0 but
-    // stream forever).
-    f.by_ref()
-        .take(max_bytes + 1)
-        .read_to_string(&mut buf)
-        .map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("read failed (or non-UTF8): {}", e),
-            )
-        })?;
-    if buf.len() as u64 > max_bytes {
-        return Err(std::io::Error::new(
-            OVER_CAP_KIND,
-            format!(
-                "{} exceeded {}-byte cap during read (likely a streaming device)",
-                label, max_bytes
-            ),
-        ));
-    }
-    Ok(buf)
+    read_bounded_utf8(std::fs::File::open(path)?, max_bytes, label)
 }
 
 /// Read up to `max_bytes` from the start of `path` for cheap content sniffing,
@@ -116,27 +93,30 @@ pub(crate) fn read_prefix_lossy(path: &Path, max_bytes: u64) -> std::io::Result<
 /// `read_bounded` but for the streaming side — `cat /dev/zero | dalfox`
 /// would otherwise OOM the process.
 pub(crate) fn read_stdin_bounded(max_bytes: u64, label: &str) -> std::io::Result<String> {
-    let mut buf = String::new();
-    std::io::stdin()
-        .lock()
-        .take(max_bytes + 1)
-        .read_to_string(&mut buf)
-        .map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("read failed (or non-UTF8): {}", e),
-            )
-        })?;
-    if buf.len() as u64 > max_bytes {
+    read_bounded_utf8(std::io::stdin().lock(), max_bytes, label)
+}
+
+fn read_bounded_utf8(reader: impl Read, max_bytes: u64, label: &str) -> std::io::Result<String> {
+    let mut bytes = Vec::new();
+    reader
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    decode_bounded_utf8(bytes, max_bytes, label)
+}
+
+fn decode_bounded_utf8(bytes: Vec<u8>, max_bytes: u64, label: &str) -> std::io::Result<String> {
+    if bytes.len() as u64 > max_bytes {
         return Err(std::io::Error::new(
             OVER_CAP_KIND,
-            format!(
-                "{} exceeded {}-byte cap (likely a streaming source)",
-                label, max_bytes
-            ),
+            format!("{label} exceeded {max_bytes}-byte cap during read"),
         ));
     }
-    Ok(buf)
+    String::from_utf8(bytes).map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("read failed (or non-UTF8): {err}"),
+        )
+    })
 }
 
 /// Outcome of [`read_stdin_bounded_within`].
@@ -203,7 +183,7 @@ fn read_bounded_within<R: Read + Send + 'static>(
     std::thread::spawn(move || {
         // `take(max + 1)` bounds the read itself, so a stream that never ends
         // stops one byte past the cap and is rejected below.
-        let mut reader = reader.take(max_bytes + 1);
+        let mut reader = reader.take(max_bytes.saturating_add(1));
         let mut buf: Vec<u8> = Vec::new();
         let mut chunk = vec![0u8; 64 * 1024];
         let mut announced = false;
@@ -224,12 +204,7 @@ fn read_bounded_within<R: Read + Send + 'static>(
                 }
                 // A signal interrupted the read; the stream is still fine.
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => {
-                    break Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("read failed (or non-UTF8): {}", e),
-                    ));
-                }
+                Err(e) => break Err(e),
             }
         };
         // Empty stream or an error on the very first read: still an answer, so
@@ -237,23 +212,7 @@ fn read_bounded_within<R: Read + Send + 'static>(
         if !announced {
             let _ = first_byte_tx.send(());
         }
-        let result = read_result.and_then(|()| {
-            if buf.len() as u64 > max_bytes {
-                return Err(std::io::Error::new(
-                    OVER_CAP_KIND,
-                    format!(
-                        "{} exceeded {}-byte cap (likely a streaming source)",
-                        label, max_bytes
-                    ),
-                ));
-            }
-            String::from_utf8(buf).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("read failed (or non-UTF8): {}", e),
-                )
-            })
-        });
+        let result = read_result.and_then(|()| decode_bounded_utf8(buf, max_bytes, &label));
         let _ = done_tx.send(result);
     });
 
