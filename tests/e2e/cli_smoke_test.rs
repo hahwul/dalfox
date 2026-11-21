@@ -853,6 +853,64 @@ fn test_report_file_confirmation_uses_stderr() {
     assert_eq!(report["dry_run"], true);
 }
 
+#[test]
+fn test_report_cannot_overwrite_resume_state() {
+    let dir = std::env::temp_dir().join(format!("dalfox-state-aliases-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("subdir")).expect("create fixture directory");
+    std::fs::write(dir.join("config.toml"), "[scan]\n").expect("write isolated config");
+    let state = dir.join("state.jsonl");
+    let journal = "{\"dalfox_state\":2,\"version\":\"3.3.0\",\"config_hash\":\"fixture\",\"created\":\"fixture\"}\n";
+    std::fs::write(&state, journal).expect("write resume file");
+    std::fs::hard_link(&state, dir.join("hardlink.jsonl")).expect("create hard link");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink("state.jsonl", dir.join("symlink.jsonl")).expect("create existing symlink");
+        symlink("new.jsonl", dir.join("dangling.jsonl")).expect("create dangling symlink");
+    }
+
+    let assert_conflict = |state_name: &str, output_name: &str, mode: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .current_dir(&dir)
+            .args(["--config", "config.toml"])
+            .args(["scan", UNREACHABLE_TARGET])
+            .args(NO_SCAN_FLAGS)
+            .args(mode)
+            .args(["--state-file", state_name, "--output", output_name])
+            .args(["--format", "json", "-S"])
+            .stdin(Stdio::null())
+            .output()
+            .expect("run dalfox");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr)
+            .unwrap_or_else(|e| panic!("{e}: {:?}", String::from_utf8_lossy(&output.stderr)));
+        assert_eq!(error["code"], "INVALID_INPUT_TYPE");
+        assert_eq!(
+            error["message"],
+            "--output and --state-file must use separate files"
+        );
+    };
+
+    assert_conflict("state.jsonl", "state.jsonl", &["--dry-run"]);
+    assert_conflict(
+        "state.jsonl",
+        "subdir/../state.jsonl",
+        &["--only-discovery"],
+    );
+    assert_conflict("state.jsonl", "hardlink.jsonl", &["--dry-run"]);
+    assert_conflict("new.jsonl", "subdir/../new.jsonl", &[]);
+    #[cfg(unix)]
+    {
+        assert_conflict("state.jsonl", "symlink.jsonl", &["--dry-run"]);
+        assert_conflict("new.jsonl", "dangling.jsonl", &["--only-discovery"]);
+    }
+
+    assert_eq!(std::fs::read_to_string(state).unwrap(), journal);
+    assert!(!dir.join("new.jsonl").exists());
+    std::fs::remove_dir_all(dir).expect("remove fixture directory");
+}
+
 fn assert_method_target_whitespace(input_type: &str) {
     let dir = std::env::temp_dir().join(format!(
         "dalfox-method-whitespace-{input_type}-{}",

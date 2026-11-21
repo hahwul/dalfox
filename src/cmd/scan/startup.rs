@@ -6,6 +6,7 @@
 //! discovered mid-scan, where it reads as a *result* rather than a mistake.
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 use super::args::PARAM_TYPE_VALUES;
@@ -86,7 +87,7 @@ fn validate_param_inputs(args: &ScanArgs) -> Result<(), String> {
 /// An empty parent (`out.json`) is the current directory. Permission and
 /// disk-full errors are still left to the write itself.
 fn validate_output_path(path: &str) -> Result<(), String> {
-    let path = std::path::Path::new(path);
+    let path = Path::new(path);
     if path.is_dir() {
         return Err(format!(
             "--output: '{}' is a directory; specify a file",
@@ -106,6 +107,48 @@ fn validate_output_path(path: &str) -> Result<(), String> {
             dir.display()
         ))
     }
+}
+
+/// Resolve a path even when its final file does not exist yet. Follow a leaf
+/// symlink in that case so a dangling output link cannot name a future journal.
+fn resolve_file_path(path: &Path) -> Option<PathBuf> {
+    let mut path = path.to_path_buf();
+    for _ in 0..40 {
+        match path.canonicalize() {
+            Ok(resolved) => return Some(resolved),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        match path.read_link() {
+            Ok(target) => path = parent.join(target),
+            Err(_) => return Some(parent.canonicalize().ok()?.join(path.file_name()?)),
+        }
+    }
+    None
+}
+
+pub(super) const OUTPUT_STATE_CONFLICT: &str = "--output and --state-file must use separate files";
+
+pub(super) fn output_conflicts_with_state(args: &ScanArgs) -> bool {
+    let (Some(output), Some(state)) = (&args.output, &args.state_file) else {
+        return false;
+    };
+    let (output, state) = (Path::new(output), Path::new(state));
+    if output == state {
+        return true;
+    }
+    if let (Some(output), Some(state)) = (resolve_file_path(output), resolve_file_path(state))
+        && output == state
+    {
+        return true;
+    }
+    // same-file opens both paths. Limit the check to regular files so opening
+    // a FIFO here cannot block startup, and catch hard links as well as paths.
+    output.is_file() && state.is_file() && same_file::is_same_file(output, state).unwrap_or(false)
 }
 
 pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOutcome> {
@@ -145,6 +188,14 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
 
     if let Some(Err(msg)) = args.output.as_deref().map(validate_output_path) {
         emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &msg);
+        return Err(ScanOutcome::Error);
+    }
+    if output_conflicts_with_state(args) {
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            OUTPUT_STATE_CONFLICT,
+        );
         return Err(ScanOutcome::Error);
     }
 
