@@ -1547,6 +1547,49 @@ async fn test_render_dry_run_plain() {
 }
 
 #[tokio::test]
+async fn test_preview_output_escapes_plain_fields_and_preserves_json() {
+    let name = "line\r\nfield\x07";
+    let spec = "missing\nsegment:path";
+    let target = target_with_params(
+        "https://example.com",
+        vec![make_param(name, Location::Query)],
+    );
+    let group = host_group(vec![target]);
+    let state = make_scan_state(vec![]);
+    let path = temp_out_path("preview_control_bytes");
+    let mut args = default_scan_args();
+    args.format = "plain".to_string();
+    args.output = Some(path.clone());
+    args.param = vec![spec.to_string()];
+
+    assert!(matches!(
+        render_dry_run(&args, &group, &state, &[]).await,
+        ScanOutcome::Clean
+    ));
+    let dry_run = std::fs::read_to_string(&path).unwrap();
+    assert!(matches!(
+        render_only_discovery(&args, &group, &state, &[]).await,
+        ScanOutcome::Clean
+    ));
+    let discovery = std::fs::read_to_string(&path).unwrap();
+
+    args.format = "json".to_string();
+    assert!(matches!(
+        render_dry_run(&args, &group, &state, &[]).await,
+        ScanOutcome::Clean
+    ));
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    std::fs::remove_file(path).unwrap();
+
+    assert!(dry_run.contains(r"line\r\nfield\x07 (Query)"));
+    assert!(dry_run.contains(r"missing\nsegment:path"));
+    assert!(discovery.contains(r"line\r\nfield\x07 (Query)"));
+    assert_eq!(report["targets"][0]["params"][0]["name"], name);
+    assert!(report["meta"]["warnings"][0].as_str().unwrap().contains(spec));
+}
+
+#[tokio::test]
 async fn test_render_dry_run_json_with_encoders() {
     let target = target_with_params(
         "https://example.com",
