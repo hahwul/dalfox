@@ -391,6 +391,35 @@ fn test_default_load_or_init_prefers_toml_over_json() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn test_broken_default_toml_symlink_warns_when_json_exists() {
+    use std::os::unix::fs::symlink;
+
+    for target in ["config.toml", "missing.toml"] {
+        let xdg_home = unique_temp_dir("xdg-broken-toml-link");
+        let dalfox_dir = xdg_home.join("dalfox");
+        std::fs::create_dir_all(&dalfox_dir).expect("create dalfox config dir");
+        symlink(target, dalfox_dir.join("config.toml")).expect("create config symlink");
+        std::fs::write(
+            dalfox_dir.join("config.json"),
+            r#"{"scan":{"silence":true}}"#,
+        )
+        .expect("write lower-priority JSON config");
+
+        let output = run_payload_with_xdg_config_home(&xdg_home);
+        assert!(
+            output.status.success(),
+            "an unreadable config stays non-fatal"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("failed to load config") && stderr.contains("config.toml"),
+            "expected a warning naming the selected config, got:\n{stderr}"
+        );
+    }
+}
+
 #[test]
 fn test_malformed_default_config_warns_without_echoing_values() {
     // One wrong-typed value discards the whole implicit config file, so the
