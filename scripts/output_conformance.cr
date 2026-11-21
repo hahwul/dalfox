@@ -12,8 +12,9 @@
 #     stderr, regardless of format.
 #   * `src/cmd/scan/logging.rs:47-53` — the spinner needs a TTY *and* no
 #     `--silence`, and repaints with `\r`.
-#   * `src/cmd/scan/output.rs:684-707` — `--output` writes the rendered document
-#     to the file; without `-o` the same string goes to stdout through
+#   * `write_output_or_stdout` in `src/cmd/scan/output.rs` — `--output` writes
+#     the rendered document to the file and confirms on stderr unless silenced.
+#     Without `-o` the same string goes to stdout through
 #     `cprintln!`, which strips ANSI under `--no-color` / `NO_COLOR`.
 #   * `src/main.rs:434-435` + `docs/content/guide/output.md:313-325` — exit 0
 #     clean, 1 findings (any tier), 2 input/config/runtime error.
@@ -403,9 +404,8 @@ begin
 
     out_file = File.tempname("dalfox-conformance", ".#{format}")
     with_findings = scan(VULN_URL, format)
-    # `-o` runs use `--silence` so the only thing on stdout is whatever the
-    # renderer leaks: without it, output.rs:687 legitimately prints one
-    # `Results written to …` status line (checked separately below).
+    # `-o` runs use `--silence` to suppress the banner, progress logs, and
+    # stderr confirmation. The unsilenced contract is checked below.
     to_file = scan(VULN_URL, format, ["-o", out_file, "-S"])
     no_findings = scan(INERT_URL, format)
 
@@ -533,22 +533,18 @@ begin
     env_leaks << "-o file: #{first_match_line(envfile, ANSI_RE)}" if envfile.matches?(ANSI_RE)
     report.check_empty("NO_COLOR=1 behaves like --no-color", env_leaks)
 
-    # --- `-o` without --silence prints the status line ------------------------
-    # output.rs:687 prints `Results written to <path>` unless silenced. For a
-    # machine format that single line is the *whole* of stdout; plain also has
-    # its INF/WRN log, which is that format's normal content.
+    # --- `-o` confirmation stays on stderr -----------------------------------
     noisy = scan(VULN_URL, format, ["-o", out_file])
-    lines = noisy.stdout.lines.reject(&.strip.empty?)
-    status_lines = lines.select(&.starts_with?("Results written to "))
+    confirmation_prefix = "Results written to "
+    report.check_eq("-o confirms once on stderr", 1,
+      noisy.stderr.lines.count(&.starts_with?(confirmation_prefix)))
+    report.check_eq("-o --silence suppresses confirmation", 0,
+      to_file.stderr.lines.count(&.starts_with?(confirmation_prefix)))
     if machine_format?(format)
-      if lines.size == 1 && status_lines.size == 1
-        report.pass("-o without --silence prints only the status line")
-      else
-        report.fail("-o without --silence prints only the status line",
-          "#{lines.size} line(s): #{lines.first(3).inspect}")
-      end
+      report.check_eq("-o leaves machine stdout empty", "", noisy.stdout)
     else
-      report.check_eq("-o without --silence prints the status line", 1, status_lines.size)
+      report.check_eq("-o keeps confirmation off plain stdout", 0,
+        noisy.stdout.lines.count(&.starts_with?(confirmation_prefix)))
     end
 
     # --- exit codes -----------------------------------------------------------
