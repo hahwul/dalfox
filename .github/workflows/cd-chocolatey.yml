@@ -101,11 +101,14 @@ jobs:
       - name: Smoke-test local package
         shell: pwsh
         run: |
-          choco install dalfox --source . -y --no-progress
+          # Reinstall the version just packed, even if the runner already has dalfox.
+          choco install dalfox --source . --version="$env:VERSION" --prerelease --force -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw 'Local Chocolatey install failed.' }
-          $text = (& dalfox --version 2>&1) -join "`n"
+          $shim = Join-Path $env:ChocolateyInstall 'bin/dalfox.exe'
+          $text = (& $shim --version 2>&1) -join "`n"
+          $code = $LASTEXITCODE
           Write-Host $text
-          if ($LASTEXITCODE -ne 0 -or $text -notmatch [regex]::Escape($env:VERSION)) {
+          if ($code -ne 0 -or $text.Trim() -cne "dalfox $env:VERSION") {
             throw "dalfox --version did not print expected version $env:VERSION."
           }
 
