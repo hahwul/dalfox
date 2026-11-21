@@ -1,6 +1,9 @@
 <div align="center">
   <br>
-  <img src="docs/static/images/logo.webp" alt="dalfox" width="400px;">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/static/images/logo-dark.svg">
+    <img src="docs/static/images/logo.svg" alt="Dalfox" width="224">
+  </picture>
 </div>
 <p align="center">
   <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md"><img src="https://img.shields.io/badge/CONTRIBUTIONS-WELCOME-30365e?style=for-the-badge&labelColor=%2330365e&color=%2330365e"></a>
