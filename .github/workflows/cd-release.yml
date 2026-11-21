@@ -86,6 +86,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Verify release tag matches Cargo version
+        if: github.event_name == 'release' || github.event.inputs.upload == 'true'
+        shell: bash
+        run: |
+          # Use binary output so native jq on Windows does not leave a CR.
+          package_version=$(cargo metadata --locked --offline --no-deps --format-version 1 |
+            jq -ber '.packages[] | select(.name == "dalfox") | .version')
+          if [[ "$VERSION" != "v$package_version" ]]; then
+            printf '::error::Release tag %s does not match Cargo package version v%s.\n' "$VERSION" "$package_version"
+            exit 1
+          fi
       - name: Install cross-compilation tools
         if: matrix.use_cross == true
         uses: taiki-e/install-action@v2.90.3
