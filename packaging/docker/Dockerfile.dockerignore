@@ -1,0 +1,9 @@
+# Include the Cargo sources and package metadata in the build context.
+*
+!Cargo.toml
+!Cargo.lock
+!build.rs
+!LICENSE.txt
+!README.md
+!src/
+!tests/
