@@ -213,18 +213,26 @@ jobs:
         if: |
           matrix.target == 'x86_64-unknown-linux-gnu' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
         run: |
           cargo deb --no-build
-          # The man page and completions are generated assets, so a path change
-          # would drop them silently. Fail here instead (the man entry matches
-          # both `.1` and `.1.gz`).
-          deb="$(find target/debian -name '*.deb' | head -n1)"
+          deb=$(find target/debian -type f -name '*.deb' -print -quit)
+          if [[ -z "$deb" ]]; then
+            echo '::error::No Debian package found in target/debian.'
+            exit 1
+          fi
+
+          # Require a complete, successful listing before checking its entries.
+          listing=$(dpkg-deb --contents "$deb")
           for entry in \
-            'man1/dalfox\.1' \
+            'man/man1/dalfox\.1(\.gz)?' \
             'bash-completion/completions/dalfox' \
             'zsh/site-functions/_dalfox' \
             'fish/vendor_completions\.d/dalfox\.fish'; do
-            dpkg-deb -c "$deb" | grep -q "$entry"
+            if ! grep -Eq "[[:space:]](\./)?usr/share/$entry$" <<< "$listing"; then
+              printf '::error::Debian package is missing an asset matching /usr/share/%s.\n' "$entry"
+              exit 1
+            fi
           done
 
       - name: Build RPM package

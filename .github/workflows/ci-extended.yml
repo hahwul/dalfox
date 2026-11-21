@@ -126,6 +126,8 @@ jobs:
         run: crystal run scripts/replay_corpus.cr
       - name: Hostile responses (crash / hang / memory)
         run: crystal run scripts/hostile_scan.cr
+      - name: Debian package asset regression
+        run: crystal spec scripts/spec/debian_release_spec.cr
   harness-smoke:
     name: Crystal harnesses (server + MCP)
     runs-on: ubuntu-latest
