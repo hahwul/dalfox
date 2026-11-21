@@ -833,19 +833,14 @@ pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
 // - $XDG_CONFIG_HOME/dalfox if XDG_CONFIG_HOME is set
 // - else $HOME/.config/dalfox
 pub(crate) fn resolve_config_dir() -> Result<PathBuf, io::Error> {
-    if let Ok(xdg) = env::var("XDG_CONFIG_HOME")
-        && !xdg.trim().is_empty()
+    if let Some(xdg) = env::var_os("XDG_CONFIG_HOME")
+        && !xdg.to_str().is_some_and(|value| value.trim().is_empty())
     {
         return Ok(Path::new(&xdg).join("dalfox"));
     }
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("HOME/USERPROFILE not set: {e}"),
-            )
-        })?;
+    let home = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME/USERPROFILE not set"))?;
     Ok(Path::new(&home).join(".config").join("dalfox"))
 }
 

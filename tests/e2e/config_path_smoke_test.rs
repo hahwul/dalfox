@@ -77,6 +77,40 @@ fn test_non_utf8_config_path_is_accepted() {
     serde_json::from_slice::<serde_json::Value>(&contents).expect("created config is JSON");
 }
 
+#[cfg(unix)]
+#[test]
+fn test_non_utf8_default_config_directories_are_accepted() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    for (variable, config_suffix) in [
+        ("XDG_CONFIG_HOME", "dalfox/config.toml"),
+        ("HOME", ".config/dalfox/config.toml"),
+        ("USERPROFILE", ".config/dalfox/config.toml"),
+    ] {
+        let dir = unique_temp_dir(variable);
+        let native_path = dir.join(OsStr::from_bytes(b"config-dir-\xff"));
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("HOME")
+            .env_remove("USERPROFILE")
+            .env(variable, &native_path)
+            .args(["payload", "event-handlers"])
+            .output()
+            .expect("run dalfox with a native config directory");
+
+        assert!(
+            output.status.success(),
+            "{variable}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            native_path.join(config_suffix).is_file(),
+            "{variable} must supply the native config directory"
+        );
+    }
+}
+
 #[test]
 fn test_help_flag_after_separator_does_not_print_banner() {
     let dir = unique_temp_dir("cli-literal-help");
