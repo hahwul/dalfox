@@ -89,6 +89,7 @@ impl Result {
                     "payload": r.payload,
                     "severity": r.severity,
                     "detection_method": r.detection_method.as_str(),
+                    "dalfoxMessageId": r.message_id.to_string(),
                 });
                 if let Some(grade) = r.confidence {
                     properties["confidence"] = json!(grade.as_str());
@@ -146,15 +147,9 @@ impl Result {
                         }
                     }],
                     "partialFingerprints": {
-                        // SARIF spec: keys are arbitrary identifiers, values
-                        // are stable hashes. v1 versions the scheme so we can
-                        // evolve the input tuple later without re-mapping
-                        // historical findings.
+                        // SARIF §3.27.17 requires versioned names and values
+                        // that contribute to the stable identity of a result.
                         "vulnIdentity/v1": stable_fp,
-                        // Preserve the catalog id under a clearly non-
-                        // fingerprint name — useful for human triage but
-                        // not used by consumers for dedup.
-                        "dalfoxMessageId": r.message_id.to_string(),
                     },
                     "properties": properties
                 })
