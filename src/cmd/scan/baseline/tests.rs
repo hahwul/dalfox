@@ -241,7 +241,8 @@ fn a_malformed_report_disables_the_diff() {
 #[test]
 fn discovery_jsonl_is_rejected_as_a_baseline() {
     let meta = r#"{"meta":{"mode":"only_discovery"}}"#;
-    let param = r#"{"url":"https://example.test","method":"GET","param":"name","location":"Query"}"#;
+    let param =
+        r#"{"url":"https://example.test","method":"GET","param":"name","location":"Query"}"#;
     for (name, body) in [
         ("discovery-empty.jsonl", meta.to_string()),
         ("discovery-params.jsonl", format!("{meta}\n{param}\n")),
@@ -251,7 +252,11 @@ fn discovery_jsonl_is_rejected_as_a_baseline() {
         let _ = std::fs::remove_file(&path);
 
         assert!(
-            baseline.warning.as_deref().unwrap().contains("only-discovery"),
+            baseline
+                .warning
+                .as_deref()
+                .unwrap()
+                .contains("only-discovery"),
             "unexpected warning for {name}: {:?}",
             baseline.warning
         );
