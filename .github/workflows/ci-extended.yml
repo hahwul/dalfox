@@ -3,10 +3,10 @@ name: Extended CI
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml]
   pull_request:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml]
   schedule:
     # Weekly: exercise the slower, normally-#[ignore]d functional suite so it
     # can't silently rot between releases.
@@ -97,8 +97,8 @@ jobs:
       # a release rather than after publishing.
       - name: Version lockstep (Cargo / snap / AUR / docs incl. KO)
         run: crystal run scripts/version_check.cr
-      - name: Version updater regression
-        run: crystal spec scripts/spec/version_update_spec.cr
+      - name: Release tooling regressions
+        run: crystal spec scripts/spec/version_update_spec.cr scripts/spec/dockerhub_release_spec.cr
       - run: cargo build --release
       # All green, so all blocking. `effectiveness` fails when recall drops or
       # the FP count rises against docs/data/effectiveness.json; `perf-budget`
