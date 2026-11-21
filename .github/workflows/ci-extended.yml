@@ -120,6 +120,8 @@ jobs:
         run: |
           crystal spec scripts/spec/docs_lint_spec.cr
           crystal run scripts/docs_lint.cr
+      - name: Snapcraft release channel regression
+        run: crystal spec scripts/spec/snapcraft_release_spec.cr
       - name: Replay corpus (benign pages must yield no findings)
         run: crystal run scripts/replay_corpus.cr
       - name: Hostile responses (crash / hang / memory)
