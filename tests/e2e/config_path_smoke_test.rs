@@ -285,6 +285,26 @@ fn test_broken_config_content_is_non_fatal_for_payload_command() {
 }
 
 #[test]
+fn test_json_config_array_warns_and_uses_defaults() {
+    let dir = unique_temp_dir("cfg-json-array");
+    let config_path = dir.join("config.json");
+    std::fs::write(&config_path, r#"[{"silence":true}]"#).expect("write positional JSON config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(&config_path)
+        .arg("payload")
+        .output()
+        .expect("run dalfox with a malformed config");
+
+    assert!(output.status.success(), "a bad config stays non-fatal");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid JSON config at line 1, column "));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(BANNER_MARK), "expected default banner");
+}
+
+#[test]
 fn test_unreadable_config_path_is_non_fatal_for_payload_command() {
     let dir = unique_temp_dir("cfg-read-error-dir");
     let output = run_payload_with_config(&dir);
