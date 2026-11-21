@@ -1096,6 +1096,76 @@ fn parse_config_templates_have_no_unknown_keys() {
 }
 
 #[test]
+fn failed_config_write_leaves_no_partial_file() {
+    use std::io::Read;
+
+    struct BrokenTemplate<'a>(&'a Path);
+
+    impl Read for BrokenTemplate<'_> {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            assert!(!self.0.exists(), "destination is still unpublished");
+            Err(io::Error::other("interrupted template"))
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("fixture directory");
+    let path = dir.path().join("config.json");
+    let contents = b"{".as_slice().chain(BrokenTemplate(&path));
+    let err = write_new_config(&path, contents).expect_err("template write must fail");
+
+    assert_eq!(err.to_string(), "interrupted template");
+    assert_eq!(fs::read_dir(dir.path()).expect("list fixture").count(), 0);
+}
+
+#[test]
+fn config_creation_preserves_existing_file() {
+    let dir = tempfile::tempdir().expect("fixture directory");
+    let path = dir.path().join("config.json");
+    let existing = br#"{"scan":{"silence":true}}"#;
+    fs::write(&path, existing).expect("write existing config");
+
+    let created =
+        write_new_config(&path, DEFAULT_JSON_TEMPLATE.as_bytes()).expect("publish attempt");
+
+    assert!(!created);
+    assert_eq!(fs::read(&path).expect("read existing config"), existing);
+    assert_eq!(fs::read_dir(dir.path()).expect("list fixture").count(), 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn config_creation_supports_long_windows_paths() {
+    let dir = tempfile::tempdir().expect("fixture directory");
+    let nested = (0..5).fold(dir.path().to_path_buf(), |parent, _| {
+        parent.join("a".repeat(60))
+    });
+    let path = nested.join("config.json");
+
+    assert!(load_path(&path).expect("create config").created);
+    assert!(!load_path(&path).expect("read config").created);
+}
+
+#[cfg(windows)]
+#[test]
+fn config_creation_rejects_nul_in_windows_paths() {
+    let dir = tempfile::tempdir().expect("fixture directory");
+    let path = dir.path().join("config.json\0ignored");
+
+    assert!(load_path(&path).is_err());
+    assert_eq!(fs::read_dir(dir.path()).expect("list fixture").count(), 0);
+}
+
+#[cfg(windows)]
+#[test]
+fn config_creation_rejects_windows_directory_paths() {
+    let dir = tempfile::tempdir().expect("fixture directory");
+    for name in [r"config.json\", r"config.json\."] {
+        assert!(load_path(&dir.path().join(name)).is_err());
+    }
+    assert_eq!(fs::read_dir(dir.path()).expect("list fixture").count(), 0);
+}
+
+#[test]
 fn parse_config_error_names_the_bad_value() {
     let err = parse_config("[scan]\nworkers = \"ten\"\n", false).unwrap_err();
     assert!(err.contains("line 2, column 11"), "{err}");
