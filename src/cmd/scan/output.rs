@@ -1013,6 +1013,7 @@ fn write_report_file(path: &str, content: &str) -> std::io::Result<()> {
 fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
     let mut output_write_failed = false;
     if let Some(output_path) = &args.output {
+        let diagnostic_path = crate::utils::log::sanitize_log_message(output_path);
         // Surface `..` traversal so the operator notices before a
         // pipeline silently writes into a parent directory. We don't
         // refuse — there are legitimate uses (`-o ../results.json` from
@@ -1022,8 +1023,7 @@ fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
             .any(|seg| seg == "..")
         {
             eprintln!(
-                "Warning: --output path '{}' contains parent-dir references — final path will be resolved by the OS",
-                output_path
+                "Warning: --output path '{diagnostic_path}' contains parent-dir references — final path will be resolved by the OS"
             );
         }
         // Always strip ANSI before writing to a file. `output_content` carries
@@ -1046,7 +1046,7 @@ fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
         match write_report_file(output_path, &file_content) {
             Ok(_) => {
                 if !args.silence {
-                    println!("Results written to {}", output_path);
+                    eprintln!("Results written to {diagnostic_path}");
                 }
             }
             Err(e) => {
@@ -1057,7 +1057,7 @@ fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
                 // becomes Error instead of a misleading success — otherwise a
                 // CI step like `dalfox -o out.json -S && use out.json` proceeds
                 // against a missing or stale file with zero indication.
-                eprintln!("Error writing to file {}: {}", output_path, e);
+                eprintln!("Error writing to file {diagnostic_path}: {e}");
                 output_write_failed = true;
             }
         }

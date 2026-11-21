@@ -813,6 +813,46 @@ fn test_scan_jsonl_stdout_has_no_empty_records() {
     assert_eq!(report["meta"]["findings_count"], 0);
 }
 
+#[test]
+fn test_report_file_confirmation_uses_stderr() {
+    let dir =
+        std::env::temp_dir().join(format!("dalfox-output-confirmation-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create output directory");
+    let (filename, displayed_filename) = if cfg!(unix) {
+        ("report\nname.json", r"report\nname.json")
+    } else {
+        ("report.json", "report.json")
+    };
+    let path = dir.join(filename);
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["scan", UNREACHABLE_TARGET])
+        .args(NO_SCAN_FLAGS)
+        .args(["--dry-run", "--format", "json", "--output"])
+        .arg(&path)
+        .stdin(Stdio::null())
+        .output()
+        .expect("run dalfox");
+    let report = std::fs::read(&path);
+    std::fs::remove_dir_all(dir).expect("remove output directory");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.stdout.is_empty(),
+        "machine stdout should be empty: {output:?}"
+    );
+    let confirmation = stderr
+        .lines()
+        .find(|line| line.starts_with("Results written to "))
+        .expect("report confirmation on stderr");
+    assert!(
+        confirmation.ends_with(displayed_filename),
+        "stderr: {stderr}"
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&report.expect("read report file")).expect("JSON report on disk");
+    assert_eq!(report["dry_run"], true);
+}
+
 fn assert_method_target_whitespace(input_type: &str) {
     let dir = std::env::temp_dir().join(format!(
         "dalfox-method-whitespace-{input_type}-{}",
