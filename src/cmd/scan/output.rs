@@ -871,12 +871,11 @@ pub(crate) async fn render_results(
             "meta": crate::scanning::result::Result::make_scan_meta_value(&scan_meta),
         });
         let mut out = serde_json::to_string(&meta).unwrap_or_default();
-        out.push('\n');
         for r in display_results {
             let v = r.to_json_value(args.include_request, args.include_response);
             if let Ok(s) = serde_json::to_string(&v) {
-                out.push_str(&s);
                 out.push('\n');
+                out.push_str(&s);
             }
         }
         out

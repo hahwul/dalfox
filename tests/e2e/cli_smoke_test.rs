@@ -795,6 +795,24 @@ const UNREACHABLE_TARGET: &str = "http://127.0.0.1:1/?q=1";
 /// Flags that keep a run to target resolution + one reachability probe.
 const NO_SCAN_FLAGS: [&str; 3] = ["--skip-xss-scanning", "--skip-discovery", "--skip-mining"];
 
+#[test]
+fn test_scan_jsonl_stdout_has_no_empty_records() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["scan", UNREACHABLE_TARGET])
+        .args(NO_SCAN_FLAGS)
+        .args(["--format", "jsonl", "-S"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("run dalfox");
+    assert_eq!(output.status.code(), Some(2));
+
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 scan output");
+    let record = stdout.strip_suffix('\n').expect("newline-terminated JSONL");
+    assert!(!record.contains('\n'), "expected one record: {stdout:?}");
+    let report: serde_json::Value = serde_json::from_str(record).expect("JSONL metadata record");
+    assert_eq!(report["meta"]["findings_count"], 0);
+}
+
 fn assert_method_target_whitespace(input_type: &str) {
     let dir = std::env::temp_dir().join(format!(
         "dalfox-method-whitespace-{input_type}-{}",
