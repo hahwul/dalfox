@@ -20,7 +20,7 @@ use serde::de::{MapAccess, Visitor, value::MapAccessDeserializer};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
@@ -743,17 +743,48 @@ impl std::fmt::Display for ConfigFileError {
 
 impl std::error::Error for ConfigFileError {}
 
-/// Create a new config without replacing a file that appeared concurrently.
-/// Configs can contain cookies, headers, proxy credentials, and OAST tokens.
-fn create_config_file(path: &Path) -> io::Result<fs::File> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+/// Publish a complete config, returning false if another writer got there first.
+/// The named temporary file is private (0600 on Unix) and on the same volume.
+fn write_new_config(path: &Path, mut contents: impl io::Read) -> io::Result<bool> {
+    #[cfg(not(windows))]
+    let parent = path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    // The Windows persist call uses native paths directly. Canonicalizing the
+    // parent supplies the verbatim prefix for long paths. `absolute` also
+    // normalizes the input and rejects embedded NULs before it reaches WinAPI.
+    #[cfg(windows)]
+    let (canonical_parent, destination) = {
+        let invalid_path = || io::Error::new(io::ErrorKind::InvalidInput, "invalid config path");
+        let path_bytes = path.as_os_str().as_encoded_bytes();
+        if !path
+            .file_name()
+            .is_some_and(|name| path_bytes.ends_with(name.as_encoded_bytes()))
+        {
+            return Err(invalid_path());
+        }
+        let path = std::path::absolute(path)?;
+        let (Some(parent), Some(filename)) = (path.parent(), path.file_name()) else {
+            return Err(invalid_path());
+        };
+        let parent = parent.canonicalize()?;
+        let destination = parent.join(filename);
+        (parent, destination)
+    };
+    #[cfg(windows)]
+    let (parent, path) = (canonical_parent.as_path(), destination.as_path());
+
+    let mut staged = tempfile::Builder::new()
+        .prefix(".dalfox-config-")
+        .tempfile_in(parent)?;
+    io::copy(&mut contents, &mut staged)?;
+    staged.as_file().sync_all()?;
+    match staged.persist_noclobber(path) {
+        Ok(_) => Ok(true),
+        Err(err) if err.error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(err) => Err(err.error),
     }
-    options.open(path)
 }
 
 /// Load configuration with the following behavior:
@@ -794,21 +825,11 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
         (load_existing(&json_path, true)?, json_path, false)
     } else {
         // Neither exists: create TOML by default
-        match create_config_file(&toml_path) {
-            Ok(mut f) => {
-                f.write_all(DEFAULT_TOML_TEMPLATE.as_bytes())?;
-                f.sync_all()?;
-                // Load the template back as Config (will parse to defaults)
-                (
-                    (toml::from_str(DEFAULT_TOML_TEMPLATE)?, Vec::new()),
-                    toml_path,
-                    true,
-                )
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                (load_existing(&toml_path, false)?, toml_path, false)
-            }
-            Err(e) => return Err(e.into()),
+        let config = toml::from_str(DEFAULT_TOML_TEMPLATE)?;
+        if write_new_config(&toml_path, DEFAULT_TOML_TEMPLATE.as_bytes())? {
+            ((config, Vec::new()), toml_path, true)
+        } else {
+            (load_existing(&toml_path, false)?, toml_path, false)
         }
     };
     Ok(LoadResult {
@@ -846,18 +867,13 @@ pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
         } else {
             toml::from_str(template)?
         };
-        match create_config_file(p) {
-            Ok(mut f) => {
-                f.write_all(template.as_bytes()).map_err(creation_error)?;
-                return Ok(LoadResult {
-                    config,
-                    path,
-                    created: true,
-                    unknown_keys: Vec::new(),
-                });
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(creation_error(e).into()),
+        if write_new_config(p, template.as_bytes()).map_err(creation_error)? {
+            return Ok(LoadResult {
+                config,
+                path,
+                created: true,
+                unknown_keys: Vec::new(),
+            });
         }
     }
     // Bound the read so `--config /dev/zero` (or any other non-regular file
