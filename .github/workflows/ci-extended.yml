@@ -117,7 +117,9 @@ jobs:
       - name: Output conformance (formats + stdout purity)
         run: crystal run scripts/output_conformance.cr
       - name: Docs lint (EN/KO pairing, links, CSP, markers)
-        run: crystal run scripts/docs_lint.cr
+        run: |
+          crystal spec scripts/spec/docs_lint_spec.cr
+          crystal run scripts/docs_lint.cr
       - name: Replay corpus (benign pages must yield no findings)
         run: crystal run scripts/replay_corpus.cr
       - name: Hostile responses (crash / hang / memory)
