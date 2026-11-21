@@ -575,15 +575,34 @@ impl StateFile {
         // where an in-place truncate is not.
         if state.reset_reason.is_some() {
             let backup = format!("{}.bak", path);
-            match std::fs::rename(path, &backup) {
-                Ok(()) => state.reset_backup = Some(backup),
-                Err(e) => {
-                    return Err(format!(
-                        "--state-file '{}' has to be started over but could not be moved to '{}': {}",
-                        path, backup, e
-                    ));
-                }
+            let output_conflicts = || {
+                args.output.as_deref().is_some_and(|output| {
+                    crate::utils::fs::paths_refer_to_same_file(
+                        std::path::Path::new(output),
+                        std::path::Path::new(&backup),
+                    )
+                })
+            };
+            const CONFLICT: &str =
+                "--output must use a different file from the --state-file backup";
+            if output_conflicts() {
+                return Err(CONFLICT.into());
             }
+            std::fs::rename(path, &backup).map_err(|e| {
+                format!(
+                    "--state-file '{}' has to be started over but could not be moved to '{}': {}",
+                    path, backup, e
+                )
+            })?;
+            // On a case-insensitive filesystem a differently spelled name may
+            // only resolve to this backup once the rename creates it.
+            if output_conflicts() {
+                let backup = crate::utils::log::sanitize_log_message(&backup);
+                return Err(format!(
+                    "{CONFLICT}. The previous state was saved to '{backup}'"
+                ));
+            }
+            state.reset_backup = Some(backup);
         }
 
         let mut file = OpenOptions::new()

@@ -8,7 +8,45 @@
 //! turned into a DoS by misclassified input.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Compare file paths, including aliases and a final component that may not
+/// exist until the caller creates the file.
+pub(crate) fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    if let (Some(left), Some(right)) = (resolve_file_path(left), resolve_file_path(right))
+        && left == right
+    {
+        return true;
+    }
+    // same-file opens both paths, so check for regular files before checking
+    // the identity of hard links.
+    left.is_file() && right.is_file() && same_file::is_same_file(left, right).unwrap_or(false)
+}
+
+/// Resolve a path even when its final file does not exist yet. Follow a leaf
+/// symlink in that case so aliases to the same future file can be compared.
+fn resolve_file_path(path: &Path) -> Option<PathBuf> {
+    let mut path = path.to_path_buf();
+    for _ in 0..40 {
+        match path.canonicalize() {
+            Ok(resolved) => return Some(resolved),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        match path.read_link() {
+            Ok(target) => path = parent.join(target),
+            Err(_) => return Some(parent.canonicalize().ok()?.join(path.file_name()?)),
+        }
+    }
+    None
+}
 
 /// Default hard cap for bounded file/stdin reads: 256 MiB. Generous enough
 /// for legitimate target lists, wordlists, and custom-payload files, while
