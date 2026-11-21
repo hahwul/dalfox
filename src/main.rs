@@ -251,14 +251,14 @@ async fn main() {
         .take_while(|arg| *arg != "--")
         .any(|arg| arg == "--no-color");
     let stdout_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    let color_enabled = stdout_is_tty && !no_color_env && !no_color_flag;
-    // Wire the *global* color decision now so every downstream module
-    // (scan, server logger, payload subcommand) honours it consistently.
-    // Previously only ScanArgs.no_color drove `crate::NO_COLOR`, leaving
-    // `dalfox scan URL | cat` (non-TTY pipe) emitting raw ANSI through
-    // the POC line, and `dalfox server` writing escape codes to a
-    // redirected log file. Auto-disable when stdout isn't a TTY.
-    if !color_enabled {
+    let no_color = no_color_env || no_color_flag;
+    let color_enabled = stdout_is_tty && !no_color;
+    // Explicit opt-outs also cover progress styling. For automatic mode,
+    // keep console's per-stream detection, including when stderr is the
+    // only terminal, and strip Dalfox's own ANSI if stdout is redirected.
+    if no_color {
+        utils::term::disable_colors();
+    } else if !stdout_is_tty {
         dalfox::NO_COLOR.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     // Parsed via `ArgMatches` rather than `Cli::parse()` so the raw matches
@@ -272,16 +272,19 @@ async fn main() {
     // on user input — everything reachable from `from_arg_matches` is a
     // definition/access mismatch — but the two must not diverge in how they
     // report.)
-    let matches = Cli::command()
-        .try_get_matches_from(raw_args)
+    let mut command = Cli::command();
+    if no_color {
+        command = command.color(clap::ColorChoice::Never);
+    }
+    let matches = command
+        .try_get_matches_from_mut(raw_args)
         .unwrap_or_else(|error| {
             if error.kind() == clap::error::ErrorKind::DisplayHelp {
                 utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
             }
             error.exit();
         });
-    let cli =
-        Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.format(&mut Cli::command()).exit());
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.format(&mut command).exit());
 
     // `man` and `completion` each write one generated artifact to stdout and
     // nothing else — the roff has to stay pure roff, the completion script has
@@ -454,7 +457,7 @@ async fn main() {
     let config_no_color = config_scan.and_then(|s| s.no_color).unwrap_or(false);
     let banner_color = color_enabled && !config_no_color;
     if config_no_color {
-        dalfox::NO_COLOR.store(true, std::sync::atomic::Ordering::Relaxed);
+        utils::term::disable_colors();
     }
     if !is_mcp
         && !is_machine_format

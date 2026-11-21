@@ -20,6 +20,15 @@ pub(crate) fn color_enabled() -> bool {
     !crate::NO_COLOR.load(Ordering::Relaxed)
 }
 
+/// Disable Dalfox's ANSI output and styles emitted by `console` and `indicatif`.
+/// Use for explicit no-color settings; `console` detects each stream's TTY
+/// independently when the user has not opted out.
+pub fn disable_colors() {
+    crate::NO_COLOR.store(true, Ordering::Relaxed);
+    console::set_colors_enabled(false);
+    console::set_colors_enabled_stderr(false);
+}
+
 /// True iff stdout is attached to a real terminal. The spinner / live
 /// progress rendering checks this so piped runs (`dalfox ... | tee log`,
 /// CI) don't get spammed with cursor-redrawing frames.
@@ -401,6 +410,39 @@ macro_rules! ceprintln {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disable_colors_updates_console_styles() {
+        // Both color policies are process-wide, so exercise them in isolation.
+        const CHILD: &str = "DALFOX_TEST_DISABLE_COLORS_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "utils::term::tests::disable_colors_updates_console_styles",
+                ])
+                .env(CHILD, "1")
+                .env("CLICOLOR_FORCE", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            return;
+        }
+
+        let stdout = console::Style::new().cyan();
+        let stderr = console::Style::new().yellow().for_stderr();
+        assert!(stdout.apply_to("running").to_string().contains('\x1b'));
+        assert!(stderr.apply_to("done").to_string().contains('\x1b'));
+        disable_colors();
+        assert!(!color_enabled());
+        assert_eq!(stdout.apply_to("running").to_string(), "running");
+        assert_eq!(stderr.apply_to("done").to_string(), "done");
+    }
 
     /// Outside the CLI (`cmd/`, `main.rs`, the banner) everything can run
     /// inside a server or MCP job, where a direct `println!` / `eprintln!`
