@@ -86,13 +86,35 @@ fn test_empty_home_paths_do_not_create_project_config() {
 }
 
 #[cfg(unix)]
-#[test]
-fn test_non_utf8_config_path_is_accepted() {
+fn native_config_path(dir: &Path, non_utf8_name: &[u8], unicode_name: &str) -> PathBuf {
     use std::ffi::OsStr;
+    use std::io::ErrorKind;
     use std::os::unix::ffi::OsStrExt;
 
-    let dir = unique_temp_dir("cfg-native-path");
-    let path = dir.join(OsStr::from_bytes(b"config-\xff.json"));
+    // Some filesystems, including the macOS CI volume, require UTF-8 names.
+    // Probe the same directory so we still exercise raw bytes where supported.
+    const DARWIN_EILSEQ: i32 = 92;
+    let probe = dir.join(OsStr::from_bytes(b"encoding-probe-\xff"));
+    match std::fs::create_dir(&probe) {
+        Ok(()) => {
+            std::fs::remove_dir(&probe).expect("remove encoding probe");
+            dir.join(OsStr::from_bytes(non_utf8_name))
+        }
+        Err(err)
+            if matches!(err.kind(), ErrorKind::InvalidInput | ErrorKind::InvalidData)
+                || (cfg!(target_os = "macos") && err.raw_os_error() == Some(DARWIN_EILSEQ)) =>
+        {
+            dir.join(unicode_name)
+        }
+        Err(err) => panic!("probe filename encoding support: {err}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_native_config_path_is_accepted() {
+    let dir = tempfile::tempdir().expect("create test temp directory");
+    let path = native_config_path(dir.path(), b"config-\xff.json", "config-café.json");
     let output = run_payload_with_config(&path);
 
     assert!(
@@ -106,17 +128,14 @@ fn test_non_utf8_config_path_is_accepted() {
 
 #[cfg(unix)]
 #[test]
-fn test_non_utf8_default_config_directories_are_accepted() {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-
+fn test_native_default_config_directories_are_accepted() {
     for (variable, config_suffix) in [
         ("XDG_CONFIG_HOME", "dalfox/config.toml"),
         ("HOME", ".config/dalfox/config.toml"),
         ("USERPROFILE", ".config/dalfox/config.toml"),
     ] {
-        let dir = unique_temp_dir(variable);
-        let native_path = dir.join(OsStr::from_bytes(b"config-dir-\xff"));
+        let dir = tempfile::tempdir().expect("create test temp directory");
+        let native_path = native_config_path(dir.path(), b"config-dir-\xff", "config-dir-café");
         let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("HOME")
