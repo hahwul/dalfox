@@ -136,6 +136,14 @@ class Page
   # `` `<script>` `` in a payload table is documentation, not markup.
   @live : String?
 
+  INLINE_CODE_SPAN = /
+    (?<!\\) (?:\\\\)*   # Start before any pairs of literal backslashes.
+    (?:(?<!`)|\\`)     # A remaining backslash escapes the first backtick.
+    \K (`+) (?!`)      # Mask from the complete opening run onward.
+    [^\r\n]*?
+    (?<!`) \1 (?!`)   # Close at a complete run of the same length.
+  /x
+
   def live_body : String
     @live ||= begin
       buf = String::Builder.new
@@ -154,7 +162,7 @@ class Page
         else
           # Blank the inside of every inline code span, keeping the length so
           # column offsets in a report still point at the right place.
-          buf << line.gsub(/`[^`\n]*`/) { |m| " " * m.size }
+          buf << line.gsub(INLINE_CODE_SPAN) { |m| " " * m.size }
           next
         end
         buf << '\n'
