@@ -3,7 +3,7 @@ require "spec"
 require "../lib/sh"
 
 describe "docs_lint.cr" do
-  it "ignores links inside fences and keeps checking after the matching closer" do
+  it "ignores links inside code examples and reports live links at their original lines" do
     script = File.expand_path("../docs_lint.cr", __DIR__)
     fixture = File.tempname("dalfox-docs-lint-", nil)
     Dir.mkdir(fixture, 0o700)
@@ -25,6 +25,15 @@ describe "docs_lint.cr" do
           MD
       end
       File.write(File.join(content, "invalid-opener.md"), "```foo`bar\n[Broken link](../invalid-opener-link/)\n")
+      File.write(File.join(content, "inline.md"), <<-'MD')
+        Example: ``[example](../quoted-double/)`` [real link](../live-double/)
+        Example: ```[example](../quoted-triple/) `` ` ``` [real link](../live-triple/)
+        Ordinary unmatched `` [real link](../live-unmatched/) `short code`
+        Escaped \` [real link](../live-escaped/) \`
+        Example: \``[example](../quoted-after-escape/)` [real link](../live-after-escape/)
+        Example: \\``[example](../quoted-even/)`` [real link](../live-even/)
+        Example: ``[example](../quoted-before-close/)\`` [real link](../live-after-close/)
+        MD
 
       result = Sh.run("crystal", ["run", script], env: {"DOCS_DIR" => fixture, "DOCS_LINT_ONLY" => "links"})
       result.status.should eq(1)
@@ -33,6 +42,12 @@ describe "docs_lint.cr" do
         result.stdout.should contain("#{name}.md:5 → ../live-#{name}/")
       end
       result.stdout.should contain("invalid-opener.md:2 → ../invalid-opener-link/")
+      %w[double triple after-escape even before-close].each do |name|
+        result.stdout.should_not contain("../quoted-#{name}/")
+      end
+      %w[double triple unmatched escaped after-escape even after-close].each_with_index(1) do |name, line|
+        result.stdout.should contain("inline.md:#{line} → ../live-#{name}/")
+      end
     ensure
       FileUtils.rm_rf(fixture)
     end
