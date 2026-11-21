@@ -7,6 +7,9 @@ on:
 
 jobs:
   snapcraft-releaser:
+    # GitHub's published event includes prereleases, but this job uploads only
+    # to the stable channel. Explicit dispatch remains available for backfills.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease)
     runs-on: ubuntu-latest
     name: snapcraft-releaser
     strategy:
