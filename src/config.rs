@@ -759,7 +759,7 @@ fn create_config_file(path: &Path) -> io::Result<fs::File> {
 /// Load configuration with the following behavior:
 /// - If $XDG_CONFIG_HOME is set and non-empty, use "$XDG_CONFIG_HOME/dalfox"
 /// - Otherwise, use "$HOME/.config/dalfox" (falling back to $USERPROFILE when
-///   $HOME is unset)
+///   $HOME is unset or empty)
 /// - Within the selected base directory, prefer "config.toml" over "config.json"
 /// - If neither file exists, create "config.toml" with a commented template and return it as created
 pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
@@ -873,8 +873,8 @@ pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
 }
 
 // Resolve the configuration directory:
-// - $XDG_CONFIG_HOME/dalfox if XDG_CONFIG_HOME is set
-// - else $HOME/.config/dalfox
+// - $XDG_CONFIG_HOME/dalfox if XDG_CONFIG_HOME is set and non-blank
+// - else .config/dalfox under the first non-empty HOME or USERPROFILE
 pub(crate) fn resolve_config_dir() -> Result<PathBuf, io::Error> {
     if let Some(xdg) = env::var_os("XDG_CONFIG_HOME")
         && !xdg.to_str().is_some_and(|value| value.trim().is_empty())
@@ -882,7 +882,8 @@ pub(crate) fn resolve_config_dir() -> Result<PathBuf, io::Error> {
         return Ok(Path::new(&xdg).join("dalfox"));
     }
     let home = env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
+        .filter(|value| !value.is_empty())
+        .or_else(|| env::var_os("USERPROFILE").filter(|value| !value.is_empty()))
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME/USERPROFILE not set"))?;
     Ok(Path::new(&home).join(".config").join("dalfox"))
 }

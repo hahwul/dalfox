@@ -8,7 +8,7 @@ toc = true
 Dalfox picks one config directory:
 
 1. `$XDG_CONFIG_HOME/dalfox/` when `XDG_CONFIG_HOME` is set and non-empty
-2. otherwise `$HOME/.config/dalfox/` (`%USERPROFILE%\.config\dalfox\` when `HOME` is unset, e.g. on Windows)
+2. otherwise `$HOME/.config/dalfox/` (`%USERPROFILE%\.config\dalfox\` when `HOME` is unset or empty, e.g. on Windows)
 
 It does not fall through to the second directory when the first holds no file. Inside the chosen directory it reads `config.toml`, or `config.json` when there is no `config.toml`. If neither exists, it writes a commented-out `config.toml` template there and runs with built-in defaults. This happens on the first run of any subcommand except `completion` and `man`, not only `scan`.
 

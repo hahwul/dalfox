@@ -9,7 +9,7 @@ Dalfox는 시작할 때 설정 파일을 읽으므로 매번 같은 플래그를
 
 ## 파일 위치
 
-Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG_CONFIG_HOME/dalfox/config.toml`을, 그렇지 않으면 `$HOME/.config/dalfox/config.toml`을 읽습니다. `HOME`이 없으면(대부분의 Windows 환경) `%USERPROFILE%\.config\dalfox`를 씁니다. 같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
+Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG_CONFIG_HOME/dalfox/config.toml`을, 그렇지 않으면 `$HOME/.config/dalfox/config.toml`을 읽습니다. `HOME`이 설정되지 않았거나 비어 있으면(대부분의 Windows 환경) `%USERPROFILE%\.config\dalfox`를 씁니다. 같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
 
 `--config`로 다른 위치를 지정할 수 있습니다.
 

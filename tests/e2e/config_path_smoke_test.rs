@@ -60,6 +60,33 @@ const BANNER_MARK: &str = "████";
 
 #[cfg(unix)]
 #[test]
+fn test_empty_home_paths_do_not_create_project_config() {
+    let dir = unique_temp_dir("cfg-empty-home");
+    let profile = dir.join("profile");
+
+    for userprofile in [Path::new(""), profile.as_path()] {
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .current_dir(&dir)
+            .env_remove("XDG_CONFIG_HOME")
+            .env("HOME", "")
+            .env("USERPROFILE", userprofile)
+            .arg("--silence")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run dalfox without a target");
+
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!dir.join(".config").exists());
+        assert_eq!(
+            profile.join(".config/dalfox/config.toml").is_file(),
+            !userprofile.as_os_str().is_empty()
+        );
+    }
+    std::fs::remove_dir_all(dir).expect("remove test directory");
+}
+
+#[cfg(unix)]
+#[test]
 fn test_non_utf8_config_path_is_accepted() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;

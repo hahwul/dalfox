@@ -8,7 +8,7 @@ toc = true
 Dalfox는 설정 디렉터리를 하나만 고릅니다.
 
 1. `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG_CONFIG_HOME/dalfox/`
-2. 그렇지 않으면 `$HOME/.config/dalfox/` (`HOME`이 없으면 `%USERPROFILE%\.config\dalfox\`, 예: Windows)
+2. 그렇지 않으면 `$HOME/.config/dalfox/` (`HOME`이 설정되지 않았거나 비어 있으면 `%USERPROFILE%\.config\dalfox\`, 예: Windows)
 
 첫 번째 디렉터리에 파일이 없다고 두 번째 디렉터리로 넘어가지는 않습니다. 고른 디렉터리에서 `config.toml`을 읽고, `config.toml`이 없으면 `config.json`을 읽습니다. 둘 다 없으면 전부 주석 처리된 `config.toml` 템플릿을 만들고 내장 기본값으로 실행합니다. 이 템플릿은 `scan`뿐 아니라 `completion`과 `man`을 제외한 어떤 서브커맨드를 처음 실행할 때도 만들어집니다.
 
