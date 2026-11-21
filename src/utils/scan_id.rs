@@ -60,7 +60,11 @@ pub fn make_scan_id_with_nonce(seed: &str, nonce: u128) -> String {
 /// Intended for use like:
 ///   log: "6bf733a start scan to https://example.com"
 pub fn short_scan_id(id: &str) -> String {
-    id[..id.len().min(7)].to_string()
+    let end = id
+        .char_indices()
+        .nth(7)
+        .map_or(id.len(), |(index, _)| index);
+    id[..end].to_string()
 }
 
 #[cfg(test)]
