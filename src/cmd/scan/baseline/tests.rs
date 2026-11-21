@@ -239,6 +239,27 @@ fn a_malformed_report_disables_the_diff() {
 }
 
 #[test]
+fn discovery_jsonl_is_rejected_as_a_baseline() {
+    let meta = r#"{"meta":{"mode":"only_discovery"}}"#;
+    let param = r#"{"url":"https://example.test","method":"GET","param":"name","location":"Query"}"#;
+    for (name, body) in [
+        ("discovery-empty.jsonl", meta.to_string()),
+        ("discovery-params.jsonl", format!("{meta}\n{param}\n")),
+    ] {
+        let path = tmp(name, &body);
+        let baseline = load(path.to_str().unwrap(), BASELINE_MODE_FILTER);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            baseline.warning.as_deref().unwrap().contains("only-discovery"),
+            "unexpected warning for {name}: {:?}",
+            baseline.warning
+        );
+        assert!(baseline.keys.is_empty());
+    }
+}
+
+#[test]
 fn a_foreign_major_version_disables_the_diff() {
     let body = serde_json::json!({
         "meta": { "dalfox_version": "2.9.1" },

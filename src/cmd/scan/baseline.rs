@@ -256,6 +256,13 @@ pub(crate) fn load(path: &str, mode: &str) -> Baseline {
         }
     };
 
+    if meta.as_ref().and_then(|m| m["mode"].as_str()) == Some("only_discovery") {
+        return disabled(format!(
+            "--baseline '{}' is an only-discovery report, which contains parameter data instead of scan findings",
+            path
+        ));
+    }
+
     // Reject a report written by a different major version rather than diffing
     // against a schema whose field meanings we can't vouch for. Missing version
     // metadata is tolerated (hand-assembled baselines are a legitimate use).
@@ -343,10 +350,9 @@ fn parse_report(
                 // would be permanently unreadable and every later run would
                 // report its whole backlog as new.
                 //
-                // Matched on `{"meta": …}` and nothing else, so the `--dry-run`
-                // and `--only-discovery` envelopes — which also carry a `meta`
-                // but describe a plan, not findings — are still rejected rather
-                // than silently read as an empty backlog.
+                // The whole-document dry-run envelope has additional fields.
+                // Discovery JSONL uses the same shape as scan JSONL here and
+                // is rejected by `load` using its metadata mode.
                 _ if map.len() == 1 && map.contains_key("meta") => {
                     Ok((map.remove("meta"), Vec::new()))
                 }
