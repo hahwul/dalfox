@@ -337,16 +337,11 @@ fn only_the_byte_caps_report_the_over_cap_kind() {
     assert!(is_over_cap(&over), "cap hit should be tagged: {over}");
 
     // Not the cap: unreadable, a directory, or non-UTF-8 bytes.
-    let missing = read_bounded(
-        std::path::Path::new("/tmp/dalfox-fs-test-no-such-file"),
-        1024,
-        "target list",
-    )
-    .unwrap_err();
-    assert!(!is_over_cap(&missing), "missing file is not a cap hit");
+    let missing = read_bounded(&tmp("missing"), 1024, "target list").unwrap_err();
+    assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
 
-    let dir = read_bounded(std::path::Path::new("/tmp"), 1024, "target list").unwrap_err();
-    assert!(!is_over_cap(&dir), "directory is not a cap hit");
+    let dir = read_bounded(&std::env::temp_dir(), 1024, "target list").unwrap_err();
+    assert_eq!(dir.kind(), std::io::ErrorKind::InvalidInput);
 
     std::fs::write(&p, [0x80u8, 0x81]).unwrap();
     let non_utf8 = read_bounded(&p, 1024, "target list").unwrap_err();
@@ -362,4 +357,12 @@ fn only_the_byte_caps_report_the_over_cap_kind() {
     )
     .unwrap_err();
     assert!(is_over_cap(&streamed), "stdin cap hit should be tagged");
+}
+
+#[test]
+fn bounded_utf8_read_checks_size_before_decoding() {
+    let bytes = "aé".as_bytes();
+    let err = read_bounded_utf8(bytes, 1, "input").unwrap_err();
+    assert!(is_over_cap(&err));
+    assert_eq!(read_bounded_utf8(bytes, u64::MAX, "input").unwrap(), "aé");
 }
