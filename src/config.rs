@@ -522,6 +522,19 @@ impl ScanConfig {
         use crate::cmd::scan;
         let mut warnings = Vec::new();
 
+        // URL values can carry credentials. Keep the parser's validation and
+        // normalization, but do not copy its value-bearing error into logs.
+        match self.base_url.as_deref().map(scan::parse_base_url_arg) {
+            Some(Ok(url)) => self.base_url = Some(url),
+            Some(Err(_)) => {
+                warnings.push(
+                    "config scan.base_url: expected an absolute HTTP(S) URL; ignoring".to_string(),
+                );
+                self.base_url = None;
+            }
+            None => {}
+        }
+
         // Fields with a clap value-parser of their own, run here because a
         // config value never passes through clap: `method` / `sxss_method` are
         // upper-cased (a lowercase `post` would break the case-sensitive method
@@ -529,12 +542,7 @@ impl ScanConfig {
         // against the known WAF aliases (a typo would otherwise fall into the
         // silent `WafType::Unknown` bucket that skips targeted bypasses).
         type ArgParser = fn(&str) -> std::result::Result<String, String>;
-        let parsed: [(&mut Option<String>, ArgParser, &str); 4] = [
-            (
-                &mut self.base_url,
-                scan::parse_base_url_arg,
-                "scan.base_url",
-            ),
+        let parsed: [(&mut Option<String>, ArgParser, &str); 3] = [
             (&mut self.method, scan::parse_http_method_arg, "scan.method"),
             (
                 &mut self.sxss_method,
@@ -616,23 +624,26 @@ impl ScanConfig {
         // the scan. A config file skips clap entirely, so validate the pattern
         // here rather than letting a typo silently report every probe as a
         // dead session (which, under the default `abort`, kills the run).
-        if let Some(p) = &self.session_check
-            && let Err(e) = regex::Regex::new(p)
+        if self
+            .session_check
+            .as_deref()
+            .is_some_and(|pattern| regex::Regex::new(pattern).is_err())
         {
-            warnings.push(format!(
-                "config scan.session_check: invalid regex ({e}); ignoring"
-            ));
+            // The regex error Display implementation quotes the pattern.
+            warnings.push("config scan.session_check: invalid regex; ignoring".to_string());
             self.session_check = None;
         }
 
         // `session_check_url` — must be absolute; a relative value would fail
         // to parse at probe time and silently disable the check.
-        if let Some(u) = &self.session_check_url
-            && url::Url::parse(u).is_err()
+        if self
+            .session_check_url
+            .as_deref()
+            .is_some_and(|url| url::Url::parse(url).is_err())
         {
-            warnings.push(format!(
-                "config scan.session_check_url: '{u}' is not a valid absolute URL; ignoring"
-            ));
+            warnings.push(
+                "config scan.session_check_url: expected an absolute URL; ignoring".to_string(),
+            );
             self.session_check_url = None;
         }
 

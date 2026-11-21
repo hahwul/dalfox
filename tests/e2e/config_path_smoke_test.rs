@@ -352,6 +352,32 @@ fn test_malformed_default_config_warns_without_echoing_values() {
 }
 
 #[test]
+fn test_invalid_config_urls_and_regex_warn_without_echoing_values() {
+    let dir = unique_temp_dir("cfg-invalid-values");
+    let config_path = dir.join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"[scan]
+base_url = "invalid-base?token=base-config-secret"
+session_check_url = "relative-session?token=session-url-secret"
+session_check = "(session-regex-secret"
+"#,
+    )
+    .expect("write invalid config values");
+
+    let output = run_payload_with_config(&config_path);
+    assert!(output.status.success(), "invalid fields stay non-fatal");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for field in ["base_url", "session_check_url", "session_check"] {
+        assert!(
+            stderr.contains(&format!("config scan.{field}:")),
+            "{stderr}"
+        );
+    }
+    assert!(!stderr.contains("-secret"), "{stderr}");
+}
+
+#[test]
 fn test_uncreatable_config_path_warns_instead_of_claiming_creation() {
     // The scaffold write is best-effort (`let _ = std::fs::write(..)`), so the
     // notice has to describe what actually landed on disk. A `--config` path
