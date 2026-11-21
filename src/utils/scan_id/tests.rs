@@ -64,3 +64,9 @@ fn test_short_scan_id() {
     let id = make_scan_id_with_nonce("seed", 999);
     assert_eq!(short_scan_id(&id).len(), 7);
 }
+
+#[test]
+fn test_short_scan_id_counts_unicode_characters() {
+    assert_eq!(short_scan_id("abcdefé"), "abcdefé");
+    assert_eq!(short_scan_id("가나다라마바사아"), "가나다라마바사");
+}
