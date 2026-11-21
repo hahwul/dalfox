@@ -20,6 +20,28 @@ fn test_cli_starts_without_error() {
 }
 
 #[test]
+fn test_no_color_disables_forced_clap_colors() {
+    for (args, expected_exit) in [
+        (&["--help"][..], 0),
+        (&["scan", "--help"][..], 0),
+        (&["--invalid-argument"][..], 2),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .env_remove("NO_COLOR")
+            .env("CLICOLOR_FORCE", "1")
+            .env("TERM", "xterm-256color")
+            .arg("--no-color")
+            .args(args)
+            .output()
+            .expect("run dalfox with --no-color");
+
+        assert_eq!(output.status.code(), Some(expected_exit), "{args:?}");
+        assert!(!output.stdout.contains(&0x1b), "{args:?}");
+        assert!(!output.stderr.contains(&0x1b), "{args:?}");
+    }
+}
+
+#[test]
 fn test_cli_version_exits_successfully() {
     let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
         .arg("--version")

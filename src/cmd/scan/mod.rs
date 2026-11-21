@@ -262,9 +262,9 @@ pub(crate) fn stream_findings_blocker(args: &ScanArgs) -> Option<&'static str> {
 /// Run a scan and return the outcome: `Clean` (no findings), `Findings`, or `Error`.
 pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Compute no-color locally (safe for concurrent server-mode scans)
-    let nc = args.no_color || std::env::var("NO_COLOR").is_ok();
+    let nc = args.no_color || std::env::var_os("NO_COLOR").is_some();
     if nc {
-        crate::NO_COLOR.store(true, Ordering::Relaxed);
+        crate::utils::term::disable_colors();
     }
 
     // Show banner at the start when using plain format and not silenced
