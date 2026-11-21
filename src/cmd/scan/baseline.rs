@@ -108,16 +108,24 @@ struct FindingIdentity<'a> {
 ///     evidence string is *not* used — it carries line/column numbers and
 ///     payload text that shift for unrelated reasons.
 fn finding_key(id: FindingIdentity<'_>) -> String {
-    format!(
-        "v1|{}|{}|{}|{}|{}|{}|{}",
-        identity_path(id.data, id.location, id.payload),
+    use std::fmt::Write as _;
+
+    let path = identity_path(id.data, id.location, id.payload);
+    let family = evidence_family(id.evidence, id.detection_method);
+    let mut key = String::new();
+    // A field can contain a delimiter, so encode its byte length before its value.
+    for field in [
+        &path,
         id.param,
         id.location,
         id.inject_type,
         id.cwe,
         id.tier,
-        evidence_family(id.evidence, id.detection_method),
-    )
+        &family,
+    ] {
+        let _ = write!(key, "{}:{field}", field.len());
+    }
+    key
 }
 
 pub(crate) fn key_for_result(r: &Result) -> String {

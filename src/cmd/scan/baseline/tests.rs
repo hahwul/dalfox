@@ -83,6 +83,25 @@ fn baseline_roundtrip_key_matches_the_live_finding_key() {
 }
 
 #[test]
+fn baseline_distinguishes_delimiters_in_adjacent_fields() {
+    let known = Result::builder(FindingType::Informational)
+        .data("https://example.test/accounts|history")
+        .param("name")
+        .build();
+    let distinct = Result::builder(FindingType::Informational)
+        .data("https://example.test/accounts")
+        .param("history|name")
+        .build();
+    let path = tmp("key-delimiters.json", &report(std::slice::from_ref(&known)));
+    let loaded = load(path.to_str().unwrap(), BASELINE_MODE_FILTER);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(loaded.is_active());
+    assert!(!loaded.is_new(&known));
+    assert!(loaded.is_new(&distinct));
+}
+
+#[test]
 fn key_ignores_the_payload_in_the_url() {
     // Two runs of the same scan embed different payloads in `data`. That is
     // the single most common source of scan-to-scan variation, and it must
