@@ -20,10 +20,12 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: hahwul/dalfox
+          # An explicit prefix survives the action's prerelease fallback.
+          # The alias rules retain the existing unprefixed prerelease tag.
           tags: |
             type=semver,pattern=v{{major}}
             type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}.{{minor}}.{{patch}}
+            type=semver,pattern={{version}},prefix=v
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
