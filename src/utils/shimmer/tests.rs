@@ -48,6 +48,23 @@ fn shimmer_preserves_visible_text() {
 }
 
 #[test]
+fn shimmer_keeps_graphemes_intact() {
+    let combining = "e\u{301}";
+    let emoji = "👩‍💻";
+    let text = format!("{combining}{emoji}");
+    let painted = shimmer_at(&text, 0.0);
+    assert!(painted.contains(combining));
+    assert!(painted.contains(emoji));
+    assert_eq!(crate::utils::term::strip_ansi(&painted), text);
+}
+
+#[test]
+fn shimmer_advances_by_terminal_columns() {
+    let painted = shimmer_at("한a", 2.0);
+    assert!(painted.contains("\x1b[38;5;255ma"));
+}
+
+#[test]
 fn shimmer_empty_is_empty() {
     assert_eq!(shimmer("", 3), "");
     assert_eq!(shimmer_at("", 0.0), "");
