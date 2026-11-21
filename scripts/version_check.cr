@@ -48,13 +48,11 @@ rescue
   nil
 end
 
-# packaging/aur/PKGBUILD: `pkgver=X`. AUR forbids hyphens in pkgver, so pre-release
-# versions are stored with `_` (e.g. 3.0.0_dev.1); normalize back to `-`
-# so it compares equal to the other files.
+# packaging/aur/PKGBUILD: `_upstreamver=X` stores the release tag version.
 def aur_version : String?
   content = File.read(AUR_PKGBUILD)
-  match = content.match(/^pkgver=([^\s]+)/m)
-  match ? match[1].gsub('_', '-') : nil
+  match = content.match(/^_upstreamver=([^\s]+)/m)
+  match ? match[1] : nil
 rescue
   nil
 end
