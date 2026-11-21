@@ -159,6 +159,8 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 같은 스캔 수준 메타�
 
 SARIF에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 두 곳에 실려, GitHub 코드 스캐닝 같은 소비 도구도 컨텍스트를 그대로 받습니다. 각 결과의 `ruleId`는 `dalfox/cwe-<n>`(XSS는 `dalfox/cwe-79`, 오래된 라이브러리는 `dalfox/cwe-1104`)입니다. `level`은 `severity`를 따르고(High → `error`, Medium → `warning`, Low / Info → `note`), PoC URL은 location의 `uri`에 들어갑니다. `partialFingerprints["vulnIdentity/v1"]`은 코드 스캐닝이 실행 간에 같은 건을 맞춰 볼 수 있게 하는 안정적인 해시입니다. 탐지 결과 필드(`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence` 등)는 결과의 `properties` 아래에 있고, `message.text`에는 `message_str`과 근거가 함께 담깁니다.
 
+카탈로그 메시지 ID는 `properties.dalfoxMessageId`에 들어갑니다.
+
 TOML에서는 최상위 `[meta]` 테이블로 나타납니다(탐지 결과는 `[[results]]` 아래).
 
 Markdown에서는 탐지 결과 요약 위에 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다. 실패한 요청, incomplete, 중복 제거된 대상, 베이스라인, 재개, `--min-confidence`처럼 무슨 일이 있었을 때만 의미 있는 행은 그때만 나타납니다.

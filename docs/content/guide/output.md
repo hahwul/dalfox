@@ -162,6 +162,8 @@ A target whose session died is reported as `"status": "incomplete"` (or `"skippe
 
 In SARIF the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers keep the context. Each result's `ruleId` is `dalfox/cwe-<n>` (`dalfox/cwe-79` for XSS, `dalfox/cwe-1104` for outdated libraries). Its `level` follows `severity` (High → `error`, Medium → `warning`, Low / Info → `note`), the PoC URL is the location `uri`, and `partialFingerprints["vulnIdentity/v1"]` is a stable hash that lets code scanning match a finding across runs. The finding fields (`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence`, …) sit under the result's `properties`, and `message.text` carries `message_str` plus the evidence.
 
+The catalog message ID is available as `properties.dalfoxMessageId`.
+
 In TOML it appears as a top-level `[meta]` table (findings under `[[results]]`).
 
 In Markdown it is rendered as tables (`## Scan Metadata` + `### Target Summary`) above the findings summary. Rows that only matter when something happened (failed requests, incomplete, deduplicated targets, baseline, resume, `--min-confidence`) appear only then.

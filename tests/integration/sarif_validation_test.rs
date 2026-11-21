@@ -259,20 +259,17 @@ fn test_sarif_partial_fingerprints() {
         .message_str("test")
         .build();
 
-    let sarif = ScanResult::results_to_sarif(&[result], false, false);
+    let mut updated_message = result.clone();
+    updated_message.message_id = 12346;
+    let sarif = ScanResult::results_to_sarif(&[result, updated_message], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
 
-    let fingerprints = &json["runs"][0]["results"][0]["partialFingerprints"];
-    assert!(
-        fingerprints.is_object(),
-        "partialFingerprints should be an object"
-    );
-    // The catalog message_id is preserved under a clearly non-fingerprint
-    // name (humans inspect it; SARIF consumers ignore it for dedup).
-    assert_eq!(
-        fingerprints["dalfoxMessageId"], "12345",
-        "dalfoxMessageId should carry the catalog id"
-    );
+    let findings = json["runs"][0]["results"].as_array().unwrap();
+    let fingerprints = &findings[0]["partialFingerprints"];
+    assert_eq!(fingerprints.as_object().unwrap().len(), 1);
+    assert_eq!(fingerprints, &findings[1]["partialFingerprints"]);
+    assert_eq!(findings[0]["properties"]["dalfoxMessageId"], "12345");
+    assert_eq!(findings[1]["properties"]["dalfoxMessageId"], "12346");
     // The dedup-driving fingerprint is the stable vulnerability identity
     // (target + param + inject_type + cwe), 16-char lowercase hex.
     let vuln_id = fingerprints["vulnIdentity/v1"]
