@@ -14,6 +14,7 @@
 
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Smooth 10-frame braille spinner. Shared by the hand-rolled spinner
 /// (`start_spinner`, the overall ticker) and the indicatif bars (as
@@ -83,21 +84,19 @@ fn cell_level(idx: f64, head: f64) -> f64 {
 /// Paint `text` with the highlight band centered at cell `head`. Runs of
 /// equal color are coalesced into a single escape (one `\x1b[38;5;Nm` per
 /// color change, not per character) so the rendered line stays compact.
-///
-/// Returns `text` unchanged when color output is disabled.
-pub(crate) fn shimmer_at(text: &str, head: f64) -> String {
-    if !crate::utils::term::color_enabled() {
-        return text.to_string();
-    }
+/// Write whole graphemes so escapes never break a displayed character.
+fn shimmer_at(text: &str, head: f64) -> String {
     let mut out = String::with_capacity(text.len() + 24);
     let mut cur: Option<u8> = None;
-    for (i, ch) in text.chars().enumerate() {
-        let code = gray_code(cell_level(i as f64, head));
+    let mut column = 0;
+    for grapheme in text.graphemes(true) {
+        let code = gray_code(cell_level(column as f64, head));
         if cur != Some(code) {
             let _ = write!(out, "\x1b[38;5;{code}m");
             cur = Some(code);
         }
-        out.push(ch);
+        out.push_str(grapheme);
+        column += console::measure_text_width(grapheme);
     }
     if cur.is_some() {
         out.push_str("\x1b[0m");
@@ -109,14 +108,10 @@ pub(crate) fn shimmer_at(text: &str, head: f64) -> String {
 /// and loops; `phase` is a monotonically increasing frame counter. Returns
 /// `text` unchanged when color output is disabled or the text is empty.
 pub(crate) fn shimmer(text: &str, phase: usize) -> String {
-    let n = text.chars().count();
-    if n == 0 {
-        return String::new();
-    }
-    if !crate::utils::term::color_enabled() {
+    if text.is_empty() || !crate::utils::term::color_enabled() {
         return text.to_string();
     }
-    let period = n as f64 + 2.0 * SWEEP_PAD;
+    let period = console::measure_text_width(text) as f64 + 2.0 * SWEEP_PAD;
     let head = (phase as f64 * SWEEP_SPEED) % period - SWEEP_PAD;
     shimmer_at(text, head)
 }

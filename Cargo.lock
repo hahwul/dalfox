@@ -607,6 +607,7 @@ dependencies = [
  "sha2 0.11.1",
  "tokio",
  "toml",
+ "unicode-segmentation",
  "url",
  "urlencoding",
  "uuid",
