@@ -216,6 +216,65 @@ fn test_missing_config_path_creation_emits_notice_on_stderr() {
 }
 
 #[test]
+fn test_config_warning_escapes_control_characters_in_keys_and_values() {
+    let dir = unique_temp_dir("cfg-control-key");
+    let path = dir.join("settings.json");
+    std::fs::write(
+        &path,
+        r#"{"scan":{"line\nbreak\r\u001b":true,"format":"unknown\nformat"}}"#,
+    )
+    .expect("write config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(&path)
+        .arg("--silence")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run dalfox without a target");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.ends_with(r#"unknown key `scan.line\nbreak\r\x1b` ignored"#)),
+        "{stderr:?}"
+    );
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("Warning: ") && line.contains(r"unknown\nformat")),
+        "{stderr:?}"
+    );
+    std::fs::remove_dir_all(dir).expect("remove test directory");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_config_notice_escapes_control_characters_in_path() {
+    let dir = unique_temp_dir("cfg-control-path");
+    let path = dir.join("local\nsettings.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(&path)
+        .arg("--silence")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run dalfox without a target");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(path.is_file());
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("Notice: --config ")
+                && line.contains(r"local\nsettings.json did not exist")),
+        "{stderr:?}"
+    );
+    std::fs::remove_dir_all(dir).expect("remove test directory");
+}
+
+#[test]
 fn test_existing_config_path_emits_no_creation_notice() {
     // Control: an existing, valid config file is loaded, not created, so no
     // creation notice fires — the notice is scoped to the scaffold case only.

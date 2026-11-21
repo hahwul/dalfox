@@ -196,6 +196,10 @@ fn exit_daemon(outcome: ScanOutcome) -> ! {
     std::process::exit(outcome.exit_code())
 }
 
+fn print_config_diagnostic(message: std::fmt::Arguments<'_>) {
+    eprintln!("{}", utils::log::sanitize_log_message(&message.to_string()));
+}
+
 #[tokio::main]
 async fn main() {
     // Install the rustls crypto provider (ring) before anything builds a
@@ -353,11 +357,11 @@ async fn main() {
     // `encoders = […]` settings had no effect. Implicit default-path
     // loading is covered separately below, and only for a file that exists.
     if let (Some(cfg_path), Err(e)) = (&cli.config, &config_load) {
-        eprintln!(
+        print_config_diagnostic(format_args!(
             "Warning: failed to load --config {}: {}",
             cfg_path.display(),
             e
-        );
+        ));
     }
     // The implicit default-path file gets the same visibility when it exists
     // and is unreadable or malformed: one wrong-typed value drops the whole
@@ -369,11 +373,11 @@ async fn main() {
         && let Err(e) = &config_load
         && let Some(fe) = e.downcast_ref::<config::ConfigFileError>()
     {
-        eprintln!(
+        print_config_diagnostic(format_args!(
             "Warning: failed to load config {}: {} — ran with built-in defaults",
             fe.path.display(),
             fe.detail
-        );
+        ));
     }
 
     // A missing explicit `--config <path>` is scaffolded with a default template
@@ -390,10 +394,10 @@ async fn main() {
     if let (Some(cfg_path), Ok(lr)) = (&cli.config, &config_load)
         && lr.created
     {
-        eprintln!(
+        print_config_diagnostic(format_args!(
             "Notice: --config {} did not exist — created it with a default template and ran with built-in defaults (check the path if you meant to load an existing config)",
             cfg_path.display()
-        );
+        ));
     }
 
     // Config values are deserialized straight into `Config` and never pass
@@ -408,13 +412,13 @@ async fn main() {
     // this is silent unless the operator set a real value.
     if let Ok(lr) = config_load.as_mut() {
         for key in &lr.unknown_keys {
-            eprintln!(
+            print_config_diagnostic(format_args!(
                 "Warning: config {}: unknown key `{key}` ignored",
                 lr.path.display()
-            );
+            ));
         }
         for warning in lr.config.normalize_and_validate() {
-            eprintln!("Warning: {warning}");
+            print_config_diagnostic(format_args!("Warning: {warning}"));
         }
     }
 

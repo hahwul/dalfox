@@ -57,7 +57,8 @@ pub fn log_prefix(color: &str, label: &str) -> String {
 /// console. CR/LF become `\n`/`\r`; other C0 controls and DEL become
 /// `\xNN`, C1 becomes `\u{NN}`; tab is kept. Returns a borrowed string on the
 /// common (clean) path so non-injecting logs allocate nothing.
-pub(crate) fn sanitize_log_message(msg: &str) -> std::borrow::Cow<'_, str> {
+#[doc(hidden)]
+pub fn sanitize_log_message(msg: &str) -> std::borrow::Cow<'_, str> {
     crate::utils::term::escape_controls(msg, |b| b == b'\t')
 }
 
