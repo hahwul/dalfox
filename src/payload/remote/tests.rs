@@ -221,9 +221,7 @@ async fn remote_fetch_redirects_stay_on_the_requested_origin() {
             async { "untrusted\n" }
         }),
     );
-    let foreign_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let foreign_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let foreign_addr = foreign_listener.local_addr().unwrap();
     let foreign_server = tokio::spawn(async move {
         let _ = axum::serve(foreign_listener, foreign).await;
@@ -255,9 +253,7 @@ async fn remote_fetch_redirects_stay_on_the_requested_origin() {
             }),
         )
         .route("/list", get(|| async { "trusted\n" }));
-    let origin_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let origin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin_addr = origin_listener.local_addr().unwrap();
     let origin_server = tokio::spawn(async move {
         let _ = axum::serve(origin_listener, origin).await;
