@@ -193,10 +193,18 @@ rescue ex
   false
 end
 
-# Loose semver — allow numeric pre-release suffix (`-dev.1`, `-rc.2`,
-# `-alpha`).
+# Accept the release format used by the docs examples, with Cargo-compatible
+# numeric components and prerelease identifiers.
 def valid_version?(version : String) : Bool
-  !!(version =~ /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?$/)
+  match = version.match(/\A([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*))?\z/)
+  return false unless match
+
+  leading_zero = /\A0[0-9]+\z/
+  core = [match[1], match[2], match[3]]
+  return false unless core.all? { |part| part.to_u64? && !leading_zero.matches?(part) }
+
+  prerelease = match[4]?
+  prerelease.nil? || prerelease.split('.').none? { |part| leading_zero.matches?(part) }
 end
 
 # Status report.

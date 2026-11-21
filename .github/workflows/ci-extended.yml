@@ -97,6 +97,8 @@ jobs:
       # a release rather than after publishing.
       - name: Version lockstep (Cargo / snap / AUR / docs incl. KO)
         run: crystal run scripts/version_check.cr
+      - name: Version updater regression
+        run: crystal spec scripts/spec/version_update_spec.cr
       - run: cargo build --release
       # All green, so all blocking. `effectiveness` fails when recall drops or
       # the FP count rises against docs/data/effectiveness.json; `perf-budget`
