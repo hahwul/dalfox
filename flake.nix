@@ -99,12 +99,16 @@
           # was just installed rather than shipping generated copies in the
           # source tree.
           postInstall = lib.optionalString canRunResult ''
-            mkdir -p $out/share/man/man1
-            $out/bin/dalfox man > $out/share/man/man1/dalfox.1
-            installShellCompletion --cmd dalfox \
-              --bash <($out/bin/dalfox completion bash) \
-              --zsh <($out/bin/dalfox completion zsh) \
-              --fish <($out/bin/dalfox completion fish)
+            mkdir -p "$out/share/man/man1"
+            "$out/bin/dalfox" man > "$out/share/man/man1/dalfox.1"
+            test -s "$out/share/man/man1/dalfox.1"
+
+            completion_dir="$(mktemp -d)"
+            for completion_shell in bash zsh fish; do
+              "$out/bin/dalfox" completion "$completion_shell" > "$completion_dir/dalfox.$completion_shell"
+              test -s "$completion_dir/dalfox.$completion_shell"
+            done
+            installShellCompletion --cmd dalfox "$completion_dir"/dalfox.{bash,zsh,fish}
           '';
 
           meta = {
