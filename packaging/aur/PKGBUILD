@@ -1,6 +1,10 @@
 # Maintainer: HAHWUL <hahwul@gmail.com>
 pkgname=dalfox
-pkgver=3.3.0
+_upstreamver=3.3.0
+# Arch disallows hyphens in pkgver. An alphabetic suffix without a separator
+# also keeps prereleases older than the corresponding stable release.
+pkgver="${_upstreamver/-/pre}"
+pkgver="${pkgver//-/_}"
 pkgrel=1
 pkgdesc="Powerful open-source XSS scanner and utility focused on automation"
 arch=('x86_64' 'aarch64')
@@ -11,30 +15,30 @@ makedepends=('cargo')
 # Disable LTO: makepkg's -flto leaks into ring's `cc` build, producing objects
 # that fail to link with lld (undefined `ring_core_*` symbols). See #1061.
 options=(!lto)
-source=("$pkgname-$pkgver.tar.gz::https://github.com/hahwul/dalfox/archive/refs/tags/v$pkgver.tar.gz")
+source=("$pkgname-$_upstreamver.tar.gz::$url/archive/refs/tags/v$_upstreamver.tar.gz")
 sha256sums=('SKIP')
 
 prepare() {
-    cd "$pkgname-$pkgver"
+    cd "$srcdir/$pkgname-$_upstreamver"
     export RUSTUP_TOOLCHAIN=stable
     cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-    cd "$pkgname-$pkgver"
+    cd "$srcdir/$pkgname-$_upstreamver"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo build --frozen --release --all-features
 }
 
 check() {
-    cd "$pkgname-$pkgver"
+    cd "$srcdir/$pkgname-$_upstreamver"
     export RUSTUP_TOOLCHAIN=stable
     cargo test --frozen --release
 }
 
 package() {
-    cd "$pkgname-$pkgver"
+    cd "$srcdir/$pkgname-$_upstreamver"
     install -Dm0755 -t "$pkgdir/usr/bin/" "target/release/$pkgname"
     install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE.txt
     install -Dm0644 -t "$pkgdir/usr/share/doc/$pkgname/" README.md

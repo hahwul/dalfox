@@ -51,8 +51,8 @@ end
 
 def aur_version : String?
   content = File.read(AUR_PKGBUILD)
-  match = content.match(/^pkgver=([^\s]+)/m)
-  match ? match[1].gsub('_', '-') : nil
+  match = content.match(/^_upstreamver=([^\s]+)/m)
+  match ? match[1] : nil
 rescue
   nil
 end
@@ -133,13 +133,12 @@ rescue ex
   false
 end
 
-# AUR pkgver disallows hyphens; rewrite `-` as `_` so dev/rc tags remain
-# valid for `makepkg --printsrcinfo`. Also resets pkgrel=1 on bump.
+# The PKGBUILD derives the Arch package version from the upstream version.
+# A new upstream version resets pkgrel=1.
 # `[^\n]*` (not `.*`) — see the DOTALL note on update_snap above.
 def update_aur(new_version : String) : Bool
   content = File.read(AUR_PKGBUILD)
-  aur_ver = new_version.gsub('-', '_')
-  updated = content.sub(/^pkgver=[^\n]*/m, "pkgver=#{aur_ver}")
+  updated = content.sub(/^_upstreamver=[^\n]*/m, "_upstreamver=#{new_version}")
                    .sub(/^pkgrel=[^\n]*/m, "pkgrel=1")
   return false if updated == content
   File.write(AUR_PKGBUILD, updated)

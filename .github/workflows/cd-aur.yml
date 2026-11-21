@@ -31,23 +31,23 @@ jobs:
           # so packaging-only fixes can ship to AUR without cutting a release.
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.workflow_run.head_branch }}
 
-      - name: Get Version
-        id: get_version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RAW_VERSION="${{ github.event.inputs.version }}"
-          else
-            RAW_VERSION="${{ github.event.workflow_run.head_branch }}"
-          fi
-          VERSION="${RAW_VERSION#v}"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Resolved version: $VERSION"
-
       - name: Update PKGBUILD version
+        env:
+          RAW_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.event.workflow_run.head_branch }}
+          PACKAGE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.pkgrel || '1' }}
+        shell: bash
         run: |
-          PKGREL="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pkgrel || '1' }}"
-          sed -i "s/^pkgver=.*/pkgver=${{ env.VERSION }}/" packaging/aur/PKGBUILD
-          sed -i "s/^pkgrel=.*/pkgrel=${PKGREL}/" packaging/aur/PKGBUILD
+          upstream_version="${RAW_VERSION#v}"
+          if [[ ! $upstream_version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            printf 'Invalid upstream version %q\n' "$RAW_VERSION" >&2
+            exit 1
+          fi
+          if [[ ! $PACKAGE_RELEASE =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            printf 'Invalid package release %q\n' "$PACKAGE_RELEASE" >&2
+            exit 1
+          fi
+          sed -i -e "s/^_upstreamver=.*/_upstreamver=$upstream_version/" \
+            -e "s/^pkgrel=.*/pkgrel=$PACKAGE_RELEASE/" packaging/aur/PKGBUILD
           cat packaging/aur/PKGBUILD
 
       - name: Publish to AUR
