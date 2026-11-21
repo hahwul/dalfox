@@ -891,7 +891,7 @@ fn test_report_cannot_overwrite_resume_state() {
         symlink("new.jsonl", dir.join("dangling.jsonl")).expect("create dangling symlink");
     }
 
-    let assert_conflict = |state_name: &str, output_name: &str, mode: &[&str]| {
+    let run_with_paths = |state_name: &str, output_name: &str, mode: &[&str]| {
         let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
             .current_dir(&dir)
             .args(["--config", "config.toml"])
@@ -905,8 +905,12 @@ fn test_report_cannot_overwrite_resume_state() {
             .expect("run dalfox");
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        let error: serde_json::Value = serde_json::from_slice(&output.stderr)
-            .unwrap_or_else(|e| panic!("{e}: {:?}", String::from_utf8_lossy(&output.stderr)));
+        serde_json::from_slice::<serde_json::Value>(&output.stderr)
+            .unwrap_or_else(|e| panic!("{e}: {:?}", String::from_utf8_lossy(&output.stderr)))
+    };
+
+    let assert_conflict = |state_name: &str, output_name: &str, mode: &[&str]| {
+        let error = run_with_paths(state_name, output_name, mode);
         assert_eq!(error["code"], "INVALID_INPUT_TYPE");
         assert_eq!(
             error["message"],
@@ -928,8 +932,29 @@ fn test_report_cannot_overwrite_resume_state() {
         assert_conflict("new.jsonl", "dangling.jsonl", &["--only-discovery"]);
     }
 
-    assert_eq!(std::fs::read_to_string(state).unwrap(), journal);
+    // The fixture hash requires a reset. A report targeting the planned
+    // backup must fail before the existing journal is moved.
+    let backup_error = run_with_paths("state.jsonl", "subdir/../state.jsonl.bak", &[]);
+    assert_eq!(backup_error["code"], "FILE_READ_ERROR");
+    assert_eq!(
+        backup_error["message"],
+        "--output must use a different file from the --state-file backup"
+    );
+    assert!(!dir.join("state.jsonl.bak").exists());
+
+    assert_eq!(std::fs::read_to_string(&state).unwrap(), journal);
     assert!(!dir.join("new.jsonl").exists());
+
+    // Filesystems that ignore case can reveal this alias only after the
+    // backup is moved into place. The previous journal must still be intact.
+    if dir.join("STATE.JSONL").is_file() {
+        let error = run_with_paths("state.jsonl", "STATE.JSONL.BAK", &[]);
+        assert_eq!(error["code"], "FILE_READ_ERROR");
+        assert!(error["message"].as_str().unwrap().contains("backup"));
+        let backup = dir.join("state.jsonl.bak");
+        let preserved = if backup.exists() { backup } else { state };
+        assert_eq!(std::fs::read_to_string(preserved).unwrap(), journal);
+    }
     std::fs::remove_dir_all(dir).expect("remove fixture directory");
 }
 
