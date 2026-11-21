@@ -133,6 +133,10 @@ impl InteractshClient {
         let mut builder = Client::builder()
             .timeout(Duration::from_secs(config.timeout.max(1)))
             .no_proxy()
+            // Registration and deregistration bodies, the poll query, and the
+            // optional Authorization header all carry session secrets. Follow
+            // ordinary redirects only while they stay on the requested origin.
+            .redirect(crate::target_parser::same_host_redirect_policy(10))
             .danger_accept_invalid_certs(accept_invalid_certs(
                 &host,
                 config.insecure,

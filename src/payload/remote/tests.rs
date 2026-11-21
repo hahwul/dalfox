@@ -204,6 +204,92 @@ fn test_build_remote_client_invalid_proxy_is_tolerated() {
     assert!(client.is_ok());
 }
 
+/// A provider controls its response but not the next network authority. A 307
+/// must not turn a configured list URL into a request to an internal/foreign
+/// service; an ordinary redirect within that provider still works.
+#[tokio::test]
+async fn remote_fetch_redirects_stay_on_the_requested_origin() {
+    use axum::{Router, http::StatusCode, routing::get};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let foreign_hits = Arc::new(AtomicUsize::new(0));
+    let hits = foreign_hits.clone();
+    let foreign = Router::new().route(
+        "/list",
+        get(move || {
+            hits.fetch_add(1, Ordering::SeqCst);
+            async { "untrusted\n" }
+        }),
+    );
+    let foreign_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let foreign_addr = foreign_listener.local_addr().unwrap();
+    let foreign_server = tokio::spawn(async move {
+        let _ = axum::serve(foreign_listener, foreign).await;
+    });
+
+    let foreign_url = format!("http://{foreign_addr}/list");
+    let origin = Router::new()
+        .route(
+            "/offsite",
+            get(move || {
+                let foreign_url = foreign_url.clone();
+                async move {
+                    axum::response::Response::builder()
+                        .status(StatusCode::TEMPORARY_REDIRECT)
+                        .header("Location", foreign_url)
+                        .body(axum::body::Body::empty())
+                        .unwrap()
+                }
+            }),
+        )
+        .route(
+            "/same-origin",
+            get(|| async {
+                axum::response::Response::builder()
+                    .status(StatusCode::TEMPORARY_REDIRECT)
+                    .header("Location", "/list")
+                    .body(axum::body::Body::empty())
+                    .unwrap()
+            }),
+        )
+        .route("/list", get(|| async { "trusted\n" }));
+    let origin_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let origin_addr = origin_listener.local_addr().unwrap();
+    let origin_server = tokio::spawn(async move {
+        let _ = axum::serve(origin_listener, origin).await;
+    });
+
+    let client = build_remote_client(&RemoteFetchOptions::default()).expect("client");
+    let stopped = client
+        .get(format!("http://{origin_addr}/offsite"))
+        .send()
+        .await
+        .expect("redirect response");
+    assert_eq!(stopped.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        foreign_hits.load(Ordering::SeqCst),
+        0,
+        "a provider redirect must not reach a foreign authority"
+    );
+
+    let body = client
+        .get(format!("http://{origin_addr}/same-origin"))
+        .send()
+        .await
+        .expect("same-origin redirect")
+        .text()
+        .await
+        .expect("list body");
+    assert_eq!(body, "trusted\n");
+
+    origin_server.abort();
+    foreign_server.abort();
+}
+
 #[tokio::test]
 async fn proxied_provider_fetch_does_not_poison_direct_fetch() {
     use axum::{Router, routing::get};

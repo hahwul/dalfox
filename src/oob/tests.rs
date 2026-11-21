@@ -448,6 +448,72 @@ async fn oob_session_start_fails_soft_when_no_server_registers() {
     );
 }
 
+/// A hostile OAST response must not replay the secret-bearing registration
+/// body or Authorization header to an authority the operator did not choose.
+#[tokio::test]
+async fn oob_registration_does_not_follow_a_cross_origin_307() {
+    let foreign_hits = Arc::new(AtomicUsize::new(0));
+    let hits = foreign_hits.clone();
+    let foreign = Router::new().route(
+        "/stolen",
+        post(move || {
+            hits.fetch_add(1, Ordering::SeqCst);
+            async { Json(json!({ "message": "stolen" })) }
+        }),
+    );
+    let foreign_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind foreign server");
+    let foreign_addr = foreign_listener.local_addr().expect("foreign addr");
+    let foreign_server = tokio::spawn(async move {
+        let _ = axum::serve(foreign_listener, foreign).await;
+    });
+
+    let foreign_url = format!("http://{foreign_addr}/stolen");
+    let origin = Router::new().route(
+        "/register",
+        post(move || {
+            let foreign_url = foreign_url.clone();
+            async move {
+                axum::response::Response::builder()
+                    .status(axum::http::StatusCode::TEMPORARY_REDIRECT)
+                    .header("Location", foreign_url)
+                    .body(axum::body::Body::empty())
+                    .expect("redirect response")
+            }
+        }),
+    );
+    let origin_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind OAST origin");
+    let origin_addr = origin_listener.local_addr().expect("origin addr");
+    let origin_server = tokio::spawn(async move {
+        let _ = axum::serve(origin_listener, origin).await;
+    });
+
+    let config = OobConfig {
+        servers: vec![format!("http://{origin_addr}")],
+        secret: Some("operator-token".to_string()),
+        wait_secs: 1,
+        timeout: 5,
+        proxy: None,
+        insecure: true,
+    };
+    let err = OobSession::start(&config, std::future::pending())
+        .await
+        .err()
+        .expect("a stopped 307 is not a successful registration");
+    assert!(err.to_string().contains("HTTP 307"), "{err}");
+    assert_eq!(
+        foreign_hits.load(Ordering::SeqCst),
+        0,
+        "registration secrets must not reach the redirect authority"
+    );
+
+    origin_server.abort();
+    foreign_server.abort();
+}
+
 #[test]
 fn interaction_reads_null_and_missing_fields_as_empty() {
     let it: crate::oob::OobInteraction =
