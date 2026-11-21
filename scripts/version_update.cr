@@ -224,7 +224,11 @@ puts "  #{OUTPUT_DOC.ljust(46)} #{output_v || "Not found"}"
 puts "  #{OUTPUT_DOC_KO.ljust(46)} #{output_ko_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v, install_ko_v, output_v, output_ko_v].compact
+versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v, install_ko_v, output_v, output_ko_v]
+if versions.any?(&.nil?)
+  puts "One or more required versions could not be read."
+  exit 1
+end
 unique = versions.uniq
 
 if unique.size > 1
@@ -232,7 +236,7 @@ if unique.size > 1
   puts
 end
 
-current = cargo_v || lock_v || snap_v || aur_v || docs_v || install_v || install_ko_v || output_v || output_ko_v || "unknown"
+current = cargo_v
 puts "Current: #{current}"
 print "New version (Enter to cancel): "
 input = gets
@@ -260,21 +264,21 @@ ok = 0
 total = 0
 
 [
-  {CARGO_TOML, ->{ update_cargo_toml(new_version) }, !cargo_v.nil?},
-  {CARGO_LOCK, ->{ update_cargo_lock(new_version) }, !lock_v.nil?},
-  {SNAP_YAML, ->{ update_snap(new_version) }, !snap_v.nil?},
-  {AUR_PKGBUILD, ->{ update_aur(new_version) }, !aur_v.nil?},
-  {DOCS_DATA, ->{ update_docs_data(new_version) }, !docs_v.nil?},
-  {INSTALL_DOC, ->{ update_install_doc(INSTALL_DOC, new_version) }, !install_v.nil?},
-  {INSTALL_DOC_KO, ->{ update_install_doc(INSTALL_DOC_KO, new_version) }, !install_ko_v.nil?},
-  {OUTPUT_DOC, ->{ update_output_doc(OUTPUT_DOC, new_version) }, !output_v.nil?},
-  {OUTPUT_DOC_KO, ->{ update_output_doc(OUTPUT_DOC_KO, new_version) }, !output_ko_v.nil?},
+  {CARGO_TOML, cargo_v, ->{ update_cargo_toml(new_version) }},
+  {CARGO_LOCK, lock_v, ->{ update_cargo_lock(new_version) }},
+  {SNAP_YAML, snap_v, ->{ update_snap(new_version) }},
+  {AUR_PKGBUILD, aur_v, ->{ update_aur(new_version) }},
+  {DOCS_DATA, docs_v, ->{ update_docs_data(new_version) }},
+  {INSTALL_DOC, install_v, ->{ update_install_doc(INSTALL_DOC, new_version) }},
+  {INSTALL_DOC_KO, install_ko_v, ->{ update_install_doc(INSTALL_DOC_KO, new_version) }},
+  {OUTPUT_DOC, output_v, ->{ update_output_doc(OUTPUT_DOC, new_version) }},
+  {OUTPUT_DOC_KO, output_ko_v, ->{ update_output_doc(OUTPUT_DOC_KO, new_version) }},
 ].each do |tuple|
-  path, fn, present = tuple
-  next unless present
+  path, version, update = tuple
+  next if version == new_version
   total += 1
   print "  #{path.ljust(46)} "
-  if fn.call
+  if update.call
     puts "ok"
     ok += 1
   else
