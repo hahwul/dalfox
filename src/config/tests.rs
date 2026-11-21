@@ -410,6 +410,9 @@ fn test_load_path_creates_missing_and_falls_back_across_formats() {
         "the extension's format names the error: {err}"
     );
 
+    let err = load_path(&bad.join("config.toml")).expect_err("parent is a regular file");
+    assert!(err.to_string().contains("could not be created"), "{err}");
+
     let _ = std::fs::remove_dir_all(base);
 }
 

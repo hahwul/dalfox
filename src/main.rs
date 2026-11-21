@@ -378,27 +378,13 @@ async fn main() {
     // explicit-`--config` path only — the implicit default-path init
     // (`load_or_init`, `cli.config == None`) stays quiet on purpose so a
     // first-time user isn't nagged about their bootstrapped config.
-    //
-    // The write itself is best-effort (`let _ = std::fs::write(..)`), so the
-    // notice checks the path instead of assuming success: `--config` pointing
-    // into a directory that does not exist, or one the process cannot write,
-    // used to report "created it with a default template" for a file that was
-    // never written — sending the operator to look at a path with nothing in
-    // it. Report what actually happened on disk.
     if let (Some(cfg_path), Ok(lr)) = (&cli.config, &config_load)
         && lr.created
     {
-        if lr.path.exists() {
-            eprintln!(
-                "Notice: --config {} did not exist — created it with a default template and ran with built-in defaults (check the path if you meant to load an existing config)",
-                cfg_path
-            );
-        } else {
-            eprintln!(
-                "Warning: --config {} did not exist and could not be created — ran with built-in defaults (check the path if you meant to load an existing config)",
-                cfg_path
-            );
-        }
+        eprintln!(
+            "Notice: --config {} did not exist — created it with a default template and ran with built-in defaults (check the path if you meant to load an existing config)",
+            cfg_path
+        );
     }
 
     // Config values are deserialized straight into `Config` and never pass
