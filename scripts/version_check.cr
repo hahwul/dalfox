@@ -3,7 +3,7 @@
 # docs/data/dalfox.json, and both language variants of
 # docs/content/getting-started/installation.md — EN and .ko.md — and the
 # sample envelopes in docs/content/guide/output.md + .ko.md).
-# Exits non-zero when they disagree so it can gate a release.
+# Exits non-zero when a version is missing or disagrees so it can gate a release.
 #
 # flake.nix is deliberately absent: it reads the version out of Cargo.toml at
 # evaluation time (`builtins.fromTOML`), so it cannot drift and has nothing to
@@ -115,10 +115,10 @@ puts "#{OUTPUT_DOC.ljust(46)} #{output_v || "Not found"}"
 puts "#{OUTPUT_DOC_KO.ljust(46)} #{output_ko_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v, install_ko_v, output_v, output_ko_v].compact
+versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v, install_ko_v, output_v, output_ko_v]
 
-if versions.empty?
-  puts "No versions found!"
+if versions.any?(&.nil?)
+  puts "One or more required versions could not be read."
   exit 1
 end
 
