@@ -63,6 +63,7 @@ hyper-util = { version = "0.1", default-features = false, features = ["tokio", "
 sha2 = "0.11"
 hex = "0.4"
 regex = "1"
+same-file = "1"
 rmcp = { version = "3.0.1", features = ["server", "macros"] }
 schemars = { version = "1", features = ["derive"] }
 oxc_parser = "0.133.0"

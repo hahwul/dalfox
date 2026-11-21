@@ -140,6 +140,8 @@ The hash also covers Dalfox's major version and every other scan option, so an u
 
 The file is append-only JSONL: one header line, then one line per target. A hard kill can at worst tear the final line, which is skipped on read while every complete record before it still counts. A target whose outcome is unchanged from the last run is not re-recorded, so a permanently unreachable host does not grow the file once per run.
 
+Use separate files for `--state-file` and `--output` to preserve the resume records when writing a report.
+
 `--dry-run` and `--only-discovery` open the file **read-only**: their plan reflects the resume, but they send no attack payloads and complete nothing, so they never create, extend, or move the file. Estimating a `--deep-scan` run with `--dry-run` cannot lose your progress. Every envelope that applies the filter (scan, dry-run, only-discovery, Markdown) carries a `resumed` block with the state-file path and how many targets were skipped, so a short report from a resumed run is never mistaken for full coverage of the input list.
 
 CLI only: `dalfox server` and MCP run one scan per job with their own lifecycle, and never resume a previous process's work.

@@ -1013,6 +1013,15 @@ fn write_report_file(path: &str, content: &str) -> std::io::Result<()> {
 fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
     let mut output_write_failed = false;
     if let Some(output_path) = &args.output {
+        // The scan may have created a new state file since startup validation.
+        if super::startup::output_conflicts_with_state(args) {
+            super::emit_error(
+                &args.format,
+                crate::cmd::error_codes::INVALID_INPUT_TYPE,
+                super::startup::OUTPUT_STATE_CONFLICT,
+            );
+            return true;
+        }
         let diagnostic_path = crate::utils::log::sanitize_log_message(output_path);
         // Surface `..` traversal so the operator notices before a
         // pipeline silently writes into a parent directory. We don't
