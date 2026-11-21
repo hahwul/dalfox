@@ -691,7 +691,7 @@ impl ScanConfig {
 /// input surface. Shared with the `--config` CLI path in `main`.
 pub const MAX_CONFIG_BYTES: u64 = 1 << 20; // 1 MiB
 
-/// An *existing* default-path config file that could not be read or parsed.
+/// A default-path config file that could not be accessed or parsed.
 /// Kept distinct from "no HOME" / "config dir not creatable" so the caller can
 /// warn about the former only: those are environment, not a file the operator
 /// edited. `detail` is already value-free (see [`parse_config`]).
@@ -734,6 +734,15 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
 
     let toml_path = base_dir.join("config.toml");
     let json_path = base_dir.join("config.json");
+    let config_exists = |p: &Path| match fs::symlink_metadata(p) {
+        // A symlink is a selected config even when its target cannot be read.
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(ConfigFileError {
+            path: p.to_path_buf(),
+            detail: e.to_string(),
+        }),
+    };
     let read = |p: &Path| crate::utils::fs::read_bounded(p, MAX_CONFIG_BYTES, "config file");
     let load_existing = |p: &Path, is_json: bool| {
         read(p)
@@ -745,9 +754,9 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
             })
     };
 
-    let ((config, unknown_keys), path, created) = if toml_path.exists() {
+    let ((config, unknown_keys), path, created) = if config_exists(&toml_path)? {
         (load_existing(&toml_path, false)?, toml_path, false)
-    } else if json_path.exists() {
+    } else if config_exists(&json_path)? {
         (load_existing(&json_path, true)?, json_path, false)
     } else {
         // Neither exists: create TOML by default
