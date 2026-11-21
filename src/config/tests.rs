@@ -416,6 +416,40 @@ fn test_load_path_creates_missing_and_falls_back_across_formats() {
     let _ = std::fs::remove_dir_all(base);
 }
 
+#[test]
+fn test_parse_config_rejects_positional_json_arrays() {
+    let scan = serde_json::to_value(ScanConfig::default()).expect("serialize scan config");
+    let field_count = scan.as_object().expect("scan config is an object").len();
+    let positional = serde_json::Value::Array(vec![serde_json::Value::Null; field_count]);
+    let nested_array = format!("{{\n  \"scan\": {positional}\n}}");
+    for content in ["\n  [{\"silence\":true}]", nested_array.as_str()] {
+        let error = parse_config(content, true).expect_err("JSON config requires named fields");
+        assert!(
+            error.starts_with("invalid JSON config at line 2, column "),
+            "{error}"
+        );
+        assert!(!error.contains("silence"));
+    }
+}
+
+#[test]
+fn test_parse_named_json_fields_preserves_null_and_duplicate_checks() {
+    let (config, keys) = parse_config(r#"{"scan":null}"#, true).expect("explicit null scan config");
+    assert!(config.scan.is_none());
+    assert!(keys.is_empty());
+
+    let error = parse_config(
+        "{\n  \"scan\": {\"silence\": true,\n  \"silence\": false}\n}",
+        true,
+    )
+    .expect_err("duplicate scan fields remain invalid");
+    assert!(
+        error.starts_with("invalid JSON config at line 3"),
+        "{error}"
+    );
+    assert!(!error.contains("silence"));
+}
+
 #[cfg(unix)]
 #[test]
 fn newly_created_config_is_not_group_or_world_readable() {

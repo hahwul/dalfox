@@ -16,10 +16,12 @@ Notes:
 - Auto-create directory and a TOML template if no config exists.
 */
 
-use serde::{Deserialize, Serialize};
+use serde::de::{MapAccess, Visitor, value::MapAccessDeserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -60,6 +62,37 @@ fn unknown_keys(raw: &serde_json::Value) -> Vec<String> {
     out
 }
 
+/// Deserialize a config table with named fields. Serde's derived struct
+/// visitors also accept positional arrays, which don't belong to the format.
+struct NamedFields<T>(T);
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for NamedFields<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct NamedFieldsVisitor<T>(PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de>> Visitor<'de> for NamedFieldsVisitor<T> {
+            type Value = NamedFields<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a config table with named fields")
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
+                T::deserialize(MapAccessDeserializer::new(map)).map(NamedFields)
+            }
+        }
+
+        deserializer.deserialize_map(NamedFieldsVisitor(PhantomData))
+    }
+}
+
+fn deserialize_scan_config<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ScanConfig>, D::Error> {
+    Option::<NamedFields<ScanConfig>>::deserialize(deserializer)
+        .map(|scan| scan.map(|NamedFields(scan)| scan))
+}
+
 /// Parse `content` as JSON or TOML, trying the format `is_json` names first.
 /// The error names the preferred format and the line / column that failed —
 /// a single mistyped value fails the whole file, so the operator has to be
@@ -72,8 +105,8 @@ fn parse_config(content: &str, is_json: bool) -> Result<(Config, Vec<String>), S
         )
     };
     let json = || {
-        serde_json::from_str::<Config>(content)
-            .map(|c| (c, serde_json::from_str(content).unwrap_or_default()))
+        serde_json::from_str::<NamedFields<Config>>(content)
+            .map(|NamedFields(config)| (config, serde_json::from_str(content).unwrap_or_default()))
             .map_err(|e| at("JSON", e.line(), e.column()))
     };
     let toml = || {
@@ -97,6 +130,7 @@ fn parse_config(content: &str, is_json: bool) -> Result<(Config, Vec<String>), S
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     // Expand with more top-level settings if needed (e.g., logging)
+    #[serde(default, deserialize_with = "deserialize_scan_config")]
     pub scan: Option<ScanConfig>,
 }
 
