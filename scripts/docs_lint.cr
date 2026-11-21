@@ -130,10 +130,9 @@ class Page
     raw.scan(/"([^"]*)"/).map(&.[1])
   end
 
-  # Body with fenced blocks and inline code spans blanked out (newlines kept so
-  # line numbers still line up). Everything that inspects *live* markup — the
-  # script, asset, link, and heading scans — works on this, because
-  # `` `<script>` `` in a payload table is documentation, not markup.
+  # Inline code is visible in heading text, but it does not contain live links,
+  # assets, or HTML. Keep both views with the original line numbers.
+  @unfenced : String?
   @live : String?
 
   INLINE_CODE_SPAN = /
@@ -144,8 +143,8 @@ class Page
     (?<!`) \1 (?!`)   # Close at a complete run of the same length.
   /x
 
-  def live_body : String
-    @live ||= begin
+  private def unfenced_body : String
+    @unfenced ||= begin
       buf = String::Builder.new
       fence = nil
       @body.each_line(chomp: false) do |line|
@@ -160,14 +159,20 @@ class Page
         elsif candidate && (candidate[1][0] == '~' || !candidate[2].includes?('`'))
           fence = candidate[1]
         else
-          # Blank the inside of every inline code span, keeping the length so
-          # column offsets in a report still point at the right place.
-          buf << line.gsub(INLINE_CODE_SPAN) { |m| " " * m.size }
+          buf << line
           next
         end
         buf << '\n'
       end
       buf.to_s
+    end
+  end
+
+  def live_body : String
+    @live ||= String.build do |buf|
+      unfenced_body.each_line(chomp: false) do |line|
+        buf << line.gsub(INLINE_CODE_SPAN) { |m| " " * m.size }
+      end
     end
   end
 
@@ -178,7 +183,7 @@ class Page
   def anchors : Set(String)
     @anchors ||= begin
       set = Set(String).new
-      live_body.each_line do |line|
+      unfenced_body.each_line do |line|
         # `#[#]{0,5}` rather than `#{1,6}`: the latter is Crystal string
         # interpolation inside a regex literal, not a repetition count.
         if m = line.match(/^ {0,3}(#[#]{0,5})[ \t]+(.+?)[ \t]*#*[ \t]*$/)
@@ -198,12 +203,16 @@ module Docs
   # i.e. markup stripped, punctuation dropped, whitespace runs → one hyphen,
   # Unicode letters preserved (Korean headings slug to Korean anchors).
   def self.slugify(text : String) : String
-    s = text.strip
+    # Code is literal heading text, including underscores and any apparent
+    # Markdown link syntax within the span.
+    s = text.strip.gsub(Page::INLINE_CODE_SPAN) do |code|
+      code.gsub(/[_\/\\]+/, "-").gsub(/[^\p{L}\p{N}\s\-]/, "")
+    end
     s = s.gsub(/!?\[([^\]]*)\]\([^)]*\)/, "\\1") # links/images → label
     s = s.gsub(/[`*_~]/, "")
     s = s.downcase
     s = s.gsub(/[^\p{L}\p{N}\s\-]/, "")
-    s = s.gsub(/\s+/, "-")
+    s = s.gsub(/[\s-]+/, "-")
     s.strip('-')
   end
 

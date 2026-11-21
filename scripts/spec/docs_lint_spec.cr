@@ -52,4 +52,44 @@ describe "docs_lint.cr" do
       FileUtils.rm_rf(fixture)
     end
   end
+
+  it "keeps inline code in heading slugs and ignores anchors inside examples" do
+    script = File.expand_path("../docs_lint.cr", __DIR__)
+    fixture = File.tempname("dalfox-docs-headings-", nil)
+    Dir.mkdir(fixture, 0o700)
+    begin
+      content = File.join(fixture, "content")
+      Dir.mkdir(content)
+      File.write(File.join(content, "anchors.md"), <<-'MD')
+        ## Open `spec`
+        [Heading](#open-spec)
+        ## ``status``
+        [Code-only heading](#status)
+        <div id="real-id"></div>
+        [Explicit ID](#real-id)
+        Example: ``<div id="quoted-id"></div>``.
+        [Invalid example ID](#quoted-id)
+        ```markdown
+        ## Fake `heading`
+        ```
+        [Invalid fenced heading](#fake-heading)
+        ## ``user_profile``
+        [Code identifier](#user-profile)
+        ## Literal `[name](url)`
+        [Code resembling a link](#literal-nameurl)
+        ## Print `--all`
+        [Flag in a heading](#print-all)
+        MD
+
+      result = Sh.run("crystal", ["run", script], env: {"DOCS_DIR" => fixture, "DOCS_LINT_ONLY" => "links"})
+      result.status.should eq(1)
+      %w[open-spec status real-id user-profile literal-nameurl print-all].each do |slug|
+        result.stdout.should_not contain("#" + slug)
+      end
+      result.stdout.should contain("anchors.md:8 → #quoted-id")
+      result.stdout.should contain("anchors.md:12 → #fake-heading")
+    ensure
+      FileUtils.rm_rf(fixture)
+    end
+  end
 end
