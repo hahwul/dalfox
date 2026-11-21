@@ -379,11 +379,7 @@ session_check = "(session-regex-secret"
 
 #[test]
 fn test_uncreatable_config_path_warns_instead_of_claiming_creation() {
-    // The scaffold write is best-effort (`let _ = std::fs::write(..)`), so the
-    // notice has to describe what actually landed on disk. A `--config` path
-    // whose parent is a regular file cannot be created on any platform, and it
-    // used to still report "created it with a default template" — sending the
-    // operator to inspect a path with nothing at it.
+    // A `--config` path whose parent is a regular file cannot be created.
     let dir = unique_temp_dir("cfg-uncreatable");
     let blocker = dir.join("not-a-directory");
     std::fs::write(&blocker, b"x").expect("write blocking regular file");

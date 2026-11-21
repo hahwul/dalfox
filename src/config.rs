@@ -776,20 +776,23 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     })
 }
 
-/// Load an explicit `--config <path>`. A missing file is created (best-effort)
+/// Load an explicit `--config <path>`. A missing file is created
 /// from the default template — JSON for a `.json` extension, TOML otherwise —
 /// and reported as `created`. An existing file is parsed in the format its
 /// extension names first, then the other one.
 pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
-    if let Some(parent) = p.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
     let is_json = p
         .extension()
         .and_then(|s| s.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("json"));
     let path = p.to_path_buf();
     if !p.exists() {
+        let creation_error = |error: io::Error| {
+            io::Error::new(error.kind(), format!("could not be created: {error}"))
+        };
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent).map_err(creation_error)?;
+        }
         let template = if is_json {
             DEFAULT_JSON_TEMPLATE
         } else {
@@ -802,7 +805,7 @@ pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
         };
         match create_config_file(p) {
             Ok(mut f) => {
-                let _ = f.write_all(template.as_bytes());
+                f.write_all(template.as_bytes()).map_err(creation_error)?;
                 return Ok(LoadResult {
                     config,
                     path,
@@ -811,14 +814,7 @@ pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
                 });
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(_) => {
-                return Ok(LoadResult {
-                    config,
-                    path,
-                    created: true,
-                    unknown_keys: Vec::new(),
-                });
-            }
+            Err(e) => return Err(creation_error(e).into()),
         }
     }
     // Bound the read so `--config /dev/zero` (or any other non-regular file
