@@ -80,6 +80,10 @@ struct AppState {
     realworld_cases: Arc<HashMap<u32, MockCase>>,
 }
 
+/// An alphanumeric stand-in for the discovery probe marker, used to ask
+/// whether a case's transform would leave such a marker readable.
+const DISCOVERY_MARKER_SAMPLE: &str = "dlxmarker0123";
+
 // Helpers for mock encoding behaviors
 fn html_named_encode_all(input: &str) -> String {
     input
@@ -1518,7 +1522,10 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
     // Advanced/evasive contexts: encoding bypass, multilayer contexts, and unicode edge cases.
     let case_ids = vec![191, 193, 194, 199, 205, 226, 230, 234, 239, 247, 250, 254];
 
+    // Counted over the cases labelled exploitable only: the list also holds
+    // safe encoded echoes, which a correct scan leaves undetected.
     let mut detected = 0usize;
+    let mut expected_total = 0usize;
     let mut mismatches = Vec::new();
 
     for case_id in case_ids {
@@ -1541,8 +1548,11 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
 
         let results = run_scan_test(addr, "query", case_id, config).await;
         let case_detected = !results.is_empty();
-        if case_detected {
-            detected += 1;
+        if case.expected_detection {
+            expected_total += 1;
+            if case_detected {
+                detected += 1;
+            }
         }
         if case_detected != case.expected_detection {
             mismatches.push(format!(
@@ -1552,8 +1562,7 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
         }
     }
 
-    let total = 12usize;
-    let detection_rate = detected as f64 / total as f64;
+    let detection_rate = detected as f64 / expected_total as f64;
 
     assert!(
         mismatches.len() <= 2,
@@ -1565,7 +1574,7 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
         detection_rate >= 0.80,
         "advanced query context detection rate below baseline: {}/{} ({:.1}%)",
         detected,
-        total,
+        expected_total,
         detection_rate * 100.0
     );
 }
@@ -1922,7 +1931,6 @@ async fn test_header_reflection_advanced_xss_coverage_v2() {
 
     // Advanced/evasive header contexts.
     let case_ids = vec![42, 43, 45, 47, 48, 50, 34, 40];
-    let mut reflected_count = 0usize;
     let mut mismatches = Vec::new();
     dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
@@ -1945,9 +1953,6 @@ async fn test_header_reflection_advanced_xss_coverage_v2() {
         let text = resp.text().await.expect("header text");
         let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
 
-        if reflected {
-            reflected_count += 1;
-        }
         // Server self-check: the echo, not the detection label.
         if !reflected {
             mismatches.push(format!(
@@ -1957,20 +1962,10 @@ async fn test_header_reflection_advanced_xss_coverage_v2() {
         }
     }
 
-    let total = 8usize;
-    let reflection_rate = reflected_count as f64 / total as f64;
-
     assert!(
         mismatches.is_empty(),
         "advanced header cases that did not echo their input:\n{}",
         mismatches.join("\n")
-    );
-    assert!(
-        reflection_rate >= 0.90,
-        "advanced header context reflection rate below baseline: {}/{} ({:.1}%)",
-        reflected_count,
-        total,
-        reflection_rate * 100.0
     );
 }
 
@@ -2002,10 +1997,17 @@ async fn test_cookie_reflection_diverse_xss_contexts_v2() {
             skip_reflection_path: true,
         })
         .await;
-        if found != case.expected_detection {
+        // Discovery asks "does the probe marker come back?", not "is this
+        // exploitable?": a URL-encoded echo returns an alphanumeric marker
+        // unchanged and is still a safe reflection. So the expectation is
+        // whether the case's transform leaves the marker readable, not the
+        // detection label.
+        let echoes_marker = apply_reflection(&case.reflection, DISCOVERY_MARKER_SAMPLE)
+            .contains(DISCOVERY_MARKER_SAMPLE);
+        if found != echoes_marker {
             failed.push(format!(
-                "case {} ({}) expected_detection={} actual_discovery={}",
-                case.id, case.name, case.expected_detection, found
+                "case {} ({}) marker_survives_transform={} actual_discovery={}",
+                case.id, case.name, echoes_marker, found
             ));
         }
     }
@@ -2049,10 +2051,13 @@ async fn test_cookie_reflection_advanced_xss_coverage_v2() {
         if found {
             found_count += 1;
         }
-        if found != case.expected_detection {
+        // See `test_cookie_reflection_diverse_xss_contexts_v2`.
+        let echoes_marker = apply_reflection(&case.reflection, DISCOVERY_MARKER_SAMPLE)
+            .contains(DISCOVERY_MARKER_SAMPLE);
+        if found != echoes_marker {
             mismatches.push(format!(
-                "case {} ({}) expected_detection={} actual_discovery={}",
-                case.id, case.name, case.expected_detection, found
+                "case {} ({}) marker_survives_transform={} actual_discovery={}",
+                case.id, case.name, echoes_marker, found
             ));
         }
     }
@@ -2061,9 +2066,8 @@ async fn test_cookie_reflection_advanced_xss_coverage_v2() {
     let discovery_rate = found_count as f64 / total as f64;
 
     assert!(
-        mismatches.len() <= 2,
-        "advanced cookie context mismatches (>{}):\n{}",
-        2,
+        mismatches.is_empty(),
+        "advanced cookie context discovery mismatches:\n{}",
         mismatches.join("\n")
     );
     assert!(
@@ -2126,7 +2130,10 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let case_ids = vec![25, 26, 27, 29, 30, 31, 32, 33];
+    // Counted over the cases labelled exploitable only: the list also holds
+    // safe encoded echoes, which a correct scan leaves undetected.
     let mut detected = 0usize;
+    let mut expected_total = 0usize;
     let mut mismatches = Vec::new();
 
     for case_id in case_ids {
@@ -2148,8 +2155,11 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
 
         let results = run_scan_test(addr, "path", case_id, config).await;
         let case_detected = !results.is_empty();
-        if case_detected {
-            detected += 1;
+        if case.expected_detection {
+            expected_total += 1;
+            if case_detected {
+                detected += 1;
+            }
         }
         if case_detected != case.expected_detection {
             mismatches.push(format!(
@@ -2159,8 +2169,7 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
         }
     }
 
-    let total = 8usize;
-    let detection_rate = detected as f64 / total as f64;
+    let detection_rate = detected as f64 / expected_total as f64;
 
     assert!(
         mismatches.len() <= 2,
@@ -2172,7 +2181,7 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
         detection_rate >= 0.75,
         "advanced path context detection rate below baseline: {}/{} ({:.1}%)",
         detected,
-        total,
+        expected_total,
         detection_rate * 100.0
     );
 }
@@ -2229,7 +2238,6 @@ async fn test_body_reflection_advanced_xss_coverage_v2() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let case_ids = vec![27, 28, 29, 30, 32, 34, 35, 36];
-    let mut reflected_count = 0usize;
     let mut mismatches = Vec::new();
     dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
@@ -2252,9 +2260,6 @@ async fn test_body_reflection_advanced_xss_coverage_v2() {
         let text = resp.text().await.expect("body text");
         let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
 
-        if reflected {
-            reflected_count += 1;
-        }
         // Server self-check: the echo, not the detection label.
         if !reflected {
             mismatches.push(format!(
@@ -2264,20 +2269,10 @@ async fn test_body_reflection_advanced_xss_coverage_v2() {
         }
     }
 
-    let total = 8usize;
-    let reflection_rate = reflected_count as f64 / total as f64;
-
     assert!(
         mismatches.is_empty(),
         "advanced body cases that did not echo their input:\n{}",
         mismatches.join("\n")
-    );
-    assert!(
-        reflection_rate >= 0.90,
-        "advanced body context reflection rate below baseline: {}/{} ({:.1}%)",
-        reflected_count,
-        total,
-        reflection_rate * 100.0
     );
 }
 

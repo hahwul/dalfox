@@ -233,7 +233,7 @@ expected_detection = true
    the input?". A case that echoes the input in an inert form — entity-escaped or
    Base64-encoded into element text, for example — is `false`: a finding there
    would be a false positive. `scripts/effectiveness_snapshot.cr` scores every
-   case against this label.
+   self-contained case (no `filter`, no `page_template`) against this label.
 5. **Verify manually**: Run dalfox manually against the case to verify
 
 ## Debugging Failed Tests

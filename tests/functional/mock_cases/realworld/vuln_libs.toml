@@ -2,9 +2,10 @@
 #
 # The page serves a library <script> tag in the initial response; the scanner's
 # preflight body is scanned for known-vulnerable versions, emitting an
-# informational (CWE-1104) finding. The reflected `{input}` lands in a
-# <textarea> (a safe, non-executing context) so these cases isolate the library
-# finding from any XSS finding.
+# informational (CWE-1104) finding. The reflected `{input}` lands raw in a
+# <textarea>, which `</textarea>` breaks out of, so both pages are also a real
+# reflected XSS. `test_vuln_library_detection_v2` isolates the library finding
+# by scanning with `skip_xss_scanning` / `skip_ast_analysis` (`run_libscan`).
 #
 # IDs use the 9100+ block to stay clear of the existing realworld corpus.
 
@@ -23,8 +24,8 @@ name = "current_lib_jquery_3_7_1"
 description = "Serves current jQuery 3.7.1 -> no library finding"
 handler_type = "realworld"
 reflection = "<script src=\"/static/js/jquery-3.7.1.min.js\"></script><textarea>{input}</textarea>"
-# The library is current, so the vulnerable-library check must stay quiet
-# (`test_vuln_library_detection_v2` asserts that by finding type). The
-# reflection itself is a raw `</textarea>` breakout, which is a real XSS.
+# The library is current, so the vulnerable-library check must stay quiet;
+# `test_vuln_library_detection_v2` asserts that. The label is about XSS, and
+# the reflection is a raw `</textarea>` breakout.
 expected_detection = true
 category = "vuln_lib"
