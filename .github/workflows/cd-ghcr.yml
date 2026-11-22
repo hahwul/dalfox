@@ -1,80 +1,175 @@
 ---
 name: GHCR Publish
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
+# Publishes ghcr.io/hahwul/dalfox: `main` from the default branch, and
+# `v<major>.<minor>.<patch>` + `latest` from a published release.
+#
+# Each platform builds on a runner of its own architecture and pushes its image
+# by digest; `merge` then stitches the digests into one multi-arch tag. The
+# arm64 half used to compile under QEMU on an amd64 runner, where an LTO release
+# build took ~45 minutes of a ~100 minute run.
 on:
   push:
     branches: [main]
+    # Only what reaches the image: the crate, its build script, the recipe.
+    # A docs-only or CI-only merge does not change the binary.
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - "src/**"
+      # The Dockerfile and its Dockerfile.dockerignore (which decides what
+      # `COPY . .` sees).
+      - "packaging/docker/**"
+      - .github/workflows/cd-ghcr.yml
   release:
     types: [published]
   workflow_dispatch:
 
+# A newer push to main supersedes an in-flight build of an older one — only the
+# latest `main` image matters. Release and manual runs each get a group of
+# their own, so nothing cancels or displaces them.
+concurrency:
+  group: ghcr-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 env:
-  # Use docker.io for Docker Hub if empty
   REGISTRY: ghcr.io
   # github.repository as <account>/<repo>
   IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
-      # This is used to complete the identity challenge
-      # with sigstore/fulcio when running outside of PRs.
-      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Install the cosign tool except on PR
-      # https://github.com/sigstore/cosign-installer
-      - name: Install cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v4.1.3
-        with:
-          cosign-release: v2.1.1
-
-      # Using QEME for multiple platforms
-      # https://github.com/docker/build-push-action?tab=readme-ov-file#usage
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      # Workaround: https://github.com/docker/build-push-action/issues/461
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@v4
 
-      # Login against a Docker registry except on PR
-      # https://github.com/docker/login-action
       - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
+      # Labels only — the tags are applied once, to the merged manifest.
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      # Build and push Docker image with Buildx (don't push on PR)
-      # https://github.com/docker/build-push-action
-      - name: Build and push Docker image
-        id: build-and-push
+      # The cache scope is per architecture and stable across commits, so the
+      # dependency layer (`cargo chef cook`) is reused until Cargo.lock changes.
+      # It was keyed on the commit SHA before, which never hits: every push
+      # rebuilt every dependency and left a ~1 GB cache entry nothing would read.
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: packaging/docker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64, linux/arm64
-          cache-from: type=gha,scope=${{ github.sha }}
-          cache-to: type=gha,mode=max,scope=${{ github.sha }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=ghcr-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ghcr-${{ matrix.arch }}
+
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish multi-arch manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Default tag rules: the branch name on a push (`main`), the tag name plus
+      # `latest` on a release.
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Create and push the manifest list
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          # Both architectures or nothing: a one-platform `main` would look
+          # healthy and fail only for whoever pulls the missing half.
+          count=$(find . -maxdepth 1 -type f | wc -l)
+          if [[ "$count" -ne 2 ]]; then
+            echo "::error::Expected 2 platform digests, found $count."
+            exit 1
+          fi
+          mapfile -t tags < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          if [[ "${#tags[@]}" -eq 0 ]]; then
+            echo '::error::No image tags were generated for this ref.'
+            exit 1
+          fi
+          args=()
+          for tag in "${tags[@]}"; do
+            args+=(-t "$tag")
+          done
+          for digest in *; do
+            args+=("$IMAGE@sha256:$digest")
+          done
+          docker buildx imagetools create "${args[@]}"
+
+      - name: Inspect the published image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: docker buildx imagetools inspect "$IMAGE:$VERSION"
