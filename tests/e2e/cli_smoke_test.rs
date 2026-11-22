@@ -1409,14 +1409,9 @@ fn http_once(port: u16, request: &str) -> String {
 fn test_server_outlives_its_log_reader() {
     use std::io::{BufRead, BufReader};
 
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("bind probe listener")
-        .local_addr()
-        .expect("probe addr")
-        .port();
     let mut child = KillOnDrop(
         Command::new(env!("CARGO_BIN_EXE_dalfox"))
-            .args(["server", "--port", &port.to_string()])
+            .args(["server", "--port", "0"])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -1431,6 +1426,9 @@ fn test_server_outlives_its_log_reader() {
             "the server never announced its listener"
         );
     }
+    let (_, addr) = line.trim_end().rsplit_once("listening on http://").unwrap();
+    let port = addr.parse::<std::net::SocketAddr>().unwrap().port();
+    assert_ne!(port, 0, "the log must report the assigned port");
     // The reader goes away; every later log line is written to a broken pipe.
     drop(stdout);
 

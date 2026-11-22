@@ -304,11 +304,14 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
     // Announced only now: this line is the operator's "it came up" signal, and
     // logging it before the bind made the last line before a bind error claim
     // success.
-    log(
-        &state,
-        "SERVER",
-        &format!("listening on http://{}", addr_str),
-    );
+    match listener.local_addr() {
+        Ok(bound) => log(&state, "SERVER", &format!("listening on http://{bound}")),
+        Err(e) => log(
+            &state,
+            "WRN",
+            &format!("listener is open but its address is unavailable: {e}"),
+        ),
+    }
     // Graceful shutdown on SIGINT / SIGTERM. axum drains in-flight
     // requests before returning; previously the server ignored Ctrl-C
     // outright and required SIGKILL, leaking any in-flight scans and
