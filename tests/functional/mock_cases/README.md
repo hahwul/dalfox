@@ -26,7 +26,7 @@ name = "my_test_case"               # Short, descriptive identifier
 description = "What vulnerability this tests"
 handler_type = "query"              # Type: query, header, cookie, path, body
 reflection = "<div>{input}</div>"   # How the input is reflected
-expected_detection = true           # Whether Dalfox should detect it
+expected_detection = true           # Whether Dalfox should report a finding (see below)
 
 # Optional fields:
 header_name = "X-Custom"            # For header injection (default: "X-Test")
@@ -228,7 +228,12 @@ expected_detection = true
 1. **Start simple**: Test basic injection before complex bypasses
 2. **One thing at a time**: Each case should test one specific scenario
 3. **Document well**: Use clear descriptions
-4. **Test both positive and negative**: Some cases may set `expected_detection = false`
+4. **Test both positive and negative**: Some cases may set `expected_detection = false`.
+   The label answers "is this reflection exploitable?", not "does the server echo
+   the input?". A case that echoes the input in an inert form — entity-escaped or
+   Base64-encoded into element text, for example — is `false`: a finding there
+   would be a false positive. `scripts/effectiveness_snapshot.cr` scores every
+   self-contained case (no `filter`, no `page_template`) against this label.
 5. **Verify manually**: Run dalfox manually against the case to verify
 
 ## Debugging Failed Tests

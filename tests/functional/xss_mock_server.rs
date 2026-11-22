@@ -80,6 +80,10 @@ struct AppState {
     realworld_cases: Arc<HashMap<u32, MockCase>>,
 }
 
+/// An alphanumeric stand-in for the discovery probe marker, used to ask
+/// whether a case's transform would leave such a marker readable.
+const DISCOVERY_MARKER_SAMPLE: &str = "dlxmarker0123";
+
 // Helpers for mock encoding behaviors
 fn html_named_encode_all(input: &str) -> String {
     input
@@ -1321,8 +1325,17 @@ async fn test_query_reflection_v2() {
     let mut missed_expected_ids = Vec::new();
     let mut false_positive_ids = Vec::new();
     let mut mismatches = Vec::new();
-    // Known coverage gaps in query full corpus (as of current scanner behavior).
-    let known_gap_ids: HashSet<u32> = [3, 4, 193, 194].into_iter().collect();
+    // Known coverage gaps in the query corpus: none. The four ids that used
+    // to sit here (3, 4, 193, 194) were entity-, URL- and Base64-encoded
+    // echoes into element text, which are not exploitable; three of them were
+    // labelled as expected detections.
+    let known_gap_ids: HashSet<u32> = HashSet::new();
+    // Known false positive of *this harness*: it scans with the opt-in
+    // `base64` encoder (see `run_scan_test_counted`). Base64 text has no HTML
+    // specials, so case 2, which only entity-escapes `<>&"'`, echoes the
+    // encoded payload verbatim and the scanner reports it as reflected (`R`).
+    // The default encoders (`url,html`) report nothing on this case.
+    let known_false_positive_ids: HashSet<u32> = [2].into_iter().collect();
 
     for case_id in case_ids {
         let case = state
@@ -1405,10 +1418,11 @@ async fn test_query_reflection_v2() {
         }
     }
 
+    let allowed_mismatches = known_gap_ids.len() + known_false_positive_ids.len();
     assert!(
-        mismatches.len() <= 8,
+        mismatches.len() <= allowed_mismatches,
         "query full corpus mismatches exceeded baseline (>{}):\n{}",
-        8,
+        allowed_mismatches,
         mismatches.join("\n")
     );
     assert!(
@@ -1423,10 +1437,16 @@ async fn test_query_reflection_v2() {
         missed_expected_ids.len(),
         known_gap_ids.len()
     );
+    let unexpected_false_positives: Vec<u32> = false_positive_ids
+        .iter()
+        .copied()
+        .filter(|id| !known_false_positive_ids.contains(id))
+        .collect();
     assert!(
-        false_positive_ids.is_empty(),
-        "query full corpus produced unexpected false positives: {:?}",
-        false_positive_ids
+        unexpected_false_positives.is_empty(),
+        "query full corpus produced unexpected false positives: {:?} (known: {:?})",
+        unexpected_false_positives,
+        known_false_positive_ids
     );
     assert!(
         positive_detection_rate >= 0.95,
@@ -1502,7 +1522,10 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
     // Advanced/evasive contexts: encoding bypass, multilayer contexts, and unicode edge cases.
     let case_ids = vec![191, 193, 194, 199, 205, 226, 230, 234, 239, 247, 250, 254];
 
+    // Counted over the cases labelled exploitable only: the list also holds
+    // safe encoded echoes, which a correct scan leaves undetected.
     let mut detected = 0usize;
+    let mut expected_total = 0usize;
     let mut mismatches = Vec::new();
 
     for case_id in case_ids {
@@ -1525,8 +1548,11 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
 
         let results = run_scan_test(addr, "query", case_id, config).await;
         let case_detected = !results.is_empty();
-        if case_detected {
-            detected += 1;
+        if case.expected_detection {
+            expected_total += 1;
+            if case_detected {
+                detected += 1;
+            }
         }
         if case_detected != case.expected_detection {
             mismatches.push(format!(
@@ -1536,8 +1562,7 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
         }
     }
 
-    let total = 12usize;
-    let detection_rate = detected as f64 / total as f64;
+    let detection_rate = detected as f64 / expected_total as f64;
 
     assert!(
         mismatches.len() <= 2,
@@ -1549,7 +1574,7 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
         detection_rate >= 0.80,
         "advanced query context detection rate below baseline: {}/{} ({:.1}%)",
         detected,
-        total,
+        expected_total,
         detection_rate * 100.0
     );
 }
@@ -1639,16 +1664,14 @@ async fn test_query_reflection_category_baselines_v2() {
             zero_hit_categories.push(category.clone());
         }
 
-        let category_min_rate = match category.as_str() {
-            "encoding_bypass" => 0.85,
-            "html_contexts" => 0.90,
-            _ => 0.95,
-        };
-        let category_max_mismatch = match category.as_str() {
-            "encoding_bypass" => 3usize,
-            "html_contexts" => 3usize,
-            _ => 1usize,
-        };
+        // `encoding_bypass` and `html_contexts` used to get a lower rate and
+        // three allowed mismatches. That slack only absorbed safe encoded
+        // echoes mislabelled as expected detections; with the labels fixed
+        // every category meets the same bar. (`html_contexts` still has one
+        // mismatch: the harness-only Base64 false positive on case 2
+        // described in `test_query_reflection_v2`.)
+        let category_min_rate = 0.95;
+        let category_max_mismatch = 1usize;
 
         assert!(
             positive_detection_rate >= category_min_rate,
@@ -1881,10 +1904,14 @@ async fn test_header_reflection_diverse_xss_contexts_v2() {
         let text = resp.text().await.expect("header text");
         let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
 
-        if reflected != case.expected_detection {
+        // This is a check of the mock server, not of the scanner: every
+        // case must echo its transformed input. `expected_detection` says
+        // whether that echo is exploitable, which is a different question
+        // (an entity-encoded echo is reflected and safe).
+        if !reflected {
             failed.push(format!(
-                "case {} ({}) expected_detection={} actual_reflection={}",
-                case.id, case.name, case.expected_detection, reflected
+                "case {} ({}) did not echo its transformed input",
+                case.id, case.name
             ));
         }
     }
@@ -1904,7 +1931,6 @@ async fn test_header_reflection_advanced_xss_coverage_v2() {
 
     // Advanced/evasive header contexts.
     let case_ids = vec![42, 43, 45, 47, 48, 50, 34, 40];
-    let mut reflected_count = 0usize;
     let mut mismatches = Vec::new();
     dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
@@ -1927,32 +1953,19 @@ async fn test_header_reflection_advanced_xss_coverage_v2() {
         let text = resp.text().await.expect("header text");
         let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
 
-        if reflected {
-            reflected_count += 1;
-        }
-        if reflected != case.expected_detection {
+        // Server self-check: the echo, not the detection label.
+        if !reflected {
             mismatches.push(format!(
-                "case {} ({}) expected_detection={} actual_reflection={}",
-                case.id, case.name, case.expected_detection, reflected
+                "case {} ({}) did not echo its transformed input",
+                case.id, case.name
             ));
         }
     }
 
-    let total = 8usize;
-    let reflection_rate = reflected_count as f64 / total as f64;
-
     assert!(
-        mismatches.len() <= 2,
-        "advanced header context mismatches (>{}):\n{}",
-        2,
+        mismatches.is_empty(),
+        "advanced header cases that did not echo their input:\n{}",
         mismatches.join("\n")
-    );
-    assert!(
-        reflection_rate >= 0.90,
-        "advanced header context reflection rate below baseline: {}/{} ({:.1}%)",
-        reflected_count,
-        total,
-        reflection_rate * 100.0
     );
 }
 
@@ -1984,10 +1997,17 @@ async fn test_cookie_reflection_diverse_xss_contexts_v2() {
             skip_reflection_path: true,
         })
         .await;
-        if found != case.expected_detection {
+        // Discovery asks "does the probe marker come back?", not "is this
+        // exploitable?": a URL-encoded echo returns an alphanumeric marker
+        // unchanged and is still a safe reflection. So the expectation is
+        // whether the case's transform leaves the marker readable, not the
+        // detection label.
+        let echoes_marker = apply_reflection(&case.reflection, DISCOVERY_MARKER_SAMPLE)
+            .contains(DISCOVERY_MARKER_SAMPLE);
+        if found != echoes_marker {
             failed.push(format!(
-                "case {} ({}) expected_detection={} actual_discovery={}",
-                case.id, case.name, case.expected_detection, found
+                "case {} ({}) marker_survives_transform={} actual_discovery={}",
+                case.id, case.name, echoes_marker, found
             ));
         }
     }
@@ -2031,10 +2051,13 @@ async fn test_cookie_reflection_advanced_xss_coverage_v2() {
         if found {
             found_count += 1;
         }
-        if found != case.expected_detection {
+        // See `test_cookie_reflection_diverse_xss_contexts_v2`.
+        let echoes_marker = apply_reflection(&case.reflection, DISCOVERY_MARKER_SAMPLE)
+            .contains(DISCOVERY_MARKER_SAMPLE);
+        if found != echoes_marker {
             mismatches.push(format!(
-                "case {} ({}) expected_detection={} actual_discovery={}",
-                case.id, case.name, case.expected_detection, found
+                "case {} ({}) marker_survives_transform={} actual_discovery={}",
+                case.id, case.name, echoes_marker, found
             ));
         }
     }
@@ -2043,9 +2066,8 @@ async fn test_cookie_reflection_advanced_xss_coverage_v2() {
     let discovery_rate = found_count as f64 / total as f64;
 
     assert!(
-        mismatches.len() <= 2,
-        "advanced cookie context mismatches (>{}):\n{}",
-        2,
+        mismatches.is_empty(),
+        "advanced cookie context discovery mismatches:\n{}",
         mismatches.join("\n")
     );
     assert!(
@@ -2108,7 +2130,10 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let case_ids = vec![25, 26, 27, 29, 30, 31, 32, 33];
+    // Counted over the cases labelled exploitable only: the list also holds
+    // safe encoded echoes, which a correct scan leaves undetected.
     let mut detected = 0usize;
+    let mut expected_total = 0usize;
     let mut mismatches = Vec::new();
 
     for case_id in case_ids {
@@ -2130,8 +2155,11 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
 
         let results = run_scan_test(addr, "path", case_id, config).await;
         let case_detected = !results.is_empty();
-        if case_detected {
-            detected += 1;
+        if case.expected_detection {
+            expected_total += 1;
+            if case_detected {
+                detected += 1;
+            }
         }
         if case_detected != case.expected_detection {
             mismatches.push(format!(
@@ -2141,8 +2169,7 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
         }
     }
 
-    let total = 8usize;
-    let detection_rate = detected as f64 / total as f64;
+    let detection_rate = detected as f64 / expected_total as f64;
 
     assert!(
         mismatches.len() <= 2,
@@ -2154,7 +2181,7 @@ async fn test_path_reflection_advanced_xss_coverage_v2() {
         detection_rate >= 0.75,
         "advanced path context detection rate below baseline: {}/{} ({:.1}%)",
         detected,
-        total,
+        expected_total,
         detection_rate * 100.0
     );
 }
@@ -2188,18 +2215,18 @@ async fn test_body_reflection_diverse_xss_contexts_v2() {
         let text = resp.text().await.expect("body text");
         let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
 
-        if reflected != case.expected_detection {
+        // Server self-check: the echo, not the detection label.
+        if !reflected {
             failed.push(format!(
-                "case {} ({}) expected_detection={} actual_reflection={}",
-                case.id, case.name, case.expected_detection, reflected
+                "case {} ({}) did not echo its transformed input",
+                case.id, case.name
             ));
         }
     }
 
     assert!(
-        failed.len() <= 1,
-        "diverse body context mismatches (>{}):\n{}",
-        1,
+        failed.is_empty(),
+        "diverse body cases that did not echo their input:\n{}",
         failed.join("\n")
     );
 }
@@ -2211,7 +2238,6 @@ async fn test_body_reflection_advanced_xss_coverage_v2() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let case_ids = vec![27, 28, 29, 30, 32, 34, 35, 36];
-    let mut reflected_count = 0usize;
     let mut mismatches = Vec::new();
     dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
@@ -2234,32 +2260,19 @@ async fn test_body_reflection_advanced_xss_coverage_v2() {
         let text = resp.text().await.expect("body text");
         let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
 
-        if reflected {
-            reflected_count += 1;
-        }
-        if reflected != case.expected_detection {
+        // Server self-check: the echo, not the detection label.
+        if !reflected {
             mismatches.push(format!(
-                "case {} ({}) expected_detection={} actual_reflection={}",
-                case.id, case.name, case.expected_detection, reflected
+                "case {} ({}) did not echo its transformed input",
+                case.id, case.name
             ));
         }
     }
 
-    let total = 8usize;
-    let reflection_rate = reflected_count as f64 / total as f64;
-
     assert!(
-        mismatches.len() <= 2,
-        "advanced body context mismatches (>{}):\n{}",
-        2,
+        mismatches.is_empty(),
+        "advanced body cases that did not echo their input:\n{}",
         mismatches.join("\n")
-    );
-    assert!(
-        reflection_rate >= 0.90,
-        "advanced body context reflection rate below baseline: {}/{} ({:.1}%)",
-        reflected_count,
-        total,
-        reflection_rate * 100.0
     );
 }
 

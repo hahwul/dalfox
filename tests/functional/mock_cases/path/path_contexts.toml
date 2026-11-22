@@ -14,7 +14,9 @@ name = "html_named_encode"
 description = "HTML entity encoding (named)"
 handler_type = "path"
 reflection = "encoded_html_named"
-expected_detection = true
+# Echoes the input with `<`, `>`, `&` and both quotes entity-escaped into element text
+# (`<div id=out>…</div>`): it renders as text and nothing executes.
+expected_detection = false
 
 [[case]]
 id = 3
@@ -22,7 +24,9 @@ name = "html_hex_lower"
 description = "HTML numeric hex encoding (lowercase)"
 handler_type = "path"
 reflection = "encoded_html_hex_lower"
-expected_detection = true
+# Echoes every character as a numeric HTML entity into element text
+# (`<div id=out>…</div>`): it renders as text and nothing executes.
+expected_detection = false
 
 [[case]]
 id = 4
@@ -30,7 +34,9 @@ name = "html_hex_upper"
 description = "HTML numeric hex encoding (uppercase X)"
 handler_type = "path"
 reflection = "encoded_html_hex_upper"
-expected_detection = true
+# Echoes every character as a numeric HTML entity into element text
+# (`<div id=out>…</div>`): it renders as text and nothing executes.
+expected_detection = false
 
 [[case]]
 id = 5
@@ -46,7 +52,9 @@ name = "base64_encode"
 description = "Base64 encoding"
 handler_type = "path"
 reflection = "encoded_base64"
-expected_detection = true
+# Echoes the input Base64-encoded into element text
+# (`<div id=out>…</div>`): it renders as text and nothing executes.
+expected_detection = false
 
 [[case]]
 id = 7

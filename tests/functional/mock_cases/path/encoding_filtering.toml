@@ -26,7 +26,9 @@ name = "path_base64_encoded"
 description = "Test path injection with Base64 encoding"
 handler_type = "path"
 reflection = "encoded_base64"
-expected_detection = true
+# Echoes the input Base64-encoded into element text
+# (`<div id=out>…</div>`): it renders as text and nothing executes.
+expected_detection = false
 
 [[case]]
 id = 27

@@ -35,7 +35,9 @@ name = "base64_encoded_reflection"
 description = "Test Base64 encoded reflection"
 handler_type = "query"
 reflection = "encoded_base64"
-expected_detection = true
+# Echoes the input Base64-encoded into element text
+# (`<div id=out>…</div>`): it renders as text and nothing executes.
+expected_detection = false
 
 [[case]]
 id = 195
