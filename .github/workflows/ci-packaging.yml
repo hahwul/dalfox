@@ -5,13 +5,27 @@ name: Packaging Build
 # caught #1061, where aws-lc-sys failed to link under Arch's rust toolchain
 # (lld). Each job builds dalfox from source the way a downstream packager
 # does, then smoke-runs the binary.
+#
+# What these jobs mostly guard is the dependency graph, the linker setup and
+# the recipes. Of the 33 failures in the 600 runs before this trigger was
+# narrowed, 32 were snap-store or apt download errors and one recorded no
+# failed job; none was a compile or link error. So the trigger is the inputs
+# most likely to break a packaging build (manifest, lockfile, build script,
+# the recipes), plus a weekly run that builds whatever main is, which also
+# covers a distro toolchain moving underneath an unchanged tree.
+#
+# The cost is deliberate: a source-only change can still break one of these
+# targets (e.g. an `include_str!` of a file the Nix source filter leaves out),
+# and that now shows up in the weekly run or the next manifest change, not on
+# its own PR. A release's version bump touches Cargo.toml and the recipes, so
+# it triggers a run; nothing gates publishing on the result, as before.
 on:
   push:
     branches: [main]
     paths:
       - Cargo.toml
       - Cargo.lock
-      - "**/*.rs"
+      - build.rs
       - packaging/aur/PKGBUILD
       - snap/snapcraft.yaml
       - flake.nix
@@ -22,15 +36,17 @@ on:
     paths:
       - Cargo.toml
       - Cargo.lock
-      - "**/*.rs"
+      - build.rs
       - packaging/aur/PKGBUILD
       - snap/snapcraft.yaml
       - flake.nix
       - flake.lock
       - .github/workflows/ci-packaging.yml
+  schedule:
+    - cron: "0 4 * * 1"
   workflow_dispatch:
 # A new push to a PR cancels the run of the previous one. Every other run
-# (push to main, manual) gets a group of its own and always finishes.
+# (push to main, schedule, manual) gets a group of its own and always finishes.
 concurrency:
   group: ci-packaging-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
