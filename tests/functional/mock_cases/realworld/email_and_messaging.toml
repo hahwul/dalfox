@@ -74,7 +74,9 @@ name = "email_strip_safe"
 description = "Email preview with full tag stripping and encoding - safe"
 handler_type = "realworld"
 reflection = "{input}"
-expected_detection = false
+# The template also echoes into `<a href="mailto:…">`, and this filter leaves
+# quotes alone: `" onfocus=alert(1) autofocus x="` breaks out of the attribute.
+expected_detection = true
 filter = "strip_tags|encode_angles"
 page_template = "email_preview"
 category = "real_world"

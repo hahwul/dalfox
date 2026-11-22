@@ -97,7 +97,10 @@ name = "safe_url_context_protocol_stripped"
 description = "URL context with javascript: and data: protocols stripped plus encoding"
 handler_type = "realworld"
 reflection = "<html><body><a href=\"{input}\">Link</a></body></html>"
-expected_detection = false
+# The filter strips a literal `javascript:` and encodes `<>` and quotes, but not
+# `&`: an entity-encoded `&#x6a;avascript:alert(1)` reaches `href` intact and
+# the browser decodes it there.
+expected_detection = true
 filter = "waf_url_protocol|encode_angles|encode_quotes"
 category = "real_world"
 
@@ -107,7 +110,9 @@ name = "safe_cloudflare_waf"
 description = "Cloudflare-like WAF blocks all common XSS vectors"
 handler_type = "realworld"
 reflection = "<div>{input}</div>"
-expected_detection = false
+# The simulated WAF blocks a literal `javascript:` and on*= handlers but lets
+# other tags through raw: `<a href="java&#115;cript:confirm(1)">x</a>` passes it.
+expected_detection = true
 filter = "waf_cloudflare_sim"
 category = "real_world"
 
@@ -117,7 +122,9 @@ name = "safe_akamai_waf"
 description = "Akamai-like WAF blocks common XSS patterns"
 handler_type = "realworld"
 reflection = "<div>{input}</div>"
-expected_detection = false
+# The simulated WAF matches on(error|load|click|mouse)= only:
+# `<details open ontoggle=alert`1`>` passes and fires on load.
+expected_detection = true
 filter = "waf_akamai_sim"
 category = "real_world"
 

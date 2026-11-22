@@ -1045,6 +1045,20 @@ async fn run_scan_test(
         .0
 }
 
+/// Which scan settings a mock-server test runs with.
+#[derive(Clone, Copy, PartialEq)]
+enum ScanProfile {
+    /// The settings these tests have always used: `--deep-scan` plus the
+    /// opt-in `base64` encoder. Deep scan keeps reporting after the first
+    /// hit, so it costs far more requests for the same yes/no answer.
+    Benchmark,
+    /// The settings `scripts/effectiveness_snapshot.cr` scans the rest of the
+    /// corpus with, so both halves are scored the same way: the default
+    /// encoders, no deep scan, and no parameter mining (every case names its
+    /// injection point).
+    Default,
+}
+
 /// [`run_scan_test`] plus the scan's request count. The count is read while
 /// `RUN_SCAN_LOCK` is still held: `run_scan` resets the process-global
 /// `REQUEST_COUNT` at start, so a read after releasing it could see another
@@ -1054,6 +1068,16 @@ async fn run_scan_test_counted(
     endpoint: &str,
     case_id: u32,
     scan_config: ScanTestConfig,
+) -> (Vec<serde_json::Value>, u64) {
+    run_scan_test_profile(addr, endpoint, case_id, scan_config, ScanProfile::Benchmark).await
+}
+
+async fn run_scan_test_profile(
+    addr: SocketAddr,
+    endpoint: &str,
+    case_id: u32,
+    scan_config: ScanTestConfig,
+    profile: ScanProfile,
 ) -> (Vec<serde_json::Value>, u64) {
     let target = format!(
         "http://{}:{}/{}{}",
@@ -1093,7 +1117,7 @@ async fn run_scan_test_counted(
         out_of_scope: vec![],
         out_of_scope_file: None,
         mining_dict_word: None,
-        skip_mining: false,
+        skip_mining: profile == ScanProfile::Default,
         skip_mining_dict: false,
         skip_mining_dom: false,
         only_discovery: false,
@@ -1123,7 +1147,15 @@ async fn run_scan_test_counted(
         workers: 10,
         max_concurrent_targets: 10,
         max_targets_per_host: 100,
-        encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
+        encoders: match profile {
+            ScanProfile::Benchmark => {
+                vec!["url".to_string(), "html".to_string(), "base64".to_string()]
+            }
+            ScanProfile::Default => scan::DEFAULT_ENCODERS
+                .iter()
+                .map(|e| e.to_string())
+                .collect(),
+        },
         custom_blind_xss_payload: None,
         blind_callback_url: None,
         oob: Default::default(),
@@ -1133,7 +1165,7 @@ async fn run_scan_test_counted(
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: false,
-        deep_scan: true,
+        deep_scan: profile == ScanProfile::Benchmark,
         sxss: false,
         sxss_url: vec![],
         sxss_method: "GET".to_string(),
@@ -2894,4 +2926,169 @@ async fn test_escaped_quote_breakout_v2() {
         "expected a #1072 escaped-quote breakout payload, got {findings:?}"
     );
     println!("[#9201] escaped-quote breakout attributed to #1072 synthesis");
+}
+
+/// Safe cases the scanner reports anyway, with the reason each is inert. All
+/// five are `R` ("reflected") findings: the payload needs no character the
+/// filter touches, so it comes back verbatim, in a place where it is text.
+/// Fixing one means deleting its line; the test fails until that happens.
+const FILTERED_KNOWN_FALSE_POSITIVES: &[(u32, &str)] = &[
+    (
+        5019,
+        "`alert(1)` echoed into element text and a quote-encoded JS string",
+    ),
+    (
+        5106,
+        "attribute-style payload (`' onerror=…`) echoed as element text",
+    ),
+    (
+        5143,
+        "attribute-style payload (`' onerror=…`) echoed as element text",
+    ),
+    (
+        5289,
+        "`alert(1)` echoed with every HTML special encoded, quotes included",
+    ),
+    (
+        5534,
+        "attribute-style payload echoed as element text, angles double-encoded",
+    ),
+];
+
+/// Cases labelled exploitable that the scanner does not report.
+///
+/// 5192 is not a clean miss: its template is `var config = {{name: '…'}};`,
+/// and with the doubled braces served literally the script does not parse, so
+/// the JS-string breakout the case describes never runs, while the simulated
+/// WAF blocks the `</script>` alternative. It stays listed until the corpus
+/// settles what `{{` means in a script template.
+const FILTERED_KNOWN_MISSES: &[(u32, &str)] = &[(
+    5192,
+    "JS-string context behind waf_moderate; the template is not valid JavaScript",
+)];
+
+/// Every corpus case with a server-side `filter` or a `page_template`, scanned
+/// with default settings and compared with its label, case by case.
+///
+/// `scripts/effectiveness_snapshot.cr` cannot serve these: the filter chain
+/// and the page templates exist only in this mock server. They are also the
+/// hardest part of the corpus, and where its safe cases are (22 of the 134,
+/// against 13 non-DOM safe cases among the 809 the harness scores).
+///
+/// The comparison is exact in both directions. A new false positive or a new
+/// miss fails; so does a listed one that stops happening, because the list
+/// would otherwise go stale and hide the next regression on the same case.
+#[tokio::test]
+#[ignore = "functional: filtered and templated corpus cases against their labels"]
+async fn test_filtered_and_templated_cases_match_labels() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut ids: Vec<u32> = state
+        .realworld_cases
+        .iter()
+        .filter(|(_, c)| c.filter.is_some() || c.page_template.is_some())
+        .map(|(id, _)| *id)
+        .collect();
+    ids.sort_unstable();
+    assert!(
+        ids.len() >= 100,
+        "expected the filtered/templated cases, found only {}",
+        ids.len()
+    );
+
+    let mut false_positives = Vec::new();
+    let mut misses = Vec::new();
+    let mut strong_false_positives = Vec::new();
+
+    for id in &ids {
+        let case = &state.realworld_cases[id];
+        let config = ScanTestConfig {
+            url_suffix: format!("/{id}?query=seed"),
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            skip_reflection_header: true,
+            skip_reflection_cookie: true,
+            skip_reflection_path: true,
+        };
+        let (results, _) =
+            run_scan_test_profile(addr, "realworld/query", *id, config, ScanProfile::Default).await;
+        // Informational findings (an outdated library, say) are not XSS claims.
+        let tiers: Vec<&str> = results
+            .iter()
+            .filter_map(|r| r["type"].as_str())
+            .filter(|t| *t != "I")
+            .collect();
+        match (case.expected_detection, tiers.is_empty()) {
+            (true, true) => misses.push(*id),
+            (false, false) => {
+                false_positives.push(*id);
+                if tiers.iter().any(|t| *t != "R") {
+                    strong_false_positives.push(format!("{id} {} {tiers:?}", case.name));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let describe = |ids: &[u32]| -> String {
+        ids.iter()
+            .map(|id| format!("{id} {}", state.realworld_cases[id].name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let known_fps: Vec<u32> = FILTERED_KNOWN_FALSE_POSITIVES
+        .iter()
+        .map(|(id, _)| *id)
+        .collect();
+    let known_misses: Vec<u32> = FILTERED_KNOWN_MISSES.iter().map(|(id, _)| *id).collect();
+    let minus = |a: &[u32], b: &[u32]| -> Vec<u32> {
+        a.iter().copied().filter(|id| !b.contains(id)).collect()
+    };
+
+    let mut problems = Vec::new();
+    let new_fps = minus(&false_positives, &known_fps);
+    if !new_fps.is_empty() {
+        problems.push(format!(
+            "new false positive(s) on safe cases: {}",
+            describe(&new_fps)
+        ));
+    }
+    let new_misses = minus(&misses, &known_misses);
+    if !new_misses.is_empty() {
+        problems.push(format!(
+            "new miss(es) on exploitable cases: {}",
+            describe(&new_misses)
+        ));
+    }
+    let fixed_fps = minus(&known_fps, &false_positives);
+    if !fixed_fps.is_empty() {
+        problems.push(format!(
+            "no longer false positives, remove from FILTERED_KNOWN_FALSE_POSITIVES: {}",
+            describe(&fixed_fps)
+        ));
+    }
+    let fixed_misses = minus(&known_misses, &misses);
+    if !fixed_misses.is_empty() {
+        problems.push(format!(
+            "now detected, remove from FILTERED_KNOWN_MISSES: {}",
+            describe(&fixed_misses)
+        ));
+    }
+    if !strong_false_positives.is_empty() {
+        problems.push(format!(
+            "safe case(s) reported above R: {}",
+            strong_false_positives.join(", ")
+        ));
+    }
+
+    assert!(
+        problems.is_empty(),
+        "filtered/templated corpus cases ({} scanned) do not match their labels:\n{}",
+        ids.len(),
+        problems.join("\n")
+    );
 }

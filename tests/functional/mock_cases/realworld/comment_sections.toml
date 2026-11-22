@@ -6,7 +6,9 @@ name = "comment_strip_tags"
 description = "Comment section strips all HTML tags from user content"
 handler_type = "realworld"
 reflection = "{input}"
-expected_detection = false
+# Stripping tags leaves quotes alone, and the template echoes into
+# `data-author="…"`: `" onmouseover=alert(1) x="` breaks out of the attribute.
+expected_detection = true
 filter = "strip_tags"
 page_template = "comment_section"
 category = "real_world"
@@ -76,6 +78,8 @@ description = "Comment section with complete HTML encoding - safe"
 handler_type = "realworld"
 reflection = "{input}"
 expected_detection = false
-filter = "strip_tags"
+# Was `strip_tags`, a copy of case 5061 that left the attribute breakout open
+# and contradicted the description. This is the filter it describes.
+filter = "encode_full_html"
 page_template = "comment_section"
 category = "real_world"

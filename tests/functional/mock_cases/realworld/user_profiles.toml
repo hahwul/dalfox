@@ -74,7 +74,9 @@ name = "profile_encoded_safe"
 description = "Profile page with all angles and quotes encoded - safe"
 handler_type = "realworld"
 reflection = "{input}"
-expected_detection = false
+# Encoding `<>` and quotes does not make this safe: the template also puts the
+# value in `<a href="…">`, where `javascript:alert(1)` needs neither.
+expected_detection = true
 filter = "encode_angles|encode_quotes"
 page_template = "user_profile"
 category = "real_world"

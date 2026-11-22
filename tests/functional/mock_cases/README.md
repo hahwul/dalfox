@@ -233,7 +233,11 @@ expected_detection = true
    the input?". A case that echoes the input in an inert form — entity-escaped or
    Base64-encoded into element text, for example — is `false`: a finding there
    would be a false positive. `scripts/effectiveness_snapshot.cr` scores every
-   self-contained case (no `filter`, no `page_template`) against this label.
+   self-contained case (no `filter`, no `page_template`) against this label;
+   the filtered and templated ones, which only the Rust mock server can serve,
+   are checked by `test_filtered_and_templated_cases_match_labels`. Both
+   compare case by case, so a case that does not behave as labelled has to be
+   fixed or recorded as a known mismatch with its reason.
 5. **Verify manually**: Run dalfox manually against the case to verify
 
 ## Debugging Failed Tests
