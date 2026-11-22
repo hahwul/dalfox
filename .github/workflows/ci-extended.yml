@@ -14,6 +14,11 @@ on:
     # can't silently rot between releases.
     - cron: "0 5 * * 1"
   workflow_dispatch:
+# A new push to a PR cancels the run of the previous one. Every other run
+# (push to main, schedule, manual) gets a group of its own and always finishes.
+concurrency:
+  group: ci-extended-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
 jobs:
@@ -59,6 +64,12 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
+      # Restores compiled dependencies. Only runs on main write the cache, so a
+      # PR reads main's entry and cannot fill the cache quota (10 GB by default)
+      # with its own.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run tests at MSRV (locked deps)
         run: cargo +${{ steps.msrv.outputs.version }} test --locked
   ignored-tests:
@@ -67,6 +78,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run normally-ignored tests
         # --include-ignored runs the normally-skipped functional suite. The
         # four detection-coverage *benchmark* tests are excluded by name:
@@ -103,6 +117,11 @@ jobs:
         run: crystal spec scripts/spec/version_update_spec.cr scripts/spec/dockerhub_release_spec.cr
       - name: SBOM release regression
         run: crystal spec scripts/spec/sbom_release_spec.cr
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Both harness jobs build the same release binary.
+          shared-key: release-harness
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build --release
       # All green, so all blocking. `effectiveness` fails when recall drops or
       # the FP count rises against docs/data/effectiveness.json; `perf-budget`
@@ -142,6 +161,11 @@ jobs:
       # index; a stale runner image then 404s on superseded .debs.
       - run: sudo apt-get update -q
       - uses: crystal-lang/install-crystal@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Both harness jobs build the same release binary.
+          shared-key: release-harness
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build --release
       - name: Server + MCP smoke
         run: crystal run scripts/server_mcp_smoke.cr
