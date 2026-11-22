@@ -23,5 +23,8 @@ name = "current_lib_jquery_3_7_1"
 description = "Serves current jQuery 3.7.1 -> no library finding"
 handler_type = "realworld"
 reflection = "<script src=\"/static/js/jquery-3.7.1.min.js\"></script><textarea>{input}</textarea>"
-expected_detection = false
+# The library is current, so the vulnerable-library check must stay quiet
+# (`test_vuln_library_detection_v2` asserts that by finding type). The
+# reflection itself is a raw `</textarea>` breakout, which is a real XSS.
+expected_detection = true
 category = "vuln_lib"
