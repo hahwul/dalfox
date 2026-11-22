@@ -1583,8 +1583,19 @@ pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
     let transport = (stdin(), stdout());
     use rmcp::service::serve_server;
     let running = serve_server(DalfoxMcp::new(), transport).await?;
-    running.waiting().await?;
+    wait_for_mcp(running).await?;
     Ok(())
+}
+
+async fn wait_for_mcp(
+    running: rmcp::service::RunningService<rmcp::RoleServer, DalfoxMcp>,
+) -> Result<(), tokio::task::JoinError> {
+    // The outer result covers the service loop itself. A failed outbound
+    // task stops that loop normally and is reported in its quit reason.
+    match running.waiting().await? {
+        rmcp::service::QuitReason::JoinError(error) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
