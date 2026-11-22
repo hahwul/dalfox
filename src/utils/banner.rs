@@ -62,8 +62,11 @@ pub(crate) fn render_banner(version: &str, color: bool) -> String {
 /// beyond what render_banner includes). Additional calls are no-ops.
 pub fn print_banner_once(version: &str, color: bool) {
     PRINT_ONCE.call_once(|| {
-        print!("{}", render_banner(version, color));
-        let _ = io::stdout().flush();
+        super::term::emit(false, render_banner(version, color));
+        // In daemon mode the writer thread owns the flush as well as the write.
+        if !super::term::daemon_mode() {
+            let _ = io::stdout().flush();
+        }
     });
 }
 

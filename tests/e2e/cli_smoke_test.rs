@@ -1246,6 +1246,62 @@ fn test_mcp_startup_failure_exits_nonzero() {
     );
 }
 
+#[test]
+fn test_server_startup_reports_bind_failure_with_closed_stdout() {
+    let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = occupied.local_addr().unwrap().port().to_string();
+    let config = tempfile::NamedTempFile::new().unwrap();
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+
+    let status = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(config.path())
+        .args(["server", "--host", "127.0.0.1", "--port", &port])
+        .stdout(writer)
+        .status()
+        .unwrap();
+    assert_eq!(
+        status.code(),
+        Some(2),
+        "the bind error must reach the caller"
+    );
+}
+
+#[test]
+fn test_mcp_startup_initializes_with_a_config_warning_and_closed_stderr() {
+    let dir = tempfile::tempdir().unwrap();
+    // An explicitly requested missing config emits a diagnostic during startup.
+    let config = dir.path().join("config.toml");
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(&config)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(writer)
+        .spawn()
+        .unwrap();
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"}
+        }
+    });
+    writeln!(child.stdin.as_mut().unwrap(), "{initialize}").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(config.is_file());
+    let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(reply["id"], 1);
+    assert_eq!(reply["result"]["serverInfo"]["name"], "dalfox");
+}
+
 /// `dalfox server` must exit 0 on SIGTERM. The signal path — handler install,
 /// the cancel sweep, the bounded scan drain — only runs in a real process.
 #[cfg(unix)]
