@@ -42,6 +42,11 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
   coverage:
+    # Dependabot PRs run without repository secrets, so CODECOV_TOKEN is empty
+    # and the upload below fails (fail_ci_if_error). A dependency-only diff has
+    # no patch coverage to report, and the push to main after the merge still
+    # uploads.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

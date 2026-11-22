@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # One PR for the week's minor and patch action bumps instead of one each.
+    # A major bump (new runtime, changed inputs) still gets a PR of its own.
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
   - package-ecosystem: docker
     directory: /
@@ -15,6 +21,20 @@ updates:
     schedule:
       interval: weekly
     target-branch: "main"
+    # A dependency joins the first group it matches.
+    groups:
+      # The four oxc crates share one version and are bumped together, so
+      # this group takes every update type on purpose.
+      oxc:
+        patterns: ["oxc_*"]
+      # Everything else that is not a major bump lands as one weekly PR. Note
+      # that Dependabot calls 0.x -> 0.y "minor" although Cargo treats it as
+      # breaking: if such a bump turns the group red, comment
+      # `@dependabot ignore <crate> minor version` on the PR and handle that
+      # crate by hand.
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
     ignore:
       # rand is intentionally pinned at 0.8 because rsa 0.9 (for interactsh OOB)
       # binds rand_core 0.6. aes/ctr are now on modern lines (0.9/0.10) after
