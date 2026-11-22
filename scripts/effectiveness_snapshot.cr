@@ -19,10 +19,23 @@
 #      any finding, V-only, high-confidence, and each (method, confidence) bucket.
 #      Each bucket counts a case once, regardless of duplicate findings.
 #   5. Write `docs/data/effectiveness.json`, including every FP and FN with the
-#      payload and evidence so the failures are actionable.
-#   6. Compare against the committed snapshot and exit non-zero when recall
-#      drops or the FP count rises. No committed snapshot yet = "no baseline",
-#      exit 0.
+#      payload and evidence so the failures are actionable, and a `verdicts`
+#      map with one grade per case (`V/high`, `R/low`, `-`, …).
+#   6. Compare against the committed snapshot, case by case, and exit non-zero
+#      when any case got worse: an expected case lost its finding, its `V`, or
+#      its high-confidence grade; a safe case gained a finding; a scan errored;
+#      a case vanished from the corpus. The aggregate rates are compared too,
+#      but with their tolerance three lost cases out of 730 would pass, which
+#      is why they are not the gate on their own. No committed snapshot yet =
+#      "no baseline", exit 0.
+#
+# The snapshot on disk is the baseline (in CI: the committed one). A run that
+# passes rewrites it, so gained detections and new cases get recorded. A run
+# that fails leaves it alone — otherwise running twice would accept the
+# regression — and so does a filtered run, whose numbers describe a subset.
+# To accept an intended change that the gate rejects (a relabelled case, a
+# detection knowingly traded away), re-run with EFFECTIVENESS_ACCEPT=1 and
+# commit the file; its diff is the reviewable record of which cases moved.
 #
 # Environment:
 #   EFFECTIVENESS_URL          scan an already-running lab instead of starting one
@@ -30,10 +43,11 @@
 #   EFFECTIVENESS_CATEGORIES   comma-separated category filter passed to the lab
 #   EFFECTIVENESS_LIMIT        scan only the first N cases (smoke runs)
 #   EFFECTIVENESS_CONCURRENCY  parallel scans                        (default 8)
-#   EFFECTIVENESS_RETRIES      retries for a scan that errored out   (default 1)
+#   EFFECTIVENESS_RETRIES      retries for a scan that errored out   (default 2)
 #   EFFECTIVENESS_TIMEOUT      per-scan wall-clock budget, seconds   (default 120)
 #   EFFECTIVENESS_TOLERANCE    recall/precision regression slack, pp (default 0.5)
 #   EFFECTIVENESS_FP_TOLERANCE extra false positives tolerated       (default 0)
+#   EFFECTIVENESS_ACCEPT       1 = record this run as the baseline even if the gate fails
 #   EFFECTIVENESS_RENDER_ONLY  1 = skip scanning, re-report the committed snapshot
 #   EFFECTIVENESS_DATA_PATH    snapshot path        (default docs/data/effectiveness.json)
 #   DALFOX_BIN                 binary under test    (default target/release/dalfox)
@@ -53,11 +67,16 @@ PORT           = ENV.fetch("EFFECTIVENESS_PORT", "4801").to_i
 CATEGORIES     = ENV["EFFECTIVENESS_CATEGORIES"]?
 LIMIT          = ENV["EFFECTIVENESS_LIMIT"]?.try(&.to_i?)
 CONCURRENCY    = ENV.fetch("EFFECTIVENESS_CONCURRENCY", "8").to_i
-RETRIES        = ENV.fetch("EFFECTIVENESS_RETRIES", "1").to_i
+RETRIES        = ENV.fetch("EFFECTIVENESS_RETRIES", "2").to_i
 SCAN_TIMEOUT   = ENV.fetch("EFFECTIVENESS_TIMEOUT", "120").to_i
 TOLERANCE      = ENV.fetch("EFFECTIVENESS_TOLERANCE", "0.5").to_f
 FP_TOLERANCE   = ENV.fetch("EFFECTIVENESS_FP_TOLERANCE", "0").to_f
+ACCEPT         = ENV["EFFECTIVENESS_ACCEPT"]? == "1"
 RENDER_ONLY    = ENV["EFFECTIVENESS_RENDER_ONLY"]? == "1"
+# A run over part of the corpus (or over a lab somebody else started, whose
+# contents this script cannot vouch for). Its totals and verdicts are not
+# comparable with the snapshot's, and it must not replace it.
+FILTERED = !(LIMIT.nil? && CATEGORIES.nil? && LAB_URL.nil?)
 DATA_PATH      = ENV.fetch("EFFECTIVENESS_DATA_PATH", "docs/data/effectiveness.json")
 REQUEST_BUDGET = ENV.fetch("EFFECTIVENESS_REQUEST_TIMEOUT", "7")
 
@@ -249,13 +268,22 @@ def measure_once(lab_case : LabCase) : Outcome
   # Informational findings (outdated libraries and friends) are not XSS claims
   # and must not count as a detection on a case labelled clean.
   xss = result.xss
-  detected = !xss.empty? || (result.findings.empty? && result.output.status == 1)
+  # None of these is a verdict about the case. A scan that lost requests can
+  # report a weaker tier than it would have (the verification request is the
+  # one that went missing), and exit 1 with nothing parseable in the report
+  # says "found something" without saying what. Both are retried like a crash
+  # and fail the gate if they persist.
+  incomplete = result.meta.try(&.["incomplete"]?).try(&.as_bool?) == true
   error = if result.timed_out?
             "timeout after #{result.elapsed.total_seconds.round(1)}s"
           elsif result.crashed?
             "exit #{result.output.status}: #{result.output.error_line}"
+          elsif result.findings.empty? && result.output.status == 1
+            "exit 1 but the report has no parseable findings"
+          elsif incomplete
+            "the scan reported itself incomplete (requests were lost)"
           end
-  Outcome.new(lab_case, detected, xss.any?(&.verified?), xss,
+  Outcome.new(lab_case, !xss.empty?, xss.any?(&.verified?), xss,
     result.elapsed.total_seconds, error)
 end
 
@@ -274,8 +302,139 @@ def measure(lab_case : LabCase) : Outcome
     outcome = measure_once(lab_case)
     return outcome if outcome.error.nil? || attempt >= RETRIES
     attempt += 1
-    sleep 500.milliseconds
+    # An errored case fails the per-case gate, so give a refused connection
+    # room to clear: 0.5 s, then 2 s.
+    sleep (attempt == 1 ? 500 : 2000).milliseconds
   end
+end
+
+# ---------------------------------------------------------------------------
+# Per-case verdicts.
+# ---------------------------------------------------------------------------
+
+# One case's result reduced to what the gate compares: the strongest tier
+# dalfox reported for it (`V` > `A` > `R`) and whether any finding is graded
+# high confidence. `-` is "no finding", `error` a scan that produced no
+# measurement.
+def grade(o : Outcome) : String
+  return "error" if o.error
+  return "-" unless o.detected
+  tier = if o.findings.any?(&.verified?)
+           "V"
+         elsif o.findings.any?(&.ast?)
+           "A"
+         else
+           "R"
+         end
+  confidence = o.findings.any? { |f| f.confidence == "high" } ? "high" : "low"
+  "#{tier}/#{confidence}"
+end
+
+def grade_detected?(grade : String) : Bool
+  grade != "-" && grade != "error"
+end
+
+def grade_verified?(grade : String) : Bool
+  grade.starts_with?("V/")
+end
+
+def grade_high?(grade : String) : Bool
+  grade.ends_with?("/high")
+end
+
+# Places where the committed snapshot disagrees with itself: a case listed as
+# a miss whose verdict is a detection, a listed false positive whose verdict is
+# "no finding", or a listed mismatch with no verdict at all. `case_transitions`
+# trusts both, so a hand-edited or half-merged snapshot has to be rejected
+# before it is used.
+def baseline_contradictions(before : Hash(String, String), known : Hash(String, String)) : Array(String)
+  known.compact_map do |uid, kind|
+    verdict = before[uid]?
+    if verdict.nil?
+      "#{uid}: listed as #{kind} but has no verdict"
+    elsif (kind == "FN") == grade_detected?(verdict)
+      "#{uid}: listed as #{kind} but its verdict is #{verdict}"
+    end
+  end
+end
+
+# Compare this run with the committed snapshot, case by case.
+#
+# `before` is the committed `verdicts` map; `known` maps the uid of every
+# mismatch the committed snapshot already lists to its kind (`FN` / `FP`).
+#
+# Returns `{regressions, notes}`. A regression fails the gate; a note is a
+# change that is not worse (a gained detection, a new case that behaves as
+# labelled) but means the committed snapshot no longer describes the corpus
+# and should be re-recorded.
+#
+# The rule for a miss or a false positive is "it must already be a recorded
+# one", not "the verdict must not have changed": that also catches a case
+# relabelled without re-recording, where the verdict is the same and only its
+# meaning moved.
+#
+# `full_corpus` is false for a filtered run (`EFFECTIVENESS_LIMIT`,
+# `EFFECTIVENESS_CATEGORIES`): a case that was simply not scanned must not be
+# reported as removed.
+def case_transitions(before : Hash(String, String), known : Hash(String, String),
+                     outcomes : Array(Outcome), full_corpus : Bool) : {Array(String), Array(String)}
+  regressions = [] of String
+  notes = [] of String
+  seen = Set(String).new
+
+  outcomes.each do |o|
+    uid = o.lab_case.uid
+    seen << uid
+    now = grade(o)
+    was = before[uid]?
+    label = "#{uid} #{o.lab_case.name}"
+
+    if err = o.error
+      regressions << "#{label}: scan error (#{err}), no measurement"
+      next
+    end
+
+    mismatch = if o.expected && !o.detected
+                 "FN"
+               elsif !o.expected && o.detected
+                 "FP"
+               end
+
+    if mismatch && known[uid]? != mismatch
+      regressions << "#{label}: " + if was.nil?
+        "new case does not match its label (#{o.expected ? "labelled vulnerable, no finding" : "labelled safe, got #{now}"})"
+      elsif mismatch == "FN" && grade_detected?(was)
+        "lost detection (#{was} -> #{now})"
+      elsif mismatch == "FP" && !grade_detected?(was)
+        "new false positive (#{now})"
+      elsif mismatch == "FN"
+        "labelled vulnerable with no finding, and not a recorded miss"
+      else
+        "labelled safe but reported (#{now}), and not a recorded false positive"
+      end
+      next
+    end
+
+    if was.nil?
+      notes << "#{label}: new case (#{now})"
+    elsif was != now
+      if o.expected && grade_verified?(was) && !grade_verified?(now)
+        regressions << "#{label}: lost verification (#{was} -> #{now})"
+      elsif o.expected && grade_high?(was) && !grade_high?(now)
+        regressions << "#{label}: lost high confidence (#{was} -> #{now})"
+      else
+        notes << "#{label}: #{was} -> #{now}"
+      end
+    end
+  end
+
+  if full_corpus
+    (before.keys - seen.to_a).each do |uid|
+      regressions << "#{uid}: in the committed snapshot but no longer served by the corpus"
+    end
+  end
+
+  {regressions, notes}
 end
 
 # ---------------------------------------------------------------------------
@@ -450,6 +609,10 @@ def build_snapshot(outcomes : Array(Outcome), wall_clock : Float64, lab_count : 
     ast_only: outcomes.count { |o| o.detected && o.findings.all?(&.ast?) && !o.findings.empty? },
     errors:   outcomes.count { |o| o.error },
     cases:    failures,
+    # One grade per case, in corpus order. This is what the gate compares, and
+    # what makes a snapshot diff show exactly which cases a change moved.
+    verdicts: outcomes.sort_by { |o| {o.lab_case.category, o.lab_case.id} }
+      .map { |o| {o.lab_case.uid, grade(o)} }.to_h,
   }
 
   JSON.parse(Snapshot.stamp("effectiveness", Dalfox.version, payload).to_json)
@@ -519,7 +682,7 @@ end
 # Gating.
 # ---------------------------------------------------------------------------
 
-def gate(data : JSON::Any) : Int32
+def gate(data : JSON::Any, outcomes : Array(Outcome)) : Int32
   baseline = Snapshot.load(DATA_PATH)
   report = Report.new("effectiveness gate")
 
@@ -534,6 +697,12 @@ def gate(data : JSON::Any) : Int32
   # caller must load the baseline *before* writing — see main.
   unless baseline
     report.skip("baseline", "no committed snapshot at #{DATA_PATH}; recorded this run as the first one")
+    return report.finish
+  end
+
+  if FILTERED
+    report.skip("aggregate rates and per-case verdicts",
+      "filtered run: its population is not the snapshot's, so nothing is compared")
     return report.finish
   end
 
@@ -554,6 +723,33 @@ def gate(data : JSON::Any) : Int32
     else
       report.pass(d.name, d.to_s.strip)
     end
+  end
+
+  if before = baseline["verdicts"]?.try(&.as_h?)
+    committed = before.transform_values(&.to_s)
+    known = {} of String => String
+    baseline["cases"]?.try(&.as_a?).try &.each do |c|
+      kind = c["kind"]?.try(&.as_s?)
+      uid = c["uid"]?.try(&.as_s?)
+      known[uid] = kind if uid && kind && kind.in?("FN", "FP")
+    end
+    contradictions = baseline_contradictions(committed, known)
+    contradictions.each { |c| report.fail("snapshot consistency", c) }
+    regressions, notes = case_transitions(committed, known, outcomes, true)
+    if regressions.empty?
+      report.pass("per-case verdicts", "no case got worse (#{committed.size} in the committed snapshot)")
+    else
+      regressions.each { |r| report.fail("per-case verdicts", r) }
+    end
+    unless notes.empty?
+      puts ""
+      puts "==> #{notes.size} case(s) changed without getting worse. A passing run records them in"
+      puts "    #{DATA_PATH}; commit it so the baseline keeps up:"
+      notes.first(20).each { |n| puts "    #{n}" }
+      puts "    … +#{notes.size - 20} more" if notes.size > 20
+    end
+  else
+    report.skip("per-case verdicts", "the committed snapshot has no `verdicts` map yet; this run records one")
   end
   report.finish
 end
@@ -583,6 +779,63 @@ if ENV["EFFECTIVENESS_SELF_TEST"]? == "1"
   raise "method buckets missing" unless buckets.size == 2
   ast = buckets.find { |b| b["detection_method"].as_s == "ast" }.not_nil!["metrics"]
   raise "AST copies inflated precision" unless ast["tp"].as_i == 1 && ast["fp"].as_i == 0
+
+  # Per-case gate. `outcomes` grades as 1 => A/high, 2 => V/low (a false
+  # positive), 3 => "-" (a miss).
+  verdicts = data["verdicts"].as_h.transform_values(&.to_s)
+  raise "verdicts not recorded per case: #{verdicts}" unless verdicts == {"1" => "A/high", "2" => "V/low", "3" => "-"}
+  recorded = {"2" => "FP", "3" => "FN"}
+  same, same_notes = case_transitions(verdicts, recorded, outcomes, true)
+  raise "an unchanged run must not regress: #{same}" unless same.empty? && same_notes.empty?
+
+  none = {} of String => String
+  verified = finding.call("V", "reflection", "high")
+  reflected = finding.call("R", "reflection", "low")
+  no_findings = [] of Dalfox::Finding
+  expect_regression = ->(name : String, before : Hash(String, String), known : Hash(String, String), now : Array(Outcome), needle : String) {
+    found, _ = case_transitions(before, known, now, true)
+    raise "#{name}: expected one regression mentioning #{needle.inspect}, got #{found}" unless found.size == 1 && found[0].includes?(needle)
+  }
+  expect_regression.call("lost detection", {"1" => "R/low"}, none,
+    [Outcome.new(make_case.call(1, true), false, false, no_findings, 0.0, nil)], "lost detection")
+  expect_regression.call("lost verification", {"1" => "V/high"}, none,
+    [Outcome.new(make_case.call(1, true), true, false, [reflected], 0.0, nil)], "lost verification")
+  expect_regression.call("lost high confidence", {"1" => "A/high"}, none,
+    [Outcome.new(make_case.call(1, true), true, false, [finding.call("A", "ast", "low")], 0.0, nil)], "lost high confidence")
+  expect_regression.call("new false positive", {"1" => "-"}, none,
+    [Outcome.new(make_case.call(1, false), true, false, [reflected], 0.0, nil)], "new false positive")
+  expect_regression.call("scan error", {"1" => "V/high"}, none,
+    [Outcome.new(make_case.call(1, true), false, false, no_findings, 0.0, "timeout")], "scan error")
+  expect_regression.call("removed case", {"1" => "V/high", "9" => "V/high"}, none,
+    [Outcome.new(make_case.call(1, true), true, true, [verified], 0.0, nil)], "no longer served")
+  expect_regression.call("mislabelled new case", none, none,
+    [Outcome.new(make_case.call(1, true), false, false, no_findings, 0.0, nil)], "does not match its label")
+  # Same verdict as before, but the case was relabelled without re-recording.
+  expect_regression.call("relabelled to safe", {"1" => "V/high"}, none,
+    [Outcome.new(make_case.call(1, false), true, true, [verified], 0.0, nil)], "not a recorded false positive")
+  expect_regression.call("relabelled to vulnerable", {"1" => "-"}, none,
+    [Outcome.new(make_case.call(1, true), false, false, no_findings, 0.0, nil)], "not a recorded miss")
+  # A recorded false positive does not excuse a different kind of mismatch.
+  expect_regression.call("recorded as the other kind", {"1" => "-"}, {"1" => "FP"},
+    [Outcome.new(make_case.call(1, true), false, false, no_findings, 0.0, nil)], "not a recorded miss")
+
+  # Not regressions: a recorded miss that is still a miss, a gained detection,
+  # a new case that behaves as labelled, and a case a filtered run skipped.
+  still, still_notes = case_transitions({"1" => "-"}, {"1" => "FN"},
+    [Outcome.new(make_case.call(1, true), false, false, no_findings, 0.0, nil)], true)
+  raise "a recorded miss must stay accepted: #{still}" unless still.empty? && still_notes.empty?
+  gained, gained_notes = case_transitions({"1" => "-"}, {"1" => "FN"},
+    [Outcome.new(make_case.call(1, true), true, true, [verified], 0.0, nil)], true)
+  raise "a gained detection must be a note, not a regression: #{gained}" unless gained.empty? && gained_notes.size == 1
+  fresh, fresh_notes = case_transitions(none, none,
+    [Outcome.new(make_case.call(1, true), true, true, [verified], 0.0, nil)], true)
+  raise "a well-behaved new case must be a note: #{fresh}" unless fresh.empty? && fresh_notes.size == 1
+  bad = baseline_contradictions({"1" => "V/high", "2" => "-", "3" => "-"}, {"1" => "FN", "2" => "FP", "3" => "FN", "4" => "FP"})
+  raise "contradictory snapshot records must be reported: #{bad}" unless bad.size == 3 && bad.none?(&.starts_with?("3:"))
+  partial, _ = case_transitions({"1" => "V/high", "9" => "V/high"}, none,
+    [Outcome.new(make_case.call(1, true), true, true, [verified], 0.0, nil)], false)
+  raise "a filtered run must not report unscanned cases as removed: #{partial}" unless partial.empty?
+
   puts "effectiveness accounting self-test passed"
   exit 0
 end
@@ -602,6 +855,8 @@ begin
   body = HTTP::Client.get("#{lab.url}/map/json").body
   map = LabMap.from_json(body)
   cases = map.cases
+  duplicates = cases.map(&.uid).tally.select { |_, n| n > 1 }.keys
+  abort "the lab lists these case uids more than once: #{duplicates.join(", ")}" unless duplicates.empty?
   cases = cases.first(LIMIT.not_nil!) if LIMIT
 
   puts "==> scanning #{cases.size}/#{map.count} case(s) with #{CONCURRENCY} workers (#{Dalfox.bin} v#{Dalfox.version})"
@@ -611,10 +866,21 @@ begin
 
   data = build_snapshot(outcomes, wall_clock, map.count)
   print_summary(data)
-  # Gate before writing: the gate compares against the committed snapshot, and
+  # Gate before writing: the gate compares against the snapshot on disk, and
   # `Snapshot.write` would replace it with this run's numbers first.
-  exit_code = gate(data)
-  Snapshot.write(DATA_PATH, data)
+  exit_code = gate(data, outcomes)
+  if FILTERED
+    puts "==> filtered run: #{DATA_PATH} left as it was"
+  elsif exit_code == 0
+    Snapshot.write(DATA_PATH, data)
+  elsif ACCEPT
+    puts "==> EFFECTIVENESS_ACCEPT=1: recording this run as the baseline despite the failures above"
+    Snapshot.write(DATA_PATH, data)
+    exit_code = 0
+  else
+    puts "==> gate failed: #{DATA_PATH} left as it was. If the change is intended, re-run with"
+    puts "    EFFECTIVENESS_ACCEPT=1 to record it, then commit the file."
+  end
 ensure
   # `exit` does not unwind, so the code is carried out of the block instead.
   lab.stop
