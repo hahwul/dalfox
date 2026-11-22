@@ -82,7 +82,13 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run normally-ignored tests
-        # --include-ignored runs the normally-skipped functional suite. The
+        # On a PR or a push, --ignored runs only the normally-skipped
+        # functional suite: ci.yml runs the regular tests on three platforms
+        # for every change to Rust sources or the manifest, and the other
+        # paths that trigger this workflow (scripts/, docs/data/, release
+        # workflows) are not read by any Rust test. The weekly and manual
+        # runs have no ci.yml run beside them, so they keep
+        # --include-ignored and run everything. The
         # four detection-coverage *benchmark* tests are excluded by name:
         # they assert detection-rate targets the scanner does not yet meet
         # (see their `#[ignore = "benchmark: ..."]` reasons) and are tracked
@@ -93,17 +99,37 @@ jobs:
         #   test_query_reflection_v2 -> that exact test (not the _diverse/_advanced variants)
         # No --all-targets: it would try to run the bench-shaped probe files
         # as benchmarks, which fails.
+        env:
+          SELECTION: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '--include-ignored' || '--ignored' }}
         run: |
-          cargo test -- --include-ignored \
+          cargo test -- "$SELECTION" \
             --skip realworld \
             --skip category_baselines \
             --skip test_query_reflection_v2
-  harness-gates:
-    name: Crystal harnesses (gates)
+  harness-binary:
+    name: Release binary for the harnesses
     runs-on: ubuntu-latest
+    # Both harness jobs drive the same release binary. Building it here once
+    # and handing it over saves a second ~4 minute LTO build per run.
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dalfox-release
+          path: target/release/dalfox
+          if-no-files-found: error
+          retention-days: 1
+  harness-gates:
+    name: Crystal harnesses (gates)
+    needs: harness-binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
       # install-crystal apt-installs its build deps without refreshing the
       # index; a stale runner image then 404s on superseded .debs.
       - run: sudo apt-get update -q
@@ -117,12 +143,14 @@ jobs:
         run: crystal spec scripts/spec/version_update_spec.cr scripts/spec/dockerhub_release_spec.cr
       - name: SBOM release regression
         run: crystal spec scripts/spec/sbom_release_spec.cr
-      - uses: Swatinem/rust-cache@v2
+      # The harnesses look for target/release/dalfox. Artifacts do not keep
+      # the executable bit. Running it once makes a binary this runner image
+      # cannot execute fail here instead of inside a harness.
+      - uses: actions/download-artifact@v8
         with:
-          # Both harness jobs build the same release binary.
-          shared-key: release-harness
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo build --release
+          name: dalfox-release
+          path: target/release
+      - run: chmod +x target/release/dalfox && target/release/dalfox --version
       # All green, so all blocking. `effectiveness` fails when recall drops or
       # the FP count rises against docs/data/effectiveness.json; `perf-budget`
       # fails when a scenario's request volume or wall-clock exceeds
@@ -153,19 +181,21 @@ jobs:
         run: crystal spec scripts/spec/debian_release_spec.cr
   harness-smoke:
     name: Crystal harnesses (server + MCP)
+    needs: harness-binary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
       # install-crystal apt-installs its build deps without refreshing the
       # index; a stale runner image then 404s on superseded .debs.
       - run: sudo apt-get update -q
       - uses: crystal-lang/install-crystal@v1
-      - uses: Swatinem/rust-cache@v2
+      # The harnesses look for target/release/dalfox. Artifacts do not keep
+      # the executable bit. Running it once makes a binary this runner image
+      # cannot execute fail here instead of inside a harness.
+      - uses: actions/download-artifact@v8
         with:
-          # Both harness jobs build the same release binary.
-          shared-key: release-harness
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo build --release
+          name: dalfox-release
+          path: target/release
+      - run: chmod +x target/release/dalfox && target/release/dalfox --version
       - name: Server + MCP smoke
         run: crystal run scripts/server_mcp_smoke.cr
