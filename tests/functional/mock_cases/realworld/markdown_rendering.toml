@@ -62,7 +62,9 @@ name = "markdown_sanitized_safe"
 description = "Markdown rendered with full sanitization - no raw HTML allowed"
 handler_type = "realworld"
 reflection = "{input}"
-expected_detection = false
+# The template puts the value in `<a href="…">`; `javascript:alert(1)` has no
+# character this sanitizer touches.
+expected_detection = true
 filter = "strip_tags|encode_full_html"
 page_template = "markdown_preview"
 category = "real_world"

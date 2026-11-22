@@ -156,7 +156,9 @@ name = "waf_multi_layer_filter"
 description = "Multi-layer WAF: strip script, remove alert keyword, encode quotes"
 handler_type = "realworld"
 reflection = "<div>{input}</div>"
-expected_detection = false
+# The filter chain is bypassable: `<iframe/src=javascript:prompt`1`>` has no
+# <script>, no on*= handler, no `alert` and no quote, and is echoed raw.
+expected_detection = true
 filter = "strip_script|strip_on_events|remove_keyword:alert|encode_quotes"
 category = "waf_bypass"
 
