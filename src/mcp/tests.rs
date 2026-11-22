@@ -1,6 +1,28 @@
 use super::*;
 use tokio::time::{Duration, sleep};
 
+#[tokio::test]
+async fn mcp_reports_an_outbound_transport_task_panic() {
+    use rmcp::model::ServerRequest;
+    // Exercise rmcp's actual send task while the input side stays connected.
+    let sink = futures::sink::unfold((), |(), _| -> std::future::Ready<std::io::Result<()>> {
+        panic!("test transport stopped while sending")
+    });
+    let service =
+        rmcp::service::serve_directly(DalfoxMcp::new(), (sink, futures::stream::pending()), None);
+    let peer = service.peer().clone();
+    let ping = peer.send_request(ServerRequest::PingRequest(Default::default()));
+    let (exit, _) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(wait_for_mcp(service), ping)
+    })
+    .await
+    .expect("the service must stop when its send task panics");
+    assert!(
+        exit.expect_err("a transport panic must reach the caller")
+            .is_panic()
+    );
+}
+
 /// Build GetResultsDalfoxParams with default pagination.
 fn get_params(scan_id: &str) -> GetResultsDalfoxParams {
     GetResultsDalfoxParams {
