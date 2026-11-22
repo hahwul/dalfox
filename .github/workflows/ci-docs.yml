@@ -1,0 +1,51 @@
+---
+name: Docs Lint
+# The docs lint also runs inside Extended CI, but that workflow triggers on
+# code, not on docs/**: a docs-only PR never ran it, and a broken link or an
+# unpaired EN/KO page surfaced later on someone else's code PR. This runs the
+# same lint for changes to what it reads. It needs Crystal only (no Rust
+# build), so it finishes in about a minute.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "skills/**"
+      - AGENTS.md
+      - scripts/docs_lint.cr
+      - scripts/spec/docs_lint_spec.cr
+      - "scripts/lib/**"
+      - .github/workflows/ci-docs.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "skills/**"
+      - AGENTS.md
+      - scripts/docs_lint.cr
+      - scripts/spec/docs_lint_spec.cr
+      - "scripts/lib/**"
+      - .github/workflows/ci-docs.yml
+  workflow_dispatch:
+# A new push to a PR cancels the run of the previous one. Every other run
+# gets a group of its own and always finishes.
+concurrency:
+  group: ci-docs-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  docs-lint:
+    name: Docs lint (EN/KO pairing, links, CSP, markers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # install-crystal apt-installs its build deps without refreshing the
+      # index; a stale runner image then 404s on superseded .debs.
+      - run: sudo apt-get update -q
+      - uses: crystal-lang/install-crystal@v1
+      - name: Docs lint
+        run: |
+          crystal spec scripts/spec/docs_lint_spec.cr
+          crystal run scripts/docs_lint.cr

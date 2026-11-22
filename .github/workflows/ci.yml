@@ -1,11 +1,50 @@
 ---
 name: CI
+# Everything `cargo build` / `cargo test` reads: the crate, and the non-Rust
+# files the tests load at run time (fixtures and the mock-case corpus under
+# tests/, and the skill bundle plus its published copy, which
+# tests/agent_skills_sync_test.rs compares). Push and pull_request use the
+# same list, so a merge that cannot change a test result (docs, CI, packaging)
+# does not re-run the matrix on main, and a PR that can change one always
+# runs it before the merge. The cargo / toolchain config names are listed
+# although none exists yet, so adding one cannot slip past the matrix.
 on:
   push:
     branches: [main]
+    paths:
+      - "**/*.rs"
+      - Cargo.toml
+      - Cargo.lock
+      - "src/**"
+      - "tests/**"
+      - "skills/dalfox/**"
+      - "docs/static/.well-known/agent-skills/**"
+      - ".cargo/**"
+      - "rust-toolchain*"
+      - rustfmt.toml
+      - .rustfmt.toml
+      - clippy.toml
+      - .clippy.toml
+      - packaging/docker/Dockerfile
+      - .github/workflows/ci.yml
   pull_request:
     branches: [main]
-    paths: ["**/*.rs", Cargo.toml, Cargo.lock, "src/**/*.toml", "src/**/*.txt", packaging/docker/Dockerfile, .github/workflows/ci.yml]
+    paths:
+      - "**/*.rs"
+      - Cargo.toml
+      - Cargo.lock
+      - "src/**"
+      - "tests/**"
+      - "skills/dalfox/**"
+      - "docs/static/.well-known/agent-skills/**"
+      - ".cargo/**"
+      - "rust-toolchain*"
+      - rustfmt.toml
+      - .rustfmt.toml
+      - clippy.toml
+      - .clippy.toml
+      - packaging/docker/Dockerfile
+      - .github/workflows/ci.yml
   workflow_dispatch:
 # A new push to a PR cancels the run of the previous one. Every other run
 # (push to main, schedule, manual) gets a group of its own and always finishes.

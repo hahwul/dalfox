@@ -3,12 +3,24 @@ name: Extended CI
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml,
-            .github/workflows/cd-snapcraft.yml, .github/workflows/cd-release.yml, .github/workflows/cd-release-asset.yml]
+    # tests/** carries the mock-case corpus the effectiveness gate scores and
+    # the fixtures the ignored functional tests load; skills/** is one of the
+    # surfaces the parity gate compares; the snap and AUR recipes carry a
+    # version the lockstep check reads. docs/** is deliberately absent: a
+    # docs-only change should not run the Rust jobs here, so the docs lint
+    # also runs on its own in ci-docs.yml.
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "tests/**", "skills/**", "scripts/**", "docs/data/**", snap/snapcraft.yaml, packaging/aur/PKGBUILD,
+            .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml, .github/workflows/cd-snapcraft.yml, .github/workflows/cd-release.yml, .github/workflows/cd-release-asset.yml]
   pull_request:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml,
-            .github/workflows/cd-snapcraft.yml, .github/workflows/cd-release.yml, .github/workflows/cd-release-asset.yml]
+    # tests/** carries the mock-case corpus the effectiveness gate scores and
+    # the fixtures the ignored functional tests load; skills/** is one of the
+    # surfaces the parity gate compares; the snap and AUR recipes carry a
+    # version the lockstep check reads. docs/** is deliberately absent: a
+    # docs-only change should not run the Rust jobs here, so the docs lint
+    # also runs on its own in ci-docs.yml.
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "tests/**", "skills/**", "scripts/**", "docs/data/**", snap/snapcraft.yaml, packaging/aur/PKGBUILD,
+            .github/workflows/ci-extended.yml, .github/workflows/cd-dockerhub.yml, .github/workflows/cd-snapcraft.yml, .github/workflows/cd-release.yml, .github/workflows/cd-release-asset.yml]
   schedule:
     # Weekly: exercise the slower, normally-#[ignore]d functional suite so it
     # can't silently rot between releases.

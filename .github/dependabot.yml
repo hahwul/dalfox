@@ -12,7 +12,9 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: docker
-    directory: /
+    # The only Dockerfile lives here. Pointed at the repository root, every
+    # run failed with "No Dockerfiles nor Kubernetes YAML found in /".
+    directory: /packaging/docker
     schedule:
       interval: weekly
 
