@@ -197,7 +197,7 @@ fn exit_daemon(outcome: ScanOutcome) -> ! {
 }
 
 fn print_config_diagnostic(message: std::fmt::Arguments<'_>) {
-    eprintln!("{}", utils::log::sanitize_log_message(&message.to_string()));
+    dalfox::ceprintln!("{}", utils::log::sanitize_log_message(&message.to_string()));
 }
 
 #[tokio::main]
@@ -289,6 +289,11 @@ async fn main() {
             error.exit();
         });
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.format(&mut command).exit());
+    // Config diagnostics and the server banner are the daemon's first log
+    // writes. Its log reader can already be closed or stalled at startup.
+    if matches!(cli.command, Some(Commands::Server(_) | Commands::Mcp)) {
+        utils::term::enter_daemon_mode();
+    }
 
     // `man` and `completion` each write one generated artifact to stdout and
     // nothing else — the roff has to stay pure roff, the completion script has
@@ -490,7 +495,6 @@ async fn main() {
             // supervisor reads status, not stderr, so the hard-coded `Clean`
             // made "the port was already in use" indistinguishable from a
             // clean shutdown.
-            utils::term::enter_daemon_mode();
             exit_daemon(match server::run_server(args).await {
                 Ok(()) => ScanOutcome::Clean,
                 Err(_) => ScanOutcome::Error,
@@ -503,7 +507,6 @@ async fn main() {
             // reads status, not stderr, and a hard-coded `Clean` made "the
             // server never came up" indistinguishable from a clean
             // shutdown.
-            utils::term::enter_daemon_mode();
             exit_daemon(match mcp::run_mcp_server().await {
                 Ok(()) => ScanOutcome::Clean,
                 Err(e) => {
