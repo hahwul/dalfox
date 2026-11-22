@@ -73,9 +73,20 @@ Gates exit non-zero on failure and print a `Report` checklist.
 Measurements write a JSON snapshot under `docs/data/` and fail when the new run
 regresses against the committed one.
 
+`effectiveness` compares per case, not only the totals: the snapshot carries a
+`verdicts` map (`"query/1": "V/high"`, `"-"` for no finding), and the gate fails
+when an expected case loses its finding, its `V` or its high-confidence grade,
+when a safe case gains a finding, when a scan errors, or when a case disappears.
+A miss or a false positive passes only if the snapshot already lists it. A run
+that passes rewrites the snapshot (recording new cases and gained detections);
+a run that fails, or one filtered to part of the corpus, leaves it alone. To
+accept a change the gate rejects — a relabelled case, a detection knowingly
+traded away — re-run with `EFFECTIVENESS_ACCEPT=1` and commit the file; its
+diff shows which cases moved.
+
 | harness | `just` | measures |
 | --- | --- | --- |
-| `effectiveness_snapshot.cr` | `effectiveness` | precision / recall / FP / FN against the labelled corpus |
+| `effectiveness_snapshot.cr` | `effectiveness` | precision / recall / FP / FN against the labelled corpus, gated case by case |
 | `perf_budget.cr` | `perf-budget` | requests and wall-clock per scenario |
 | `ab_diff.cr` | `ab-diff <old-bin>` | findings gained and lost between two binaries |
 | `xssmaze_score.cr` | `xssmaze-score` | detection rate against the XSSMaze lab (needs Docker) |

@@ -152,6 +152,11 @@ harness: build
 effectiveness: build
     crystal run scripts/effectiveness_snapshot.cr
 
+# Record this run as the effectiveness baseline even where the gate rejects it; commit the result.
+[group('benchmark')]
+effectiveness-accept: build
+    EFFECTIVENESS_ACCEPT=1 crystal run scripts/effectiveness_snapshot.cr
+
 # Re-report the committed effectiveness snapshot without scanning.
 [group('benchmark')]
 effectiveness-report:
