@@ -99,7 +99,7 @@ jobs:
           fi
       - name: Install cross-compilation tools
         if: matrix.use_cross == true
-        uses: taiki-e/install-action@v2.90.3
+        uses: taiki-e/install-action@v2.90.6
         with:
           tool: cross
       - name: Install musl tools
