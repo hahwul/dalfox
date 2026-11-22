@@ -7,6 +7,11 @@ on:
     branches: [main]
     paths: ["**/*.rs", Cargo.toml, Cargo.lock, "src/**/*.toml", "src/**/*.txt", packaging/docker/Dockerfile, .github/workflows/ci.yml]
   workflow_dispatch:
+# A new push to a PR cancels the run of the previous one. Every other run
+# (push to main, schedule, manual) gets a group of its own and always finishes.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
 jobs:
@@ -23,6 +28,12 @@ jobs:
         rust: [stable]
     steps:
       - uses: actions/checkout@v7
+      # Restores compiled dependencies. Only runs on main write the cache, so a
+      # PR reads main's entry and cannot fill the cache quota (10 GB by default)
+      # with its own.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build
         run: cargo build --verbose
       - name: Run tests
@@ -51,6 +62,9 @@ jobs:
         uses: taiki-e/install-action@v2.90.6
         with:
           tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Generate code coverage
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Upload to Codecov

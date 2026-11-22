@@ -29,6 +29,11 @@ on:
       - flake.lock
       - .github/workflows/ci-packaging.yml
   workflow_dispatch:
+# A new push to a PR cancels the run of the previous one. Every other run
+# (push to main, manual) gets a group of its own and always finishes.
+concurrency:
+  group: ci-packaging-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
 jobs:
