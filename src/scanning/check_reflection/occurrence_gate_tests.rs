@@ -259,9 +259,28 @@ fn every_script_occurrence_has_to_be_string_data() {
 }
 
 #[test]
-fn markup_structure_comments_and_css_are_live() {
+fn a_comment_is_inert_unless_the_payload_ends_it() {
+    let p = attr_payload();
+    let html = format!("<p>{p}</p><!-- rendered for q={p} -->");
+    assert!(inert(&html, &p));
+    // The payload carries the terminator: what follows it is markup.
+    let closing = format!("--><svg onload=alert(1) class={}>", marker());
+    let html = format!("<!-- rendered for q={closing} -->");
+    assert!(!inert(&html, &closing));
+    let closing = format!("--!><svg onload=alert(1) class={}>", marker());
+    let html = format!("<!-- rendered for q={closing} -->");
+    assert!(!inert(&html, &closing));
+    // Old Internet Explorer parsed the body of a conditional comment.
+    let html = format!("<p>{p}</p><!--[if lt IE 9]><p title='{p}'></p><![endif]-->");
+    assert!(!inert(&html, &p));
+    // A bogus comment is markup structure, not comment text.
+    let html = format!("<p>{p}</p><!x {p}>");
+    assert!(!inert(&html, &p));
+}
+
+#[test]
+fn markup_structure_and_css_are_live() {
     for html in [
-        "<p>alert(1)</p><!-- alert(1) -->",
         "<p>alert(1)</p><style>.a{content:'alert(1)'}</style>",
         "<p>alert(1)</p><div alert(1)>x</div>",
         "<p>alert(1)</p><alert(1)>",

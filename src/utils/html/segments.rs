@@ -12,10 +12,11 @@ and ends, and reports the stretches that are **not** markup structure:
 * [`SegmentKind::RawText`] — the content of `<script>`, `<style>`,
   `<textarea>`, `<title>` and the other raw-text elements,
 * [`SegmentKind::AttrValue`] — one attribute value of a start tag, without its
-  quotes.
+  quotes,
+* [`SegmentKind::Comment`] — the text of a `<!-- … -->` comment.
 
 Anything outside a segment is structure: a tag name, an attribute name, the
-space between attributes, a comment, a doctype. A caller asking "is this echo
+space between attributes, a doctype, a bogus comment. A caller asking "is this echo
 inert?" treats a byte outside every segment as live.
 
 The tokenizer only needs the tree builder for two decisions: which start tags
@@ -28,7 +29,7 @@ browser would read as markup; the reverse only costs a suppression.
 
 use std::collections::VecDeque;
 
-use super::{FOREIGN_BREAKOUT_TAGS, skip_comment, skip_to_first_gt};
+use super::{FOREIGN_BREAKOUT_TAGS, comment_extent, skip_to_first_gt};
 
 /// One stretch of the document that is not markup structure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +55,8 @@ pub(crate) enum SegmentKind<'a> {
     /// The value of one attribute of a start tag, quotes excluded. `element`
     /// and `name` are as written in the document.
     AttrValue { element: &'a str, name: &'a str },
+    /// The text of a `<!-- … -->` comment, delimiters excluded.
+    Comment,
     /// From here to the end of the document the model gives no answer.
     Unparsed,
 }
@@ -378,7 +381,14 @@ impl<'a> Segments<'a> {
         }
         match bytes[lt + 1] {
             b'!' if bytes[lt + 2..].starts_with(b"--") => {
-                self.pos = skip_comment(bytes, lt + 4);
+                let text_start = lt + 4;
+                // `<!-->` and `<!--->` close on the opening dashes and hold no
+                // text; a comment the input ends inside runs to the end.
+                let (text_end, end) = comment_extent(bytes, text_start);
+                if text_end > text_start {
+                    self.push(text_start, text_end, SegmentKind::Comment);
+                }
+                self.pos = end;
             }
             // A real CDATA section exists only in foreign content, and what it
             // holds there is text the model has not followed.

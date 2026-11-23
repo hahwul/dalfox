@@ -1715,6 +1715,7 @@ fn attr_echo(
 /// An occurrence is inert when the segmenter places it wholly inside
 ///
 /// * **text** — the tokenizer saw no tag in it, so nothing in it is markup;
+/// * a **comment** that is not a conditional comment;
 /// * a **raw-text element** a browser only displays
 ///   ([`INERT_RAW_TEXT_ELEMENTS`]);
 /// * an **attribute value** a browser only stores (see [`attr_echo`]);
@@ -1723,9 +1724,9 @@ fn attr_echo(
 ///   ([`crate::scanning::js_context_verify::echo_is_string_data`]).
 ///
 /// Anything else keeps the finding: an occurrence that crosses a segment
-/// boundary (it opened a tag, closed a quote, ended an element), one in a tag
-/// outside any value, in a comment, in `<style>`, in a data block or an
-/// unclosed script, and anything after the point where the segmenter stops.
+/// boundary (it opened a tag, closed a quote, ended an element or a comment),
+/// one in a tag outside any value, in `<style>`, in a data block or an unclosed
+/// script, and anything after the point where the segmenter stops.
 ///
 /// Encoded echoes are checked where they matter: in attribute values a browser
 /// acts on, [`attr_echo`] also looks for the payload entity- or
@@ -1821,6 +1822,19 @@ pub(crate) fn reflection_inert_at_every_occurrence(html: &str, payload: &str) ->
         match segment.kind {
             SegmentKind::Text => {}
             SegmentKind::Unparsed => return false,
+            // The segmenter ends a comment where the tokenizer does, so an
+            // occurrence wholly inside one did not close it. A conditional
+            // comment is the exception: old Internet Explorer parsed its body.
+            SegmentKind::Comment => {
+                if !hits.is_empty()
+                    && body
+                        .trim_start()
+                        .get(..3)
+                        .is_some_and(|open| open.eq_ignore_ascii_case("[if"))
+                {
+                    return false;
+                }
+            }
             SegmentKind::AttrValue { element, name } => {
                 if attr_echo(element, name, body, &variants, anchor, !hits.is_empty())
                     == AttrEcho::Live

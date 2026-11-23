@@ -4681,7 +4681,7 @@ async fn test_sxss_applies_the_same_response_gates_as_the_normal_path() {
 ///
 /// Under a `--limit` the phase loops now flush before every limit check
 /// (`limit_reached_in_phase`), so the abort can no longer be holding a batched
-/// finding. `victim` below reflects entity-escaped into an HTML comment, a
+/// finding. `victim` below reflects entity-escaped into a `<style>` block, a
 /// position the scanner neither verifies nor proves inert: it records an `R`
 /// on its first reflection payload, that `R` alone trips `--limit 1`, and the
 /// worker aborts mid-catalog. The finding that tripped the limit must be in
@@ -4704,7 +4704,7 @@ async fn test_run_scanning_limit_abort_keeps_already_confirmed_findings() {
                 .replace('>', "&gt;")
                 .replace('"', "&quot;");
             Html(format!(
-                "<html><body><!-- debug: {escaped} --></body></html>"
+                "<html><head><style>.q::after{{content:\"{escaped}\"}}</style></head><body></body></html>"
             ))
         }
     };
@@ -6149,9 +6149,10 @@ async fn test_run_scanning_limit_ignores_findings_only_poc_hides() {
             .replace('<', "&lt;")
             .replace('>', "&gt;")
             .replace('"', "&quot;");
-        // A comment: reported as `R`, never verified (see the fixture above).
+        // A `<style>` block: reported as `R`, never verified (see the fixture
+        // above).
         Html(format!(
-            "<html><body><!-- debug: {escaped} --></body></html>"
+            "<html><head><style>.q::after{{content:\"{escaped}\"}}</style></head><body></body></html>"
         ))
     };
     let addr = spawn_regression_app(Router::new().route("/", get(handler))).await;
@@ -6180,7 +6181,7 @@ async fn test_run_scanning_limit_ignores_findings_only_poc_hides() {
             .await
             .iter()
             .any(|r| r.result_type == FindingType::Reflected),
-        "fixture: the echo inside the comment records an R"
+        "fixture: the echo inside the style block records an R"
     );
     assert_eq!(findings_count.load(Ordering::Relaxed), 0);
     assert!(

@@ -114,6 +114,32 @@ fn comments_and_declarations_are_not_text() {
     assert_eq!(texts("a<!-- never closed <p>x"), ["a"]);
 }
 
+fn comments(html: &str) -> Vec<&str> {
+    segments(html)
+        .filter(|s| s.kind == SegmentKind::Comment)
+        .map(|s| &html[s.start..s.end])
+        .collect()
+}
+
+#[test]
+fn comment_text_excludes_its_delimiters() {
+    assert_eq!(comments("a<!-- x <b> y -->c"), [" x <b> y "]);
+    assert_eq!(comments("<!--x--!>y"), ["x"]);
+    assert_eq!(comments("<!--x-->y<!--z-->"), ["x", "z"]);
+    // The first `-->` ends it; the rest is text.
+    assert_eq!(comments("<!--x-->y-->"), ["x"]);
+    assert_eq!(texts("<!--x-->y-->"), ["y-->"]);
+    // Empty forms hold nothing.
+    assert!(comments("<!-->a<!--->b<!---->c").is_empty());
+    assert_eq!(texts("<!-->a<!--->b<!---->c"), ["a", "b", "c"]);
+    // Never closed: the comment runs to the end of input.
+    assert_eq!(comments("a<!-- x <p>y"), [" x <p>y"]);
+    // Bogus comments and doctypes are structure, not comment text.
+    assert!(comments("<!x><?y></ z><!DOCTYPE html>").is_empty());
+    // Inside raw text `<!--` is not a comment.
+    assert!(comments("<textarea><!-- x --></textarea>").is_empty());
+}
+
 #[test]
 fn raw_text_elements_hold_their_markup_as_text() {
     assert_eq!(
@@ -282,6 +308,7 @@ mod differential {
         Text(String),
         Attr(String, String, String),
         Raw(String, String),
+        Comment(String),
     }
 
     #[derive(Default)]
@@ -350,6 +377,11 @@ mod differential {
                         st.events.push(Event::Raw(name, content));
                     }
                 }
+                Token::CommentToken(text) => {
+                    if !text.is_empty() {
+                        st.events.push(Event::Comment(text.to_string()));
+                    }
+                }
                 _ => {}
             }
             TokenSinkResult::Continue
@@ -394,6 +426,7 @@ mod differential {
                 SegmentKind::RawText { element, .. } => {
                     events.push(Event::Raw(element.to_ascii_lowercase(), body.to_string()));
                 }
+                SegmentKind::Comment => events.push(Event::Comment(body.to_string())),
                 SegmentKind::Unparsed => panic!("unexpected stop in {html:?}"),
             }
         }
@@ -480,6 +513,47 @@ mod differential {
         "＜",
     ];
 
+    /// html5ever reports a bogus comment (`<!x>`, `<?x>`, `</ x>`) as a comment
+    /// token too; the segmenter reports no text for those. Comment events are
+    /// compared only for documents that cannot contain one. The test is on the
+    /// raw bytes, so it also skips documents where the sequence sits in an
+    /// attribute value or raw text; that only costs coverage.
+    fn may_hold_a_bogus_comment(html: &str) -> bool {
+        let bytes = html.as_bytes();
+        (0..bytes.len()).any(|i| {
+            bytes[i] == b'<'
+                && match bytes.get(i + 1) {
+                    Some(b'!') => !bytes[i + 2..].starts_with(b"--"),
+                    Some(b'?') => true,
+                    Some(b'/') => bytes
+                        .get(i + 2)
+                        .is_some_and(|b| !b.is_ascii_alphabetic() && *b != b'>'),
+                    _ => false,
+                }
+        })
+    }
+
+    /// Both event lists for `html`, or `None` when they are not comparable.
+    fn compared(html: &str) -> Option<(Vec<Event>, Vec<Event>)> {
+        let mut expected = oracle_events(html)?;
+        let mut actual = segment_events(html);
+        if may_hold_a_bogus_comment(html) {
+            for events in [&mut expected, &mut actual] {
+                events.retain(|e| !matches!(e, Event::Comment(_)));
+                // Text on both sides of a dropped comment reads as one run.
+                let mut merged: Vec<Event> = Vec::with_capacity(events.len());
+                for event in events.drain(..) {
+                    match (merged.last_mut(), event) {
+                        (Some(Event::Text(last)), Event::Text(more)) => last.push_str(&more),
+                        (_, event) => merged.push(event),
+                    }
+                }
+                *events = merged;
+            }
+        }
+        Some((actual, expected))
+    }
+
     struct XorShift(u64);
 
     impl XorShift {
@@ -494,20 +568,23 @@ mod differential {
     #[test]
     fn segments_agree_with_html5ever_on_generated_documents() {
         let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
-        let mut compared = 0u32;
+        let mut compared_documents = 0u32;
         for _ in 0..60_000 {
             let len = 1 + (rng.next() % 28) as usize;
             let html: String = (0..len)
                 .map(|_| ATOMS[(rng.next() % ATOMS.len() as u64) as usize])
                 .collect();
-            let Some(expected) = oracle_events(&html) else {
+            let Some((actual, expected)) = compared(&html) else {
                 continue;
             };
-            assert_eq!(segment_events(&html), expected, "document: {html:?}");
-            compared += 1;
+            assert_eq!(actual, expected, "document: {html:?}");
+            compared_documents += 1;
         }
         // The duplicate-attribute skip must stay a minority.
-        assert!(compared > 40_000, "only {compared} documents compared");
+        assert!(
+            compared_documents > 40_000,
+            "only {compared_documents} documents compared"
+        );
     }
 
     #[test]
@@ -526,15 +603,18 @@ mod differential {
             "<title></title/>y",
             "x</title y='>'>z",
             "<!--a--!>b<!--c-->d",
+            "<!---->a<!--->b<!-->c<!----->d",
+            "<!--a--b-->c<!--d->e-->f",
+            "<!--a<!--b-->c-->d",
+            "x<!--a--",
+            "x<!--a-",
+            "x<!--a",
             "<! a>b<? c>d</ e>f",
             "<div title=\"a > b\">c",
             "<div title=a>b",
         ] {
-            assert_eq!(
-                Some(segment_events(html)),
-                oracle_events(html),
-                "document: {html:?}"
-            );
+            let (actual, expected) = compared(html).expect("no duplicate attributes");
+            assert_eq!(actual, expected, "document: {html:?}");
         }
     }
 }
