@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -58,49 +59,201 @@ func Test_checkCrossSite(t *testing.T) {
 		for k, v := range tc.headers {
 			req.Header.Set(k, v)
 		}
-		got := checkCrossSite(req, opts)
+		got := checkCrossSite(req, opts, newOriginMatcher(opts.AllowedOrigins))
 		assert.Equal(t, tc.ok, got == "", "%s: %q", tc.name, got)
 	}
 
 	// --jsonp exists to be read cross-origin, so it opts out.
 	req := httptest.NewRequest(http.MethodGet, "/scan/x", nil)
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	assert.Empty(t, checkCrossSite(req, &model.Options{JSONP: true}))
+	assert.Empty(t, checkCrossSite(req, &model.Options{JSONP: true}, originMatcher{}))
 }
 
+func Test_checkCrossSite_sameOrigin(t *testing.T) {
+	// The bundled Swagger UI sends Origin on its POST/DELETE calls.
+	req := httptest.NewRequest(http.MethodPost, "/scan", nil)
+	req.Host = "127.0.0.1:6664"
+	req.Header.Set("Origin", "http://127.0.0.1:6664")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	assert.Empty(t, checkCrossSite(req, &model.Options{}, originMatcher{}))
+
+	// Same host, different port is another origin.
+	req.Header.Set("Origin", "http://127.0.0.1:8080")
+	assert.NotEmpty(t, checkCrossSite(req, &model.Options{}, originMatcher{}))
+	req.Header.Set("Origin", "null")
+	assert.NotEmpty(t, checkCrossSite(req, &model.Options{}, originMatcher{}))
+}
+
+func Test_originMatcher_matchesEchoCORS(t *testing.T) {
+	m := newOriginMatcher([]string{"https://*.corp.example", "http://ui.local:300?", "https://exact.example/"})
+	assert.True(t, m.allows("https://ui.corp.example"))
+	assert.True(t, m.allows("https://a.b.corp.example"))
+	assert.True(t, m.allows("http://ui.local:3001"))
+	// echo CORS does not strip a trailing slash, so neither do we.
+	assert.False(t, m.allows("https://exact.example"))
+	assert.True(t, m.allows("https://exact.example/"))
+	assert.False(t, m.allows("https://corp.example.evil"))
+	assert.False(t, m.allows("https://evilcorp.example"))
+	assert.False(t, m.allows("http://ui.local:30011"))
+	assert.True(t, newOriginMatcher([]string{"*"}).allows("https://anything.example"))
+	assert.False(t, newOriginMatcher(nil).allows("https://anything.example"))
+}
+
+// stubScans replaces the scan launcher for the duration of a test, so no
+// real scan goroutine outlives it.
+func stubScans(t *testing.T) chan model.Options {
+	t.Helper()
+	got := make(chan model.Options, 16)
+	orig := startAPIScan
+	startAPIScan = func(_ string, rq model.Options, _ model.Options, _ string) { got <- rq }
+	t.Cleanup(func() { startAPIScan = orig })
+	return got
+}
+
+func serve(e *echo.Echo, method, path, body string, mutate func(*http.Request)) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Host = "127.0.0.1:6664"
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if mutate != nil {
+		mutate(req)
+	}
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+
+const scanBody = `{"url":"http://127.0.0.1:1/"}`
+
 func Test_requestSourceGuard_onServer(t *testing.T) {
+	stubScans(t)
 	scans := []string{}
-	options := model.Options{ServerType: "rest", ServerHost: "127.0.0.1", Scan: map[string]model.Scan{}}
+	options := model.Options{ServerHost: "127.0.0.1", Scan: map[string]model.Scan{}}
 	e := setupEchoServer(&options, &scans)
 
-	send := func(mutate func(*http.Request)) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/scan", strings.NewReader(`{"url":"http://127.0.0.1:1/"}`))
-		req.Host = "127.0.0.1:6664"
-		req.Header.Set("Content-Type", "application/json")
-		mutate(req)
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		return rec
-	}
-
-	rec := send(func(*http.Request) {})
+	rec := serve(e, http.MethodPost, "/scan", scanBody, nil)
 	assert.Equal(t, http.StatusOK, rec.Code, "curl-style client must keep working")
 
-	rec = send(func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") })
+	rec = serve(e, http.MethodPost, "/scan", scanBody, func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") })
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Origin: https://evil.example")
 
-	rec = send(func(r *http.Request) { r.Host = "rebind.evil.example:6664" })
+	rec = serve(e, http.MethodPost, "/scan", scanBody, func(r *http.Request) { r.Host = "rebind.evil.example:6664" })
 	assert.Equal(t, http.StatusForbidden, rec.Code, "DNS-rebound Host must be rejected")
-
-	rec = send(func(r *http.Request) { r.Header.Set("Content-Type", "application/x-www-form-urlencoded") })
-	assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
+	assert.Contains(t, rec.Body.String(), "untrusted Host")
 
 	// /health is browser-probeable too; the guard covers every route.
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	rec = httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	rec = serve(e, http.MethodGet, "/health", "", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") })
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Sec-Fetch-Site: cross-site")
+
+	// Same-origin Swagger UI calls carry an Origin and must pass.
+	rec = serve(e, http.MethodDelete, "/scans/all", "", func(r *http.Request) {
+		r.Header.Set("Origin", "http://127.0.0.1:6664")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+	})
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func Test_requestSourceGuard_preflightGetsHostCheck(t *testing.T) {
+	scans := []string{}
+	options := model.Options{ServerHost: "127.0.0.1", AllowedOrigins: []string{"https://*.example.com"}, Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	preflight := func(host string) int {
+		return serve(e, http.MethodOptions, "/scan", "", func(r *http.Request) {
+			r.Host = host
+			r.Header.Set("Origin", "https://app.example.com")
+			r.Header.Set("Access-Control-Request-Method", "POST")
+		}).Code
+	}
+	assert.Equal(t, http.StatusForbidden, preflight("rebind.evil.example:6664"))
+	assert.Equal(t, http.StatusNoContent, preflight("127.0.0.1:6664"))
+}
+
+func Test_jsonpOptsOutReadsOnly(t *testing.T) {
+	stubScans(t)
+	scans := []string{}
+	options := model.Options{ServerHost: "127.0.0.1", JSONP: true, Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	crossSite := func(r *http.Request) {
+		r.Header.Set("Origin", "https://evil.example")
+		r.Header.Set("Sec-Fetch-Site", "cross-site")
+	}
+	assert.Equal(t, http.StatusForbidden, serve(e, http.MethodPost, "/scan", scanBody, crossSite).Code)
+	assert.Equal(t, http.StatusForbidden, serve(e, http.MethodDelete, "/scans/all", "", crossSite).Code)
+	rec := serve(e, http.MethodGet, "/health?callback=cb", "", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") })
+	assert.Equal(t, http.StatusOK, rec.Code, "<script src> reads are what --jsonp is for")
+}
+
+func Test_apiKeyServer_skipsSourceGuard(t *testing.T) {
+	stubScans(t)
+	scans := []string{}
+	options := model.Options{ServerHost: "0.0.0.0", APIKey: "k", Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	byServiceName := func(r *http.Request) { r.Host = "dalfox:6664" }
+	assert.Equal(t, http.StatusUnauthorized, serve(e, http.MethodGet, "/health", "", byServiceName).Code)
+	assert.Equal(t, http.StatusOK, serve(e, http.MethodGet, "/health", "", func(r *http.Request) {
+		byServiceName(r)
+		r.Header.Set(APIKeyHeader, "k")
+	}).Code, "a keyed client addressing a compose/k8s service name must work")
+}
+
+func Test_setupEchoServer_enforcesKeyWhateverServerType(t *testing.T) {
+	// --type REST / library callers with an empty ServerType used to skip the
+	// API key check entirely.
+	for _, st := range []string{"", "REST", "rest", "anything"} {
+		scans := []string{}
+		options := model.Options{ServerType: st, APIKey: "k", Scan: map[string]model.Scan{}}
+		e := setupEchoServer(&options, &scans)
+		assert.Equal(t, http.StatusUnauthorized, serve(e, http.MethodGet, "/scans", "", nil).Code, "ServerType %q", st)
+	}
+}
+
+func Test_postScanHandler_contentType(t *testing.T) {
+	stubScans(t)
+	scans := []string{}
+	options := model.Options{ServerHost: "127.0.0.1", Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	for ct, want := range map[string]int{
+		"application/json":                  http.StatusOK,
+		"application/json; charset=utf-8":   http.StatusOK,
+		"application/x-www-form-urlencoded": http.StatusUnsupportedMediaType,
+		"text/plain":                        http.StatusUnsupportedMediaType,
+		"application/jsonx":                 http.StatusUnsupportedMediaType,
+		"application/json-evil":             http.StatusUnsupportedMediaType,
+		"":                                  http.StatusUnsupportedMediaType,
+	} {
+		rec := serve(e, http.MethodPost, "/scan", scanBody, func(r *http.Request) { r.Header.Set("Content-Type", ct) })
+		assert.Equal(t, want, rec.Code, "Content-Type %q", ct)
+	}
+}
+
+func Test_hostName(t *testing.T) {
+	for in, want := range map[string]string{
+		"localhost.:6664":       "localhost",
+		"[::1]:6664":            "::1",
+		"[::1]":                 "::1",
+		"dalfox.internal:16664": "dalfox.internal",
+		" dalfox.internal ":     "dalfox.internal",
+		":6664":                 "",
+	} {
+		assert.Equal(t, want, hostName(in), in)
+	}
+	opts := &model.Options{AllowedHosts: []string{"dalfox.internal:16664"}}
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Host = "dalfox.internal:16664"
+	assert.Empty(t, checkHost(req, opts), "--allowed-hosts entries may carry a port")
+	req.Host = ":6664"
+	assert.NotEmpty(t, checkHost(req, &model.Options{}), "an empty name never matches an empty --host")
+}
+
+func Test_setupEchoServer_ipv6Addr(t *testing.T) {
+	for _, h := range []string{"::1", "[::1]"} {
+		scans := []string{}
+		e := setupEchoServer(&model.Options{ServerHost: h, ServerPort: 6664}, &scans)
+		assert.Equal(t, "[::1]:6664", e.Server.Addr)
+	}
 }
 
 func Test_prepareRESTScanOptions(t *testing.T) {
@@ -110,8 +263,15 @@ func Test_prepareRESTScanOptions(t *testing.T) {
 	assert.False(t, rq.OutputResponse, "no API key: raw response must be stripped")
 	assert.Empty(t, rq.FoundAction)
 
-	rq = model.Options{OutputRequest: true, OutputResponse: true, FoundAction: "id"}
+	rq = model.Options{PoCType: "http-request", CookieFromRaw: "/nonexistent"}
+	prepareRESTScanOptions(&rq, &model.Options{})
+	assert.Equal(t, "plain", rq.PoCType, "no API key: http-request PoCs embed a request dump")
+	assert.Empty(t, rq.CookieFromRaw, "server-side path; a missing file calls os.Exit")
+
+	rq = model.Options{OutputRequest: true, OutputResponse: true, FoundAction: "id", PoCType: "http-request", CookieFromRaw: "/x"}
 	prepareRESTScanOptions(&rq, &model.Options{APIKey: "k"})
+	assert.Equal(t, "http-request", rq.PoCType)
+	assert.Empty(t, rq.CookieFromRaw, "stripped regardless of auth")
 	assert.True(t, rq.OutputRequest, "authenticated callers keep opt-in raw output")
 	assert.True(t, rq.OutputResponse)
 	assert.Empty(t, rq.FoundAction, "dangerous options are stripped regardless of auth")
@@ -128,25 +288,18 @@ func Test_serverExposureWarnings(t *testing.T) {
 }
 
 func Test_postScanHandler_stripsRawOutputWithoutAPIKey(t *testing.T) {
-	got := make(chan model.Options, 1)
-	orig := startAPIScan
-	startAPIScan = func(_ string, rq model.Options, _ model.Options, _ string) { got <- rq }
-	defer func() { startAPIScan = orig }()
-
+	got := stubScans(t)
+	// Empty ServerType too: the strip must follow the key, not the type.
 	for _, tc := range []struct {
 		apiKey string
 		keep   bool
 	}{{"", false}, {"k", true}} {
 		scans := []string{}
-		options := model.Options{ServerType: "rest", APIKey: tc.apiKey, Scan: map[string]model.Scan{}}
+		options := model.Options{APIKey: tc.apiKey, Scan: map[string]model.Scan{}}
 		e := setupEchoServer(&options, &scans)
-		req := httptest.NewRequest(http.MethodPost, "/scan",
-			strings.NewReader(`{"url":"http://127.0.0.1:1/","options":{"output-request":true,"output-response":true}}`))
-		req.Header.Set("Content-Type", "application/json")
-		req.Host = "127.0.0.1:6664"
-		req.Header.Set(APIKeyHeader, tc.apiKey)
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		rec := serve(e, http.MethodPost, "/scan",
+			`{"url":"http://127.0.0.1:1/","options":{"output-request":true,"output-response":true}}`,
+			func(r *http.Request) { r.Header.Set(APIKeyHeader, tc.apiKey) })
 		if !assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String()) {
 			return
 		}

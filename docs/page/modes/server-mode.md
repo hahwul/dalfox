@@ -41,8 +41,11 @@ dalfox server --host 0.0.0.0 --port 8090 --api-key "your-secret-key"
 # Start REST API server with API key authentication
 dalfox server --api-key "your-secret-key"
 
-# Start REST API server with CORS and JSONP enabled
-dalfox server --allowed-origins "http://localhost:3000,https://example.com" --jsonp
+# Allow a browser UI on another origin (CORS)
+dalfox server --api-key "your-secret-key" --allowed-origins "http://localhost:3000,https://example.com"
+
+# Serve JSONP for <script src> readers (trusted networks only; see Security Considerations)
+dalfox server --jsonp
 
 # Start as an MCP server
 dalfox server --type mcp
@@ -286,11 +289,18 @@ jobs:
 When deploying Dalfox in server mode, consider the following security practices:
 
 1. **Access Control**: The server listens on `127.0.0.1` by default. If you bind it to another address, set `--api-key`: without one, anyone who can reach the port can make Dalfox send requests to any host it can reach, including internal services. Dalfox prints a warning at startup in that case.
-2. **Raw HTTP output**: Without `--api-key`, the REST API ignores `output-request` and `output-response`, so scan results never carry raw request or response bodies to unauthenticated callers.
-3. **Browser requests**: The REST API rejects cross-site browser requests (by `Origin` and `Sec-Fetch-Site`) and requests whose `Host` header is a hostname other than `localhost`, the `--host` value, or one listed in `--allowed-hosts` (this blocks DNS rebinding). Origins listed in `--allowed-origins` are accepted. `--jsonp` turns the cross-site check off, because JSONP exists to be read cross-origin; do not combine it with an unauthenticated server.
-4. **Resource Limits**: Set appropriate worker and timeout values to avoid resource exhaustion
-5. **Monitoring**: Implement monitoring for the Dalfox server to track resource usage and scan activity
-6. **Isolation**: Run the server in an isolated environment (Docker container or separate VM)
+2. **Raw HTTP output**: Without `--api-key`, the REST API ignores `output-request` and `output-response` and turns a `poc-type` of `http-request` into `plain`, so scan results carry no raw request or response dumps. Findings still include a short `evidence` snippet of the response around the payload.
+3. **Server-side files**: The REST and MCP APIs ignore options that name a file on the server (`cookie-from-raw`, `custom-payload-file`, `mining-dict-word`, `output`, `har-file-path`, and so on) and `found-action`, with or without an API key.
+4. **Browser requests (no API key)**: Without `--api-key`, the REST API rejects requests that a web page could make on your behalf:
+   - cross-site requests, judged by `Origin` and `Sec-Fetch-Site`. Same-origin requests (the bundled Swagger UI) and origins listed in `--allowed-origins` are accepted.
+   - requests whose `Host` header is a hostname other than `localhost`, the `--host` value, or one listed in `--allowed-hosts`. This blocks DNS rebinding. IP addresses are always accepted. If clients reach the server by a name (a Docker Compose service, a Kubernetes Service, an internal DNS name), add it with `--allowed-hosts`, or set `--api-key`.
+
+   With `--api-key`, these checks are skipped: a web page cannot attach the `X-API-KEY` header without CORS approval.
+5. **JSONP**: `--jsonp` lets any web page read results through `<script src>`, so it also turns off the cross-site check for `GET` requests. A `<script>` tag cannot send `X-API-KEY`, so JSONP only works on a server without an API key. Use it only on a trusted network.
+6. **Request format**: `POST /scan` accepts only `Content-Type: application/json`.
+7. **Resource Limits**: Set appropriate worker and timeout values to avoid resource exhaustion
+8. **Monitoring**: Implement monitoring for the Dalfox server to track resource usage and scan activity
+9. **Isolation**: Run the server in an isolated environment (Docker container or separate VM)
 
 ## Common Issues and Solutions
 
