@@ -21,15 +21,31 @@ inert?" treats a byte outside every segment as live.
 
 The tokenizer only needs the tree builder for two decisions: which start tags
 switch it into a raw-text state, and whether it is inside foreign (SVG/MathML)
-content, where those switches do not happen. Both are modelled here with one
-rule: when the model cannot be sure, it stops and reports the rest of the
-document as [`SegmentKind::Unparsed`]. It must never claim "text" for bytes a
-browser would read as markup; the reverse only costs a suppression.
+content, where those switches do not happen. Answering either exactly takes the
+whole stack of open elements, which this does not keep. It follows the
+well-formed cases instead — foreign elements that nest and close in order, an
+integration point that holds text only — and at anything else it stops and
+reports the rest of the document as [`SegmentKind::Unparsed`]:
+
+* an end tag in foreign content that no open foreign element answers (it may
+  close an HTML ancestor and the foreign root with it),
+* an end tag inside an integration point that an enclosing foreign element
+  could answer, or that the integration point may not be the one to answer
+  because an HTML element opened inside it,
+* table structure and `template` end tags inside an integration point, which
+  are not stopped by it the way most end tags are,
+* the start tags the tree builder may drop instead of acting on: raw-text
+  elements inside `select`, anything after `frameset`, anything after a `col`
+  inside `template`.
+
+It must never claim "text" for bytes a browser would read as markup; being in
+the wrong namespace in *either* direction can do that, so there is no safe side
+to guess toward.
 */
 
 use std::collections::VecDeque;
 
-use super::{FOREIGN_BREAKOUT_TAGS, comment_extent, skip_to_first_gt};
+use super::{FOREIGN_BREAKOUT_TAGS, VOID_ELEMENTS, comment_extent, skip_to_first_gt};
 
 /// One stretch of the document that is not markup structure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,13 +118,48 @@ impl ForeignRoot {
 /// What the insertion point is nested in, innermost last. Empty means plain
 /// HTML content.
 #[derive(Debug)]
-enum Frame {
-    /// Inside `<svg>` / `<math>`. `depth` counts same-named roots nested
-    /// directly in this foreign content, so each `</svg>` closes one.
-    Foreign { root: ForeignRoot, depth: usize },
+enum Frame<'a> {
+    /// Inside `<svg>` / `<math>`. `open` lists the foreign elements opened in
+    /// it and not yet closed, innermost last.
+    Foreign {
+        root: ForeignRoot,
+        open: Vec<&'a str>,
+    },
     /// Inside an integration point of the frame below: HTML content again.
-    Html { element: &'static str },
+    /// `html_opened` is set once an HTML element that can stay open started in
+    /// here; from then on that element, not the integration point, may be the
+    /// one an end tag is matched against.
+    Html {
+        element: &'static str,
+        math: bool,
+        html_opened: bool,
+    },
 }
+
+impl Frame<'_> {
+    /// Whether an end tag `name` could be answered by an element of this frame.
+    fn has_element(&self, name: &str) -> bool {
+        match self {
+            Frame::Foreign { root, open } => {
+                name.eq_ignore_ascii_case(root.name())
+                    || open.iter().any(|o| o.eq_ignore_ascii_case(name))
+            }
+            Frame::Html { element, .. } => name.eq_ignore_ascii_case(element),
+        }
+    }
+}
+
+/// Foreign elements tracked per root before the model gives up. Real SVG is
+/// one to two orders of magnitude shallower.
+const MAX_OPEN_FOREIGN_ELEMENTS: usize = 4096;
+
+/// Table structure, plus `template`. Their end tags are looked up in "table
+/// scope" (or on the whole stack), which an integration point does not bound,
+/// and in a table insertion mode their start tags close the open cell or row
+/// first. Either way they can close an integration point from inside it.
+const CROSSES_INTEGRATION_POINT: &[&str] = &[
+    "caption", "col", "colgroup", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "template",
+];
 
 fn is_tag_space(b: u8) -> bool {
     matches!(b, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ')
@@ -299,9 +350,11 @@ pub(crate) struct Segments<'a> {
     html: &'a str,
     pos: usize,
     queue: VecDeque<Segment<'a>>,
-    frames: Vec<Frame>,
+    frames: Vec<Frame<'a>>,
     /// Between `<select>` and `</select>` in HTML content.
     in_select: bool,
+    /// `<template>` start tags not yet matched by an end tag.
+    template_depth: usize,
     finished: bool,
 }
 
@@ -313,6 +366,7 @@ pub(crate) fn segments(html: &str) -> Segments<'_> {
         queue: VecDeque::new(),
         frames: Vec::new(),
         in_select: false,
+        template_depth: 0,
         finished: false,
     }
 }
@@ -428,43 +482,68 @@ impl<'a> Segments<'a> {
         if name.eq_ignore_ascii_case("select") {
             self.in_select = false;
         }
+        if name.eq_ignore_ascii_case("template") {
+            self.template_depth = self.template_depth.saturating_sub(1);
+        }
         enum Action {
             Keep,
             LeaveForeign,
-            CloseRoot,
-            CloseIntegrationPoint,
+            CloseForeign(usize),
+            PopFrame,
             Stop,
         }
-        let action = match self.frames.last() {
-            // These two end tags are handled as HTML and close the foreign
-            // content.
-            Some(Frame::Foreign { .. }) if name_in(name, &["p", "br"]) => Action::LeaveForeign,
-            Some(Frame::Foreign { root, .. }) if name.eq_ignore_ascii_case(root.name()) => {
-                Action::CloseRoot
+        let action = match self.frames.split_last() {
+            None => Action::Keep,
+            Some((Frame::Foreign { root, open }, _)) => {
+                if name_in(name, &["p", "br"]) {
+                    // These two end tags are handled as HTML and close the
+                    // foreign content.
+                    Action::LeaveForeign
+                } else if let Some(at) = open.iter().rposition(|o| o.eq_ignore_ascii_case(name)) {
+                    Action::CloseForeign(at)
+                } else if name.eq_ignore_ascii_case(root.name()) {
+                    Action::PopFrame
+                } else {
+                    // No foreign element answers it, so it goes to the HTML
+                    // elements around the root, where it may close one of them
+                    // and the root with it, or be ignored.
+                    Action::Stop
+                }
             }
-            // Any other end tag may close an HTML ancestor and the foreign
-            // root with it. Staying "foreign" then is the safe side.
-            Some(Frame::Foreign { .. }) => Action::Keep,
-            Some(Frame::Html { element }) if name.eq_ignore_ascii_case(element) => {
-                Action::CloseIntegrationPoint
+            Some((
+                Frame::Html {
+                    element,
+                    html_opened,
+                    ..
+                },
+                enclosing,
+            )) => {
+                if name.eq_ignore_ascii_case(element) {
+                    if *html_opened {
+                        Action::Stop
+                    } else {
+                        Action::PopFrame
+                    }
+                } else if name_in(name, CROSSES_INTEGRATION_POINT)
+                    || enclosing.iter().any(|f| f.has_element(name))
+                {
+                    Action::Stop
+                } else {
+                    // Matched against the HTML elements inside the integration
+                    // point only.
+                    Action::Keep
+                }
             }
-            // Whether this closes the enclosing root depends on which HTML
-            // elements are open inside the integration point.
-            Some(Frame::Html { .. }) if name_in(name, &["svg", "math"]) => Action::Stop,
-            _ => Action::Keep,
         };
         match action {
             Action::Keep => {}
             Action::LeaveForeign => self.leave_foreign_content(),
-            Action::CloseRoot => {
-                if let Some(Frame::Foreign { depth, .. }) = self.frames.last_mut() {
-                    *depth -= 1;
-                    if *depth == 0 {
-                        self.frames.pop();
-                    }
+            Action::CloseForeign(at) => {
+                if let Some(Frame::Foreign { open, .. }) = self.frames.last_mut() {
+                    open.truncate(at);
                 }
             }
-            Action::CloseIntegrationPoint => {
+            Action::PopFrame => {
                 self.frames.pop();
             }
             Action::Stop => self.stop_at(lt),
@@ -510,33 +589,61 @@ impl<'a> Segments<'a> {
                 }
                 self.leave_foreign_content();
             } else {
-                if name.eq_ignore_ascii_case(root.name()) {
-                    if !tag.self_closing
-                        && let Some(Frame::Foreign { depth, .. }) = self.frames.last_mut()
-                    {
-                        *depth += 1;
-                    }
-                } else if let Some(element) = root
-                    .integration_points()
-                    .iter()
-                    .find(|p| name.eq_ignore_ascii_case(p))
-                {
-                    if !tag.self_closing {
-                        self.frames.push(Frame::Html { element });
-                    }
-                } else if name_in(name, &["script", "style", "annotation-xml"]) {
+                if name_in(name, &["script", "style", "annotation-xml"]) {
                     // A foreign `<script>` runs its text and a foreign
                     // `<style>` is CSS, but neither is a raw-text element, and
                     // `annotation-xml` is an integration point only for some
                     // `encoding` values.
                     self.queue.truncate(queued);
                     self.stop_at(lt);
+                } else if tag.self_closing {
+                    // Opens nothing.
+                } else if let Some(element) = root
+                    .integration_points()
+                    .iter()
+                    .find(|p| name.eq_ignore_ascii_case(p))
+                {
+                    self.frames.push(Frame::Html {
+                        element,
+                        math: root == ForeignRoot::Math,
+                        html_opened: false,
+                    });
+                } else if let Some(Frame::Foreign { open, .. }) = self.frames.last_mut() {
+                    if open.len() >= MAX_OPEN_FOREIGN_ELEMENTS {
+                        self.queue.truncate(queued);
+                        self.stop_at(lt);
+                    } else {
+                        open.push(name);
+                    }
                 }
                 return;
             }
         }
 
-        // HTML content.
+        // HTML content: the document itself, or an integration point.
+        if let Some(Frame::Html {
+            math, html_opened, ..
+        }) = self.frames.last_mut()
+        {
+            // Inside a MathML text integration point these two stay MathML
+            // elements, and what follows them is foreign content again. Table
+            // structure can close the integration point from inside it.
+            if (*math && name_in(name, &["mglyph", "malignmark"]))
+                || name_in(name, CROSSES_INTEGRATION_POINT)
+            {
+                self.queue.truncate(queued);
+                self.stop_at(lt);
+                return;
+            }
+            // A raw-text element is consumed whole below, a void element never
+            // stays open, and a foreign root gets a frame of its own.
+            if !name_in(name, VOID_ELEMENTS)
+                && !name_in(name, RAW_TEXT_ELEMENTS)
+                && !name_in(name, &["svg", "math"])
+            {
+                *html_opened = true;
+            }
+        }
         let foreign_root = if name.eq_ignore_ascii_case("svg") {
             Some(ForeignRoot::Svg)
         } else if name.eq_ignore_ascii_case("math") {
@@ -546,7 +653,10 @@ impl<'a> Segments<'a> {
         };
         if let Some(root) = foreign_root {
             if !tag.self_closing {
-                self.frames.push(Frame::Foreign { root, depth: 1 });
+                self.frames.push(Frame::Foreign {
+                    root,
+                    open: Vec::new(),
+                });
             }
             return;
         }
@@ -554,9 +664,16 @@ impl<'a> Segments<'a> {
             self.in_select = true;
             return;
         }
-        if name.eq_ignore_ascii_case("frameset") {
-            // In a frameset document the tree builder ignores the start tags
-            // that would switch the tokenizer to raw text.
+        if name.eq_ignore_ascii_case("template") {
+            self.template_depth += 1;
+            return;
+        }
+        if name.eq_ignore_ascii_case("frameset")
+            || (self.template_depth > 0 && name.eq_ignore_ascii_case("col"))
+        {
+            // In a frameset document, and after a `col` in template contents,
+            // the tree builder ignores the start tags that would switch the
+            // tokenizer to raw text.
             self.queue.truncate(queued);
             self.stop_at(lt);
             return;
@@ -591,7 +708,18 @@ impl<'a> Segments<'a> {
                 closed: plaintext || content_end.is_some(),
             },
         );
-        self.pos = end;
+        // The element's own end tag closes it and nothing else, so it is
+        // consumed here instead of being matched against the frames.
+        self.pos = match content_end {
+            Some(close) => match scan_tag(html, close + 2 + name.len(), |_, _, _| {}) {
+                Some(end_tag) => end_tag.end,
+                None => {
+                    self.finished = true;
+                    bytes.len()
+                }
+            },
+            None => bytes.len(),
+        };
     }
 }
 

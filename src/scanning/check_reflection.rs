@@ -1726,7 +1726,8 @@ fn attr_echo(
 /// Anything else keeps the finding: an occurrence that crosses a segment
 /// boundary (it opened a tag, closed a quote, ended an element or a comment),
 /// one in a tag outside any value, in `<style>`, in a data block or an unclosed
-/// script, and anything after the point where the segmenter stops.
+/// script, and any trace of the payload after the point where the segmenter
+/// stops.
 ///
 /// Encoded echoes are checked where they matter: in attribute values a browser
 /// acts on, [`attr_echo`] also looks for the payload entity- or
@@ -1821,7 +1822,13 @@ pub(crate) fn reflection_inert_at_every_occurrence(html: &str, payload: &str) ->
         let body = &html[segment.start..segment.end];
         match segment.kind {
             SegmentKind::Text => {}
-            SegmentKind::Unparsed => return false,
+            // The segmenter gave up from here on. That only matters if the
+            // payload came back in this part, in any encoding.
+            SegmentKind::Unparsed => {
+                if !hits.is_empty() || body.contains(anchor) {
+                    return false;
+                }
+            }
             // The segmenter ends a comment where the tokenizer does, so an
             // occurrence wholly inside one did not close it. A conditional
             // comment is the exception: old Internet Explorer parsed its body.

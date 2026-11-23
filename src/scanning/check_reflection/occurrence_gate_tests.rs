@@ -291,13 +291,20 @@ fn markup_structure_and_css_are_live() {
 }
 
 #[test]
-fn everything_after_the_segmenter_stops_is_live() {
-    let html = "<svg><script>var x = 1;</script></svg><p>alert(1)</p>";
-    assert!(!inert(html, "alert(1)"));
-    let html = "<p>alert(1)</p><svg><style>a{}</style></svg>";
-    assert!(!inert(html, "alert(1)"));
-    let html = "<p>alert(1)</p><select><xmp>x</xmp></select>";
-    assert!(!inert(html, "alert(1)"));
+fn a_trace_of_the_payload_after_the_segmenter_stops_is_live() {
+    for html in [
+        "<svg><script>var x = 1;</script></svg><p>alert(1)</p>",
+        "<p>alert(1)</p><svg><style>a{}</style><text>alert(1)</text></svg>",
+        "<p>alert(1)</p><select><xmp>alert(1)</xmp></select>",
+        // Not the whole payload, but its anchor: an encoding the gate cannot
+        // undo, in a part of the page it cannot place.
+        "<p>alert(1)</p><svg><style>a{}</style><a onclick=\"alert&lpar;1&rpar;\">x</a></svg>",
+    ] {
+        assert!(!inert(html, "alert(1)"), "{html}");
+    }
+    // Nothing of the payload in the part the segmenter gave up on.
+    let html = "<p>alert(1)</p><svg><style>a{}</style><path d=\"M0 0\"/></svg>";
+    assert!(inert(html, "alert(1)"));
 }
 
 #[test]

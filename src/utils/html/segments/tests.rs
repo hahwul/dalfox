@@ -217,8 +217,9 @@ fn foreign_content_has_no_raw_text_elements() {
         [("img", "src", "x"), ("img", "onerror", "alert(1)")]
     );
     // After `</svg>` it is a raw-text element again.
-    let html = "<svg><g></g></svg><title><img></title>";
+    let html = "<svg><g><path d='M0'/></g></svg><title><img></title>";
     assert_eq!(raw_texts(html), [("title", "<img>", true)]);
+    assert_eq!(unparsed_from(html), None);
     // A self-closing root opens nothing.
     assert_eq!(raw_texts("<svg/><title>a</title>"), [("title", "a", true)]);
     // HTML inside an integration point has raw-text elements.
@@ -232,43 +233,108 @@ fn foreign_content_has_no_raw_text_elements() {
         [("textarea", "<b>", true)]
     );
     assert_eq!(
-        raw_texts("<math><mi><title>a</title></mi></math>"),
+        raw_texts("<math><mi>x</mi><mo><title>a</title></mo></math>"),
         [("title", "a", true)]
     );
-    // `mi` is an integration point in MathML only.
-    assert!(raw_texts("<svg><mi><title><b></title>").is_empty());
+    // `mi` is an integration point in MathML only, and `title` in SVG only.
+    assert!(raw_texts("<svg><mi><textarea><b></textarea>").is_empty());
+    assert!(raw_texts("<math><title><textarea><b></textarea>").is_empty());
 }
 
 #[test]
-fn nested_foreign_roots_close_one_at_a_time() {
-    let html = "<svg><svg></svg><title><b></title></svg><title><i></title>";
-    assert_eq!(raw_texts(html), [("title", "<i>", true)]);
+fn well_formed_foreign_content_is_followed_to_its_end() {
+    let html = "<svg><g><svg><title>t</title><path d='M0'></svg><circle/></g></svg>\
+                <textarea><i></textarea>";
+    assert_eq!(unparsed_from(html), None);
+    assert_eq!(raw_texts(html), [("textarea", "<i>", true)]);
+    // An end tag closes through the foreign elements above the one it names.
+    let html = "<svg><g><path><rect></g></svg><xmp><i></xmp>";
+    assert_eq!(unparsed_from(html), None);
+    assert_eq!(raw_texts(html), [("xmp", "<i>", true)]);
+    // `</p>` and `</br>` leave foreign content, like a breakout start tag.
+    assert_eq!(
+        raw_texts("<svg><g></p><xmp><i></xmp>"),
+        [("xmp", "<i>", true)]
+    );
+    // Void and raw-text elements do not stay open inside an integration point.
+    let html = "<svg><desc>a<br><img src=x><textarea>t</textarea></desc></svg><xmp>x</xmp>";
+    assert_eq!(unparsed_from(html), None);
+    assert_eq!(
+        raw_texts(html),
+        [("textarea", "t", true), ("xmp", "x", true)]
+    );
 }
 
+/// Where following the namespace would take the stack of open elements, the
+/// model stops instead of guessing. Each document is paired with the offset
+/// it stops at; the comments say what a browser does with it.
 #[test]
 fn the_model_stops_where_it_cannot_follow_the_tree_builder() {
-    let html = "a<svg><script>alert(1)</script></svg>";
-    assert_eq!(unparsed_from(html), Some(6));
-    assert_eq!(texts(html), ["a"]);
-    assert_eq!(unparsed_from("<svg><style>x</style>"), Some(5));
-    assert_eq!(unparsed_from("<svg><![CDATA[<b>]]></svg>"), Some(5));
-    assert_eq!(unparsed_from("<svg><font color=red><title>"), Some(5));
-    assert_eq!(
-        unparsed_from("<svg><foreignObject><div></svg><title>"),
-        Some(25)
-    );
-    assert_eq!(unparsed_from("<select><xmp><img></xmp></select>"), Some(8));
-    assert_eq!(unparsed_from("<frameset><textarea>"), Some(0));
+    for (html, at) in [
+        // A foreign `<script>` runs its text; a foreign `<style>` is CSS.
+        ("a<svg><script>alert(1)</script></svg>", 6),
+        ("<svg><style>x</style>", 5),
+        ("<svg><![CDATA[<b>]]></svg>", 5),
+        ("<svg><font color=red><title>", 5),
+        ("<math><annotation-xml encoding='text/html'><title>", 6),
+        // `</div>` closes the `<div>` and the `<svg>` in it. The `<title>`
+        // after it is then MathML, not an SVG integration point.
+        ("<div><svg></div><math><title><title><img></title>", 10),
+        // `</g>` closes `<title>` and `<g>`, so the next `<title>` is another
+        // integration point holding real markup.
+        ("<svg><g><title></g><title><img></title>", 15),
+        ("<svg><foreignObject><div></svg><title>", 25),
+        // With `<div>` open, `</foreignObject>` is ignored: still HTML.
+        (
+            "<svg><foreignObject><div></foreignObject><title><textarea></title><img>",
+            25,
+        ),
+        // The inner `<title>` is a raw-text element; a `<b>` would stay open.
+        ("<svg><title><b></title><title><img></title>", 15),
+        // `mglyph` in a text integration point is MathML again.
+        ("<math><mtext><mglyph><title><img></title>", 13),
+        ("<math><mi><malignmark><title><img></title>", 10),
+        // Table structure is not stopped by an integration point.
+        ("<table><td><svg><title></td><title><img></title>", 23),
+        ("<table><td><svg><desc><col><title><img></title>", 22),
+        // `</foreignObject>` closes `<mi>`, `<math>` and itself: SVG again.
+        (
+            "<svg><foreignObject><math><mi></foreignObject><title><img></title>",
+            30,
+        ),
+        ("<template><svg><title></template><title><img></title>", 22),
+        // The tree builder drops these start tags instead of acting on them.
+        ("<select><xmp><img></xmp></select>", 8),
+        ("<frameset><textarea>", 0),
+        ("<template><col><title></template><img>", 10),
+    ] {
+        assert_eq!(unparsed_from(html), Some(at), "{html}");
+    }
     // Not in the way otherwise.
-    assert_eq!(
-        unparsed_from("<svg><path d=''/></svg><script>1</script>"),
-        None
-    );
-    assert_eq!(
-        unparsed_from("<select><option>a</select><xmp>b</xmp>"),
-        None
-    );
-    assert_eq!(unparsed_from("<p><![CDATA[x]]></p>"), None);
+    for html in [
+        "<svg><path d=''/></svg><script>1</script>",
+        "<select><option>a</select><xmp>b</xmp>",
+        "<p><![CDATA[x]]></p>",
+        "<template><p>a</p></template><title>t</title>",
+        "<table><colgroup><col></colgroup><tr><td><textarea>x</textarea>",
+    ] {
+        assert_eq!(unparsed_from(html), None, "{html}");
+    }
+}
+
+#[test]
+fn a_raw_text_end_tag_is_not_matched_against_the_frames() {
+    // The inner `</title>` belongs to the HTML `<title>` inside the SVG one.
+    let html = "<svg><title><title>a</title>b</title></svg><xmp>c</xmp>";
+    assert_eq!(unparsed_from(html), None);
+    assert_eq!(raw_texts(html), [("title", "a", true), ("xmp", "c", true)]);
+    assert_eq!(texts(html), ["b"]);
+}
+
+#[test]
+fn deeply_nested_foreign_content_stops_instead_of_growing() {
+    let html = format!("<svg>{}<title>t</title>", "<g>".repeat(5000));
+    assert!(unparsed_from(&html).is_some());
 }
 
 #[test]
@@ -288,6 +354,209 @@ fn multibyte_text_keeps_char_boundaries() {
     let html = "<p title=\"한글 ＜\">日本語<b>＞</b>";
     assert_eq!(attrs(html), [("p", "title", "한글 ＜")]);
     assert_eq!(texts(html), ["日本語", "＞"]);
+}
+
+// ---- property test against html5ever's tree builder -----------------------
+
+/// The differential test below drives html5ever's *tokenizer* and switches its
+/// raw-text states by tag name, so it cannot see the decisions that need the
+/// tree builder: foreign content, integration points, `select`, `template`,
+/// tables. This one parses whole documents with `scraper` and checks the one
+/// property the segmenter's caller relies on: bytes that became an element
+/// are never reported as data.
+mod tree_builder {
+    use super::super::{SegmentKind, segments};
+
+    const PROBE: &str = "<img data-probe=x>";
+
+    /// Ways to end a document with the probe. In plain HTML content the first
+    /// four hold it as text; whether they do depends on everything before.
+    const ENDINGS: &[(&str, &str)] = &[
+        ("<title>", "</title>"),
+        ("<textarea>", "</textarea>"),
+        ("<xmp>", "</xmp>"),
+        ("<noscript>", "</noscript>"),
+        ("<!--", "-->"),
+        ("", ""),
+        // The probe ends up inside a raw-text element the prefix opened only
+        // if the prefix's own `<textarea>` / `<xmp>` was a start tag.
+        ("", "</textarea>"),
+        ("", "</xmp>"),
+    ];
+
+    const NAMES: &[&str] = &[
+        "svg",
+        "math",
+        "foreignObject",
+        "desc",
+        "title",
+        "mi",
+        "mo",
+        "mtext",
+        "mglyph",
+        "malignmark",
+        "annotation-xml",
+        "g",
+        "a",
+        "path",
+        "div",
+        "p",
+        "span",
+        "b",
+        "table",
+        "tbody",
+        "tr",
+        "td",
+        "th",
+        "caption",
+        "colgroup",
+        "col",
+        "select",
+        "option",
+        "optgroup",
+        "template",
+        "button",
+        "object",
+        "applet",
+        "marquee",
+        "form",
+        "font",
+        "textarea",
+        "xmp",
+        "noscript",
+        "style",
+        "script",
+        "iframe",
+        "frameset",
+        "body",
+        "head",
+        "br",
+        "img",
+        "li",
+        "ul",
+        "input",
+        "nobr",
+        "h1",
+    ];
+
+    const EXTRA: &[&str] = &[
+        "<svg/>",
+        "<path/>",
+        "<g/>",
+        "<title/>",
+        "<foreignObject/>",
+        "<mi/>",
+        "<desc/>",
+        "<font color=red>",
+        "<annotation-xml encoding=\"text/html\">",
+        "<![CDATA[",
+        "]]>",
+        "<!--",
+        "-->",
+        "x",
+        " ",
+        "<svg><title>",
+        "<math><mtext>",
+        "</svg></svg>",
+    ];
+
+    fn probe_became_an_element(html: &str) -> bool {
+        let selector = scraper::Selector::parse("img[data-probe]").expect("selector");
+        scraper::Html::parse_document(html)
+            .select(&selector)
+            .next()
+            .is_some()
+    }
+
+    /// Whether the segmenter reports the probe at `at` as data: wholly inside
+    /// a segment, anything but the "no answer" one.
+    fn probe_reported_as_data(html: &str, at: usize) -> bool {
+        segments(html)
+            .any(|s| s.kind != SegmentKind::Unparsed && s.start <= at && at + PROBE.len() <= s.end)
+    }
+
+    fn violates(prefix: &str, ending: (&str, &str)) -> Option<String> {
+        let html = format!("{prefix}{}{PROBE}{}", ending.0, ending.1);
+        let at = prefix.len() + ending.0.len();
+        (probe_reported_as_data(&html, at) && probe_became_an_element(&html)).then_some(html)
+    }
+
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    #[test]
+    fn an_element_is_never_reported_as_data() {
+        let mut atoms: Vec<String> = EXTRA.iter().map(|a| a.to_string()).collect();
+        for name in NAMES {
+            atoms.push(format!("<{name}>"));
+            atoms.push(format!("</{name}>"));
+        }
+        let mut rng = XorShift(0x0123_4567_89AB_CDEF);
+        let mut reported_as_data = 0u32;
+        for _ in 0..40_000 {
+            let len = 1 + rng.below(12);
+            let prefix: String = (0..len)
+                .map(|_| atoms[rng.below(atoms.len())].as_str())
+                .collect();
+            let ending = ENDINGS[rng.below(ENDINGS.len())];
+            if let Some(html) = violates(&prefix, ending) {
+                panic!("reported as data, parsed as an element: {html:?}");
+            }
+            let at = prefix.len() + ending.0.len();
+            let html = format!("{prefix}{}{PROBE}{}", ending.0, ending.1);
+            reported_as_data += u32::from(probe_reported_as_data(&html, at));
+        }
+        // The property is vacuous if the model stops on everything.
+        assert!(
+            reported_as_data > 4_000,
+            "only {reported_as_data} documents were followed to the probe"
+        );
+    }
+
+    #[test]
+    fn known_tree_builder_cases() {
+        for (prefix, ending) in [
+            ("<svg><g><title></g>", ENDINGS[0]),
+            ("<div><svg></div><math><title>", ENDINGS[0]),
+            (
+                "<svg><foreignObject><div></foreignObject><title><textarea></title>",
+                ENDINGS[1],
+            ),
+            ("<math><mtext><mglyph>", ENDINGS[0]),
+            ("<template><col><title></template>", ENDINGS[5]),
+            ("<table><td><svg><title></td></title><title>", ENDINGS[0]),
+            ("<svg><title><title></title></title>", ENDINGS[0]),
+            ("<select><xmp>", ENDINGS[5]),
+            ("<div><svg></div><math></svg>", ENDINGS[0]),
+            // A stale "inside SVG" belief makes the HTML `<title>` an
+            // integration point, and the `<textarea>` in it a start tag.
+            (
+                "<table><td><svg><title></td></title><title><textarea></title>",
+                ENDINGS[6],
+            ),
+            // `col` is void, so only the table-structure rule sees it.
+            (
+                "<table><td><svg><desc><col></desc><title><textarea></title>",
+                ENDINGS[6],
+            ),
+            // The end tag names an integration point further out.
+            ("<svg><foreignObject><math><mi></foreignObject>", ENDINGS[0]),
+            (
+                "<svg><foreignObject><p></foreignObject><title><xmp></title>",
+                ENDINGS[7],
+            ),
+        ] {
+            assert_eq!(violates(prefix, ending), None);
+        }
+    }
 }
 
 // ---- differential test against html5ever's tokenizer ----------------------
@@ -377,10 +646,8 @@ mod differential {
                         st.events.push(Event::Raw(name, content));
                     }
                 }
-                Token::CommentToken(text) => {
-                    if !text.is_empty() {
-                        st.events.push(Event::Comment(text.to_string()));
-                    }
+                Token::CommentToken(text) if !text.is_empty() => {
+                    st.events.push(Event::Comment(text.to_string()));
                 }
                 _ => {}
             }
