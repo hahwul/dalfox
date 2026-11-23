@@ -69,6 +69,7 @@ type Options struct {
 	APIKey         string   `json:"api-key,omitempty"`
 	ServerType     string   `json:"server-type,omitempty"`
 	AllowedOrigins []string `json:"allowed-origins,omitempty"`
+	AllowedHosts   []string `json:"allowed-hosts,omitempty"`
 	JSONP          bool     `json:"jsonp,omitempty"`
 
 	// Output Options

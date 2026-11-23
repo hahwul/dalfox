@@ -1,8 +1,10 @@
 package server
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	printing "github.com/hahwul/dalfox/v2/internal/printing"
@@ -46,6 +48,7 @@ func RunAPIServer(options model.Options) {
 	if options.Scan == nil {
 		options.Scan = make(map[string]model.Scan)
 	}
+	printServerWarnings(&options)
 	e := setupEchoServer(&options, &scans)                      // Pass address of options
 	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options) // Pass options by value
 	graceful.ListenAndServe(e.Server, 5*time.Second)
@@ -62,6 +65,12 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 			AllowOrigins: options.AllowedOrigins,
 			AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete},
 		}))
+	}
+
+	// Request-source checks run before the API key, so a browser page can't
+	// drive the API even when auth is off (GHSA-c98c-mph6-6hm9).
+	if options.ServerType == "rest" {
+		e.Use(requestSourceGuard(options))
 	}
 
 	// API Key Authentication Middleware
@@ -108,7 +117,7 @@ func apiKeyAuth(validAPIKey string, options *model.Options) echo.MiddlewareFunc 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			apiKey := c.Request().Header.Get(APIKeyHeader)
-			if apiKey == "" || apiKey != validAPIKey {
+			if apiKey == "" || subtle.ConstantTimeCompare([]byte(apiKey), []byte(validAPIKey)) != 1 {
 				res := Res{Code: http.StatusUnauthorized, Msg: "Unauthorized: Invalid or missing API Key"}
 				return respondJSONorJSONP(c, http.StatusUnauthorized, res, options)
 			}
@@ -190,7 +199,36 @@ func sanitizeAPIScanOptions(o *model.Options) {
 	o.MiningWordlist = ""
 }
 
+// stripRawHTTPOutput drops raw request/response capture from findings. With
+// no API key, whoever can reach the port would otherwise read the full body
+// of any internal page dalfox can reach (GHSA-c98c-mph6-6hm9).
+func stripRawHTTPOutput(o *model.Options) {
+	o.OutputRequest = false
+	o.OutputResponse = false
+}
+
+// prepareRESTScanOptions applies every scrub a REST scan request goes through.
+func prepareRESTScanOptions(rq *model.Options, server *model.Options) {
+	sanitizeAPIScanOptions(rq)
+	if server.APIKey == "" {
+		stripRawHTTPOutput(rq)
+	}
+}
+
+// startAPIScan is swapped in tests to observe the options a scan starts with.
+var startAPIScan = ScanFromAPI
+
 func postScanHandler(c echo.Context, scans *[]string, options *model.Options) error {
+	// JSON only. Req has no `form` tags, so a form-encoded body never filled
+	// in the URL anyway; this turns that silent empty-URL scan into an error
+	// and keeps preflight-free cross-site bodies out by construction.
+	if ct := c.Request().Header.Get(echo.HeaderContentType); !strings.HasPrefix(strings.ToLower(strings.TrimSpace(ct)), echo.MIMEApplicationJSON) {
+		res := &Res{
+			Code: http.StatusUnsupportedMediaType,
+			Msg:  "Content-Type must be application/json",
+		}
+		return respondJSONorJSONP(c, http.StatusUnsupportedMediaType, res, options)
+	}
 	rq := new(Req)
 	if err := c.Bind(rq); err != nil {
 		res := &Res{
@@ -199,7 +237,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 		}
 		return respondJSONorJSONP(c, http.StatusInternalServerError, res, options)
 	}
-	sanitizeAPIScanOptions(&rq.Options)
+	prepareRESTScanOptions(&rq.Options, options)
 	sid := utils.GenerateRandomToken(rq.URL)
 	res := &Res{
 		Code: http.StatusOK,
@@ -209,7 +247,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 	if options.Scan == nil {
 		options.Scan = make(map[string]model.Scan)
 	}
-	go ScanFromAPI(rq.URL, rq.Options, *options, sid)
+	go startAPIScan(rq.URL, rq.Options, *options, sid)
 
 	return respondJSONorJSONP(c, http.StatusOK, res, options)
 }

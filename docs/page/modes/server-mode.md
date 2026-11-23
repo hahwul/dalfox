@@ -32,11 +32,11 @@ These modes are particularly valuable for:
 To start Dalfox in server mode, use the `server` command:
 
 ```bash
-# Start with default settings (listening on 0.0.0.0:6664 in REST API mode)
+# Start with default settings (listening on 127.0.0.1:6664 in REST API mode)
 dalfox server
 
-# Specify custom host and port
-dalfox server --host 127.0.0.1 --port 8090
+# Listen on all interfaces (set an API key whenever the port is reachable by others)
+dalfox server --host 0.0.0.0 --port 8090 --api-key "your-secret-key"
 
 # Start REST API server with API key authentication
 dalfox server --api-key "your-secret-key"
@@ -52,17 +52,18 @@ dalfox server --type mcp
 
 | Flag                | Description                                                                  | Default        |
 |---------------------|------------------------------------------------------------------------------|----------------|
-| `--host`            | Specify the address to bind the server to                                    | `0.0.0.0`      |
+| `--host`            | Specify the address to bind the server to                                    | `127.0.0.1`    |
 | `--port`            | Specify the port to bind the server to                                       | `6664`         |
 | `--type`            | Specify the server type (`rest` or `mcp`)                                    | `rest`         |
 | `--api-key`         | Specify the API key for server authentication (REST API mode only)           | `""` (empty)   |
 | `--allowed-origins` | Comma-separated list of allowed origins for CORS (REST API mode only)        | `[]` (empty)   |
+| `--allowed-hosts`   | Extra hostnames accepted in the `Host` header (REST API mode only)           | `[]` (empty)   |
 | `--jsonp`           | Enable JSONP responses by checking for a `callback` param (REST API mode only) | `false`        |
 
 ### Example Output
 
 ```bash
-dalfox server --host 0.0.0.0 --port 8090
+dalfox server --host 0.0.0.0 --port 8090 --api-key "your-secret-key"
     _..._
   .' .::::.   __   _   _    ___ _ __ __
  :  :::::::: |  \ / \ | |  | __/ \\ V /
@@ -261,7 +262,8 @@ jobs:
       
       - name: Run Dalfox Server
         run: |
-          docker run -d -p 6664:6664 hahwul/dalfox:latest server
+          # Inside a container the server must listen on 0.0.0.0 to be reachable
+          docker run -d -p 127.0.0.1:6664:6664 hahwul/dalfox:latest /app/dalfox server --host 0.0.0.0
           sleep 5  # Wait for server to start
       
       - name: Run Scan
@@ -283,10 +285,12 @@ jobs:
 
 When deploying Dalfox in server mode, consider the following security practices:
 
-1. **Access Control**: Restrict access to the API server using a reverse proxy, firewall rules, or API keys
-2. **Resource Limits**: Set appropriate worker and timeout values to avoid resource exhaustion
-3. **Monitoring**: Implement monitoring for the Dalfox server to track resource usage and scan activity
-4. **Isolation**: Run the server in an isolated environment (Docker container or separate VM)
+1. **Access Control**: The server listens on `127.0.0.1` by default. If you bind it to another address, set `--api-key`: without one, anyone who can reach the port can make Dalfox send requests to any host it can reach, including internal services. Dalfox prints a warning at startup in that case.
+2. **Raw HTTP output**: Without `--api-key`, the REST API ignores `output-request` and `output-response`, so scan results never carry raw request or response bodies to unauthenticated callers.
+3. **Browser requests**: The REST API rejects cross-site browser requests (by `Origin` and `Sec-Fetch-Site`) and requests whose `Host` header is a hostname other than `localhost`, the `--host` value, or one listed in `--allowed-hosts` (this blocks DNS rebinding). Origins listed in `--allowed-origins` are accepted. `--jsonp` turns the cross-site check off, because JSONP exists to be read cross-origin; do not combine it with an unauthenticated server.
+4. **Resource Limits**: Set appropriate worker and timeout values to avoid resource exhaustion
+5. **Monitoring**: Implement monitoring for the Dalfox server to track resource usage and scan activity
+6. **Isolation**: Run the server in an isolated environment (Docker container or separate VM)
 
 ## Common Issues and Solutions
 

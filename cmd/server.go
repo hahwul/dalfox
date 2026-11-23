@@ -10,6 +10,7 @@ import (
 var port int                        // Port to bind the server to
 var host, serverType, apiKey string // Host address, server type, and API Key
 var allowedOrigins []string         // Allowed origins for CORS
+var allowedHosts []string           // Extra Host header names accepted
 var jsonp bool                      // Enable JSONP responses
 
 // serverCmd represents the server command for starting API servers
@@ -28,6 +29,7 @@ func runServerCmd(cmd *cobra.Command, args []string) {
 	options.APIKey = apiKey
 	options.ServerType = serverType // Add this line to store serverType in options
 	options.AllowedOrigins = allowedOrigins
+	options.AllowedHosts = allowedHosts
 	options.JSONP = jsonp
 
 	switch serverType {
@@ -46,10 +48,11 @@ func runServerCmd(cmd *cobra.Command, args []string) {
 func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.Flags().IntVar(&port, "port", 6664, "Specify the port to bind the server to. Example: --port 6664")
-	serverCmd.Flags().StringVar(&host, "host", "0.0.0.0", "Specify the address to bind the server to. Example: --host '0.0.0.0'")
+	serverCmd.Flags().StringVar(&host, "host", "127.0.0.1", "Specify the address to bind the server to. Use --host '0.0.0.0' to listen on all interfaces (set --api-key too).")
 	serverCmd.Flags().StringVar(&serverType, "type", "rest", "Specify the server type. Example: --type 'rest' or --type 'mcp'")
 	serverCmd.Flags().StringVar(&apiKey, "api-key", "", "Specify the API key for server authentication. Example: --api-key 'your-secret-key'")
 	serverCmd.Flags().StringSliceVar(&allowedOrigins, "allowed-origins", []string{}, "Allowed origins for CORS. Example: --allowed-origins \"http://example.com,http://localhost:3000\"")
+	serverCmd.Flags().StringSliceVar(&allowedHosts, "allowed-hosts", []string{}, "Extra hostnames accepted in the Host header (IP literals, localhost and --host are always accepted). Example: --allowed-hosts \"dalfox.internal\"")
 	serverCmd.Flags().BoolVar(&jsonp, "jsonp", false, "Enable JSONP responses. Example: --jsonp")
 
 	// Apply custom help format to this subcommand
