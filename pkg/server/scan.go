@@ -51,7 +51,8 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 // @Success 200 {object} Res
 // @Router /scan/{scanid} [get]
 func GetScan(sid string, options model.Options) model.Scan {
-	return options.Scan[sid]
+	s, _ := model.LoadScan(options.Scan, sid)
+	return s
 }
 
 // GetScans is list of scan

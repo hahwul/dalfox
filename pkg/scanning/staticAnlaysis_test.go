@@ -2,6 +2,7 @@ package scanning
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -159,4 +160,18 @@ func Test_StaticAnalysis(t *testing.T) {
 			StaticAnalysis(tt.target, tt.options, rl)
 		})
 	}
+}
+
+func Test_StaticAnalysis_unparsablePathVariant(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	// Replacing "a?" with dalfoxpathtest leaves "/%zz" in the path, which
+	// does not parse; this used to dereference a nil request.
+	target := srv.URL + "/a?/%zz"
+	assert.NotPanics(t, func() {
+		StaticAnalysis(target, model.Options{Timeout: 5}, newRateLimiter(0))
+	})
 }

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	printing "github.com/hahwul/dalfox/v2/internal/printing"
@@ -61,6 +62,10 @@ func RunAPIServer(options model.Options) {
 		fmt.Fprintln(os.Stderr, "[ERROR] REST API server: "+err.Error())
 	}
 }
+
+// scansMu serializes the handlers that read or rewrite the scan ID list;
+// echo serves requests concurrently.
+var scansMu sync.Mutex
 
 func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // options is now a pointer
 	e := echo.New()
@@ -135,18 +140,28 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	})
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.GET("/scans", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return scansHandler(c, scans, options)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return scanHandler(c, scans, options)
 	})
 	e.POST("/scan", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return postScanHandler(c, scans, options)
 	})
 	e.DELETE("/scans/all", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return deleteScansHandler(c, scans, options)
 	})
 	e.DELETE("/scan/:sid", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return deleteScanHandler(c, scans, options)
 	})
 	return e
@@ -190,7 +205,7 @@ func scansHandler(c echo.Context, scans *[]string, options *model.Options) error
 
 func scanHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	sid := c.Param("sid")
-	scanData, inOptionsScan := options.Scan[sid]
+	scanData, inOptionsScan := model.LoadScan(options.Scan, sid)
 	scanResult := GetScan(sid, *options)
 
 	res := &Res{}
@@ -245,30 +260,37 @@ func sanitizeAPIScanOptions(o *model.Options) {
 	// file calls os.Exit(1), so one request could stop the server.
 	o.CookieFromRaw = ""
 
-	// Values the CLI never produces but that crash the whole process when a
-	// scan goroutine panics: make(chan, -1) for a negative worker count, and
-	// a nil request from an unparsable trigger URL. 0 means "default" to
+	// Keep numeric options in a range the scan engine handles. A negative
+	// worker count panicked in make(chan) inside a scan goroutine, which
+	// ends the process; a huge one sizes channel buffers; a huge delay or
+	// timeout leaves scan goroutines asleep for years. 0 means "default" to
 	// dalfox.Initialize.
-	if o.Concurrence < 0 {
-		o.Concurrence = 0
-	}
-	if o.Concurrence > maxAPIWorkers {
-		o.Concurrence = maxAPIWorkers
-	}
-	if o.Timeout < 0 {
-		o.Timeout = 0
-	}
-	if o.Delay < 0 {
-		o.Delay = 0
-	}
+	o.Concurrence = clampOption(o.Concurrence, maxAPIWorkers)
+	o.Timeout = clampOption(o.Timeout, maxAPITimeoutSecs)
+	o.Delay = clampOption(o.Delay, maxAPIDelayMs)
 	if o.Trigger != "" && !isHTTPURL(o.Trigger) {
 		o.Trigger = ""
 	}
 }
 
-// maxAPIWorkers caps the per-scan worker count an API caller can request.
-// Workers size channel buffers, so an unbounded value is an allocation.
-const maxAPIWorkers = 1000
+// Upper bounds for API scan options. The CLI defaults are 100 workers, a
+// 10 s timeout and no delay.
+const (
+	maxAPIWorkers     = 1000
+	maxAPITimeoutSecs = 300
+	maxAPIDelayMs     = 60000
+)
+
+// clampOption maps a negative value to 0 (the default) and caps the rest.
+func clampOption(v, max int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
 
 func isHTTPURL(raw string) bool {
 	u, err := url.Parse(raw)
@@ -288,7 +310,7 @@ func stripRawHTTPOutput(o *model.Options) {
 }
 
 // evidenceLine matches one CodeView entry: "<n> line:  <response excerpt>".
-var evidenceLine = regexp.MustCompile(`(\d+) line:  `)
+var evidenceLine = regexp.MustCompile(`(?m)^\s*(\d+) line:  `)
 
 // redactEvidence returns a copy of results whose evidence keeps the line
 // numbers and the payload but none of the surrounding response text, which
@@ -381,9 +403,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 // deleteScansHandler clears all scan data
 func deleteScansHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	*scans = []string{}
-	if options.Scan != nil {
-		options.Scan = make(map[string]model.Scan)
-	}
+	model.ClearScans(options.Scan)
 	return respondJSONorJSONP(c, http.StatusOK, Res{Code: 200, Msg: "All scans deleted"}, options)
 }
 
@@ -401,7 +421,7 @@ func deleteScanHandler(c echo.Context, scans *[]string, options *model.Options) 
 	sid := c.Param("sid")
 
 	// Check if sid exists in options.Scan (source of truth) or in the scans slice
-	_, inOptionsScan := options.Scan[sid]
+	_, inOptionsScan := model.LoadScan(options.Scan, sid)
 	inScansSlice := contains(*scans, sid)
 
 	if !inOptionsScan && !inScansSlice {
@@ -421,7 +441,7 @@ func deleteScanHandler(c echo.Context, scans *[]string, options *model.Options) 
 
 	// Delete from options.Scan map
 	if inOptionsScan {
-		delete(options.Scan, sid)
+		model.DeleteScan(options.Scan, sid)
 	}
 
 	return respondJSONorJSONP(c, http.StatusOK, Res{Code: 200, Msg: "Scan deleted successfully"}, options)

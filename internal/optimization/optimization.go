@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,16 +18,29 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
+// newRequestOrInert never returns nil. URLs built by string surgery (path
+// variants, triggers) can fail to parse; http.NewRequest then returned nil,
+// and the 20-odd callers that use req.Host or the headers panicked in a
+// scan goroutine, ending the process. An inert request with an empty URL
+// fails cleanly at send ("unsupported protocol scheme") instead.
+func newRequestOrInert(method, url string, body io.Reader) *http.Request {
+	if req, err := http.NewRequest(method, url, body); err == nil {
+		return req
+	}
+	req, _ := http.NewRequest(method, "", body)
+	return req
+}
+
 // GenerateNewRequest is make http.Cilent
 func GenerateNewRequest(url, body string, options model.Options) *http.Request {
-	req, _ := http.NewRequest("GET", url, nil)
+	req := newRequestOrInert("GET", url, nil)
 	req = har.AddMessageIDToRequest(req)
 	// Add the Accept header like browsers do.
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 
 	if options.Data != "" {
 		d := []byte(body)
-		req, _ = http.NewRequest("POST", url, bytes.NewBuffer(d))
+		req = newRequestOrInert("POST", url, bytes.NewBuffer(d))
 		req = har.AddMessageIDToRequest(req)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}

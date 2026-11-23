@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -337,6 +338,9 @@ func Test_redactEvidence(t *testing.T) {
 	assert.Equal(t, "1 line:  [redacted]\n    ", out[1].Evidence)
 	assert.Empty(t, out[2].Evidence)
 	assert.Equal(t, "[redacted]", redactEvidence([]model.PoC{{Payload: "p", Evidence: "free-form SECRET"}})[0].Evidence)
+	// Response text that itself looks like "<n> line:  " must not add entries.
+	got := redactEvidence([]model.PoC{{Payload: "<x>", Evidence: "4 line:  id 12345 line:  <x>\n    "}})[0].Evidence
+	assert.Equal(t, "4 line:  <x>\n    ", got)
 	assert.Contains(t, in[0].Evidence, "SECRET", "stored results must not be modified")
 }
 
@@ -438,9 +442,11 @@ func Test_sanitizeAPIScanOptions_crashValues(t *testing.T) {
 	assert.Equal(t, 0, o.Delay)
 	assert.Empty(t, o.Trigger, "an unparsable trigger yields a nil request")
 
-	o = model.Options{Concurrence: 1 << 30, Trigger: "http://127.0.0.1/?s=SEQNC"}
+	o = model.Options{Concurrence: 1 << 30, Timeout: 1 << 30, Delay: 9000000000000, Trigger: "http://127.0.0.1/?s=SEQNC"}
 	sanitizeAPIScanOptions(&o)
 	assert.Equal(t, maxAPIWorkers, o.Concurrence)
+	assert.Equal(t, maxAPITimeoutSecs, o.Timeout)
+	assert.Equal(t, maxAPIDelayMs, o.Delay, "a huge delay parks scan goroutines for years")
 	assert.Equal(t, "http://127.0.0.1/?s=SEQNC", o.Trigger)
 	for _, bad := range []string{"javascript:alert(1)", "file:///etc/passwd", "/relative", "http://"} {
 		o = model.Options{Trigger: bad}
@@ -484,4 +490,52 @@ func Test_swaggerSpecFollowsTheServerAddress(t *testing.T) {
 		host, _ := spec["host"].(string)
 		assert.Empty(t, host, "a fixed host makes Swagger UI cross-origin when opened on another address")
 	}
+}
+
+// Test_scanStore_concurrentAccess runs under -race: scans store results from
+// background goroutines while handlers read and delete them.
+func Test_scanStore_concurrentAccess(t *testing.T) {
+	scans := []string{}
+	options := model.Options{Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			model.StoreScan(options.Scan, "sid", model.Scan{URL: "http://x/"})
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		serve(e, http.MethodGet, "/scan/sid", "", nil)
+		if i%50 == 0 {
+			serve(e, http.MethodDelete, "/scans/all", "", nil)
+		}
+	}
+	<-done
+	// ClearScans empties the map in place, so a scan that finishes after a
+	// delete-all still lands where GET /scan/:id looks.
+	serve(e, http.MethodDelete, "/scans/all", "", nil)
+	model.StoreScan(options.Scan, "late", model.Scan{URL: "http://x/"})
+	_, ok := model.LoadScan(options.Scan, "late")
+	assert.True(t, ok)
+}
+
+// Test_scanList_concurrentHandlers runs under -race: echo serves requests
+// concurrently, and POST /scan appends to the same ID list GET /scans reads.
+func Test_scanList_concurrentHandlers(t *testing.T) {
+	stubScans(t)
+	scans := []string{}
+	options := model.Options{Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(3)
+		go func() { defer wg.Done(); serve(e, http.MethodPost, "/scan", scanBody, nil) }()
+		go func() { defer wg.Done(); serve(e, http.MethodGet, "/scans", "", nil) }()
+		go func() { defer wg.Done(); serve(e, http.MethodGet, "/scan/unknown", "", nil) }()
+	}
+	wg.Wait()
+	scansMu.Lock()
+	defer scansMu.Unlock()
+	assert.Len(t, scans, 20, "no scan ID may be lost")
 }
