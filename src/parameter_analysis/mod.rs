@@ -29,7 +29,7 @@ pub(crate) mod xml_inject;
 
 pub(crate) use mining::detect_injection_context;
 
-use crate::cmd::scan::ScanArgs;
+use crate::engine_options::EngineOptions;
 use crate::target_parser::Target;
 pub use discovery::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -1393,12 +1393,12 @@ async fn active_probe_param_shared(
 
 pub async fn analyze_parameters(
     target: &mut Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     multi_pb: Option<Arc<MultiProgress>>,
 ) {
-    // CLI `-d` bodies are present on both `ScanArgs` and `Target`, but imported
+    // CLI `-d` bodies are present on both `EngineOptions` and `Target`, but imported
     // raw-HTTP/HAR requests carry their body only on `Target`. The body mining
-    // strategies consume `ScanArgs.data`, so give them the captured body when
+    // strategies consume `EngineOptions.data`, so give them the captured body when
     // there was no explicit CLI body override.
     let mut effective_args = args.clone();
     if effective_args.data.is_none() {
@@ -1717,7 +1717,7 @@ fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], targe
 /// and `--data` body fields) rather than the mining wordlists: those are the
 /// operator's own declared inputs, so seeding them cannot invent traffic the
 /// user did not ask for. `--ignore-param` is still honoured.
-fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: &ScanArgs) {
+fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: &EngineOptions) {
     let mut candidates: Vec<(String, Location)> = Vec::new();
 
     for (name, _) in target.url.query_pairs() {

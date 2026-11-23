@@ -349,7 +349,7 @@ async fn proxied_provider_fetch_does_not_poison_direct_fetch() {
     };
     let payloads = crate::scanning::xss_common::get_dynamic_payloads(
         &crate::parameter_analysis::InjectionContext::Html(None),
-        &args,
+        &crate::engine_options::EngineOptions::from(&args),
     )
     .unwrap();
     assert!(payloads.contains(&"substituted".to_string()));

@@ -1,5 +1,5 @@
 use super::*;
-use crate::cmd::scan::ScanArgs;
+use crate::engine_options::EngineOptions;
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -238,7 +238,7 @@ async fn test_blind_scan_forms_posts_payload_for_same_origin_post_form() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -289,7 +289,7 @@ async fn test_blind_scan_forms_skips_get_forms() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -312,7 +312,7 @@ async fn test_blind_scan_forms_skips_cross_origin_action() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -335,7 +335,7 @@ async fn test_blind_scan_forms_preserves_hidden_csrf_and_skips_hidden_rotation()
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -380,7 +380,7 @@ async fn test_blind_scan_forms_uses_get_to_fetch_even_when_target_is_post() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -408,7 +408,7 @@ async fn test_blind_scan_forms_overrides_caller_content_type() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -444,7 +444,7 @@ async fn test_blind_scan_forms_skips_multipart() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -464,7 +464,7 @@ async fn test_blind_scanning_sends_requests_for_query_body_header_and_cookie() {
     blind_scanning_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -757,7 +757,7 @@ async fn test_blind_scanning_injects_percent_encoded_body_names_in_place() {
     blind_scanning_with(
         &target,
         CallbackSource::Static("https://cb.example/hook"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -805,7 +805,7 @@ async fn test_blind_scan_forms_fetch_does_not_forward_accept_encoding() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -845,7 +845,7 @@ async fn test_blind_scanning_skips_a_json_body() {
     blind_scanning_with(
         &target,
         CallbackSource::Static("https://cb.example/hook"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -878,7 +878,7 @@ async fn test_blind_scan_forms_caps_fields_and_folds_repeated_forms() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -906,7 +906,7 @@ async fn test_blind_scanning_skips_ignored_params() {
     blind_scanning_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs {
+        &EngineOptions {
             ignore_param: ignore.to_vec(),
             ..Default::default()
         },
@@ -937,7 +937,7 @@ async fn test_blind_scan_forms_skips_ignored_fields() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs {
+        &EngineOptions {
             ignore_param: vec!["note".to_string()],
             ..Default::default()
         },
@@ -963,7 +963,7 @@ async fn test_blind_scan_forms_skips_out_of_scope_action() {
     blind_scan_forms_with(
         &target,
         CallbackSource::Static("https://cb.example"),
-        &ScanArgs {
+        &EngineOptions {
             exclude_url: vec!["/submit".to_string()],
             ..Default::default()
         },

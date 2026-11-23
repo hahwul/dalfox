@@ -37,7 +37,7 @@ async fn dom_verify(
     target: &Target,
     param: &Param,
     payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> (bool, Option<String>) {
     let client = target.build_client_or_default();
     let outcome = check_dom_verification_with_evidence(&client, target, param, payload, args)
@@ -50,15 +50,12 @@ fn make_param() -> Param {
     Param::new("q".to_string(), "seed".to_string(), Location::Query)
 }
 
-fn default_scan_args() -> crate::cmd::scan::ScanArgs {
-    crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
+fn default_scan_args() -> crate::engine_options::EngineOptions {
+    crate::engine_options::EngineOptions {
         silence: true,
         workers: 10,
         max_concurrent_targets: 10,
         encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }

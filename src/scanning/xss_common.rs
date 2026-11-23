@@ -1,4 +1,4 @@
-use crate::cmd::scan::ScanArgs;
+use crate::engine_options::EngineOptions;
 
 use crate::parameter_analysis::{DelimiterType, InjectionContext};
 use std::collections::HashMap;
@@ -537,7 +537,7 @@ pub(crate) fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn st
 
 pub(crate) fn get_dynamic_payloads(
     context: &InjectionContext,
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut base_payloads = if args.only_custom_payload {
         vec![]
@@ -580,7 +580,7 @@ pub(crate) fn get_dynamic_payloads(
 /// Apply custom alert value substitution (`--custom-alert-value` / `--custom-alert-type`).
 pub(crate) fn apply_custom_alert_substitution(
     payloads: Vec<String>,
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> Vec<String> {
     if args.custom_alert_value == "1" && args.custom_alert_type != "str" {
         return payloads;

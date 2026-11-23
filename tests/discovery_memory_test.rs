@@ -65,7 +65,12 @@ async fn discovery_peak(url: &str, cookies: usize, body_bytes: usize) -> usize {
     };
     let before = LIVE.load(Relaxed);
     PEAK.store(before, Relaxed);
-    analyze_parameters(&mut target, &args, None).await;
+    analyze_parameters(
+        &mut target,
+        &dalfox::engine_options::EngineOptions::from(&args),
+        None,
+    )
+    .await;
     PEAK.load(Relaxed).saturating_sub(before)
 }
 

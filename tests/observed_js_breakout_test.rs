@@ -305,7 +305,12 @@ async fn observed_breakout_carrier_covers_form_route() {
     args.skip_mining = true;
     args.skip_xss_scanning = true;
 
-    analyze_parameters(&mut target, &args, None).await;
+    analyze_parameters(
+        &mut target,
+        &dalfox::engine_options::EngineOptions::from(&args),
+        None,
+    )
+    .await;
 
     // The form's `fld` input reflects via POST to its action URL, so form
     // discovery must surface a Body param carrying the form action URL.

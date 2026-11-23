@@ -1,5 +1,5 @@
 use super::*;
-use crate::cmd::scan::ScanArgs;
+use crate::engine_options::EngineOptions;
 use crate::target_parser::parse_target;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -16,7 +16,7 @@ fn cap_reflection_params_bounds_scan_inputs() {
 }
 
 // Mock mining function for testing
-fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
+fn mock_mine_parameters(_target: &mut Target, _args: &EngineOptions) {
     // Simulate adding a reflection param
     _target.reflection_params.push(Param {
         injection_context: Some(InjectionContext::Html(None)),
@@ -31,13 +31,9 @@ fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
 #[test]
 fn test_analyze_parameters_with_mock_mining() {
     let mut target = parse_target("https://example.com").unwrap();
-    let args = ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let args = EngineOptions {
         workers: 10,
         max_concurrent_targets: 10,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -57,15 +53,11 @@ fn test_analyze_parameters_with_mock_mining() {
 #[test]
 fn test_analyze_parameters_skip_mining() {
     let target = parse_target("https://example.com").unwrap();
-    let _args = ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let _args = EngineOptions {
         skip_mining: true, // Skip mining
         skip_mining_dict: false,
         workers: 10,
         max_concurrent_targets: 10,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -77,15 +69,11 @@ fn test_analyze_parameters_skip_mining() {
 #[test]
 fn test_probe_body_params_mock() {
     let mut target = parse_target("https://example.com").unwrap();
-    let _args = ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let _args = EngineOptions {
         data: Some("key1=value1&key2=value2".to_string()),
         method: "POST".to_string(),
         workers: 10,
         max_concurrent_targets: 10,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -141,14 +129,10 @@ fn test_check_cookie_discovery_mock() {
 #[test]
 fn test_cookie_from_raw() {
     let mut target = parse_target("https://example.com").unwrap();
-    let args = ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let args = EngineOptions {
         cookie_from_raw: Some("tests/fixtures/sample_request.txt".to_string()),
         workers: 10,
         max_concurrent_targets: 10,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -181,14 +165,10 @@ fn test_cookie_from_raw() {
 #[test]
 fn test_cookie_from_raw_no_file() {
     let mut target = parse_target("https://example.com").unwrap();
-    let args = ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let args = EngineOptions {
         cookie_from_raw: Some("nonexistent.txt".to_string()),
         workers: 10,
         max_concurrent_targets: 10,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -648,12 +628,8 @@ fn test_ensure_sxss_candidate_params_seeds_json_body_keys() {
     );
 }
 
-fn default_scan_args() -> ScanArgs {
-    ScanArgs {
-        insecure: Some(true),
-        input_type: "url".to_string(),
-        format: "json".to_string(),
-        targets: vec!["http://127.0.0.1:0".to_string()],
+fn default_scan_args() -> EngineOptions {
+    EngineOptions {
         skip_mining: true,
         skip_mining_dict: true,
         skip_mining_dom: true,
@@ -665,14 +641,12 @@ fn default_scan_args() -> ScanArgs {
         silence: true,
         workers: 1,
         max_concurrent_targets: 1,
-        max_targets_per_host: 1,
         encoders: vec![
             "url".to_string(),
             "html".to_string(),
             "2url".to_string(),
             "base64".to_string(),
         ],
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
@@ -2629,8 +2603,7 @@ async fn analyze_parameters_fetches_the_base_page_once() {
         untouched.store(0, Ordering::Relaxed);
         let mut target = parse_target(&format!("http://{addr}{path}")).unwrap();
         target.workers = 1;
-        let args = ScanArgs {
-            targets: vec![format!("http://{addr}{path}")],
+        let args = EngineOptions {
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,

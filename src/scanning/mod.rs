@@ -107,7 +107,7 @@ pub(crate) use progress::*;
 pub(crate) use request_render::*;
 pub(crate) use waf_strategy::*;
 
-use crate::cmd::scan::ScanArgs;
+use crate::engine_options::EngineOptions;
 use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification_with_evidence;
 use crate::scanning::result::FindingType;
@@ -133,7 +133,7 @@ pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 /// reports nothing.
 pub(crate) fn count_matching_results(
     results: &[crate::scanning::result::Result],
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> usize {
     if args.tier_model.as_deref() == Some("confidence") {
         return crate::cmd::scan::dedupe_ast_results_for_model(
@@ -160,7 +160,7 @@ pub(crate) fn count_matching_results(
 pub(crate) fn count_new_matching_results(
     existing: &[crate::scanning::result::Result],
     batch: &[crate::scanning::result::Result],
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> isize {
     if args.tier_model.as_deref() == Some("confidence")
         && batch
@@ -247,7 +247,7 @@ fn found_param_key(param: &Param) -> String {
 async fn collapse_target_results(
     results: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     findings_count: &Arc<AtomicUsize>,
-    args: &ScanArgs,
+    args: &EngineOptions,
     target: &Target,
 ) {
     // Before the lock: the key hashes the request body, and every other
@@ -545,7 +545,7 @@ fn payload_chunk_size(completed: usize, concurrency: usize) -> usize {
 /// bump (plus a `ProgressBar` clone, itself an `Arc` internally).
 #[derive(Clone)]
 struct ScanWorkerCtx {
-    args: Arc<ScanArgs>,
+    args: Arc<EngineOptions>,
     target: Arc<Target>,
     client: Arc<reqwest::Client>,
     results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
@@ -2100,7 +2100,7 @@ impl ScanRunHandles {
 
 pub async fn run_scanning(
     target: &Target,
-    args: Arc<ScanArgs>,
+    args: Arc<EngineOptions>,
     handles: ScanRunHandles,
 ) -> ScanRunReport {
     let ScanRunHandles {

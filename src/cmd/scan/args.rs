@@ -1093,6 +1093,19 @@ pub struct BlindOobArgs {
 /// Default end-of-scan OOB drain window when `--blind-oob-wait` is unset.
 pub(crate) const DEFAULT_BLIND_OOB_WAIT_SECS: u64 = 30;
 
+/// Whether `url` passes `--include-url` / `--exclude-url`, for URLs the scan
+/// finds on its own (form actions, external scripts) rather than the target
+/// list. Invalid patterns are skipped; startup already rejects them.
+pub(crate) fn url_in_scope(include_url: &[String], exclude_url: &[String], url: &str) -> bool {
+    if include_url.is_empty() && exclude_url.is_empty() {
+        return true;
+    }
+    let scope = compiled_url_scope(include_url, exclude_url);
+    let (include, exclude) = &scope.2;
+    (include.is_empty() || include.iter().any(|r| r.is_match(url)))
+        && !exclude.iter().any(|r| r.is_match(url))
+}
+
 impl ScanArgs {
     /// `--remote-wordlists` worth fetching up front: dictionary mining is their
     /// only reader, so with it skipped they would be a wasted request each.
@@ -1124,20 +1137,7 @@ impl ScanArgs {
     }
 
     pub(crate) fn matches_only_poc(&self, r: &crate::scanning::result::Result) -> bool {
-        self.only_poc.is_empty()
-            || self
-                .only_poc
-                .iter()
-                .any(|f| r.matches_type(&f.trim().to_uppercase(), self.tier_model.as_deref()))
-    }
-
-    pub(crate) fn counts_toward_limit(&self, r: &crate::scanning::result::Result) -> bool {
-        !self.below_min_confidence(r)
-            && self.matches_only_poc(r)
-            && r.matches_type(
-                &self.limit_result_type.to_uppercase(),
-                self.tier_model.as_deref(),
-            )
+        crate::engine_options::matches_only_poc(&self.only_poc, self.tier_model.as_deref(), r)
     }
 
     /// Whether `--min-confidence` drops `r`; see
@@ -1152,19 +1152,6 @@ impl ScanArgs {
     pub(crate) fn fails_run(&self, r: &crate::scanning::result::Result) -> bool {
         self.fail_on.as_deref() != Some(FAIL_ON_HIGH)
             || r.confidence == Some(crate::scanning::result::Confidence::High)
-    }
-
-    /// Whether `url` passes `--include-url` / `--exclude-url`, for URLs the
-    /// scan finds on its own (form actions, external scripts) rather than the
-    /// target list. Invalid patterns are skipped; startup already rejects them.
-    pub(crate) fn url_in_scope(&self, url: &str) -> bool {
-        if self.include_url.is_empty() && self.exclude_url.is_empty() {
-            return true;
-        }
-        let scope = compiled_url_scope(&self.include_url, &self.exclude_url);
-        let (include, exclude) = &scope.2;
-        (include.is_empty() || include.iter().any(|r| r.is_match(url)))
-            && !exclude.iter().any(|r| r.is_match(url))
     }
 
     /// Effective `--on-session-loss` policy: the operator's choice, else

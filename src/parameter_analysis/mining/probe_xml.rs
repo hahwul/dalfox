@@ -28,7 +28,7 @@ pub(super) fn request_is_xml(target: &Target, data: &str) -> bool {
 /// No-op on JSON / form / GET targets. Bounded by the tokenizer's point cap.
 pub async fn probe_xml_body_params(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
     pb: Option<ShimmerSpinner>,

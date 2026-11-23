@@ -89,7 +89,7 @@ struct Poller {
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
-    count_args: crate::cmd::scan::ScanArgs,
+    count_args: crate::engine_options::EngineOptions,
     cancel: Arc<AtomicBool>,
     seen: StdMutex<HashSet<String>>,
     stop: AtomicBool,
@@ -140,7 +140,7 @@ pub(crate) fn spawn_poller(
         session,
         results,
         findings_count,
-        count_args: crate::cmd::scan::ScanArgs {
+        count_args: crate::engine_options::EngineOptions {
             limit_result_type: args.limit_result_type.clone(),
             only_poc: args.only_poc.clone(),
             tier_model: args.tier_model.clone(),

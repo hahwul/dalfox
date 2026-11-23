@@ -4,7 +4,7 @@ use super::*;
 
 pub async fn probe_dictionary_params(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
     pb: Option<ShimmerSpinner>,

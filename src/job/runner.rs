@@ -279,7 +279,8 @@ pub(crate) async fn preflight(
         });
     }
 
-    analyze_parameters(target, scan_args, None).await;
+    let engine_opts = crate::engine_options::EngineOptions::from(scan_args);
+    analyze_parameters(target, &engine_opts, None).await;
     cap_reflection_params(target);
 
     let enc_factor = crate::encoding::encoder_expansion_factor(&scan_args.encoders);
@@ -294,7 +295,7 @@ pub(crate) async fn preflight(
             // no requests for them, so the estimate bills none (they stay
             // listed as discovered).
             let payload_count = if crate::scanning::param_is_http_scannable(p) {
-                crate::scanning::estimate_param_requests(p, scan_args, enc_factor, &apply_cap)
+                crate::scanning::estimate_param_requests(p, &engine_opts, enc_factor, &apply_cap)
             } else {
                 0
             };
@@ -383,6 +384,8 @@ pub(crate) async fn execute_scan(
     warn: &(dyn Fn(&str) + Send + Sync),
 ) -> ScanRun {
     let args = args.clone();
+    // What the engine reads of `args`, resolved once for the whole job.
+    let engine_opts = Arc::new(crate::engine_options::EngineOptions::from(args.as_ref()));
     let cancel_flag = cancel_flag.clone();
     // Every warning is also recorded for the job record (`Job::warnings`), not
     // only logged: a server/MCP caller never sees the operator log, so "OOB
@@ -578,8 +581,8 @@ pub(crate) async fn execute_scan(
                         // Params × templates × channels, each paced by
                         // `delay`: a cancel mid-pass stops the stored writes.
                         let inject = async {
-                            crate::scanning::blind_scanning_with(target, source, args.as_ref()).await;
-                            crate::scanning::blind_scan_forms_with(target, source, args.as_ref()).await;
+                            crate::scanning::blind_scanning_with(target, source, &engine_opts).await;
+                            crate::scanning::blind_scan_forms_with(target, source, &engine_opts).await;
                         };
                         tokio::select! {
                             _ = inject => {}
@@ -769,7 +772,7 @@ pub(crate) async fn execute_scan(
                                         &results,
                                         &findings_count,
                                         ast_batch,
-                                        &args,
+                                        &engine_opts,
                                     )
                                     .await;
                                     if crate::utils::response_has_markup_document(
@@ -781,7 +784,7 @@ pub(crate) async fn execute_scan(
                                                 &client,
                                                 target,
                                                 &body,
-                                                args.as_ref(),
+                                                &engine_opts,
                                             )
                                             .await;
                                         // Read by DOM mining in
@@ -791,7 +794,7 @@ pub(crate) async fn execute_scan(
                                             &results,
                                             &findings_count,
                                             ext_batch,
-                                            &args,
+                                            &engine_opts,
                                         )
                                         .await;
                                     }
@@ -863,7 +866,7 @@ pub(crate) async fn execute_scan(
                         // `analyze_parameters` takes `&ScanArgs`, so pass the shared
                         // Arc directly instead of deep-cloning it just to re-set a
                         // field that already holds the desired value.
-                        analyze_parameters(target, args.as_ref(), None).await;
+                        analyze_parameters(target, &engine_opts, None).await;
                     };
                     tokio::select! {
                         _ = pre_scan => {}
@@ -887,7 +890,7 @@ pub(crate) async fn execute_scan(
 
                     scan_report = crate::scanning::run_scanning(
                         target,
-                        args.clone(),
+                        engine_opts.clone(),
                         crate::scanning::ScanRunHandles::new(
                             results.clone(),
                             findings_count.clone(),

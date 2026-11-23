@@ -4,14 +4,12 @@ use crate::target_parser::parse_target;
 
 mod request_efficiency;
 
-/// ScanArgs preset for run_scanning integration tests below. Keeps
+/// EngineOptions preset for run_scanning integration tests below. Keeps
 /// `skip_xss_scanning` toggleable per-test so the empty/short-circuit
 /// tests can still opt out of real HTTP traffic while the
 /// `realworld_level1_shape_v_upgrade` test exercises the full pipeline.
-fn integration_scan_args(skip_xss: bool) -> crate::cmd::scan::ScanArgs {
-    crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
+fn integration_scan_args(skip_xss: bool) -> crate::engine_options::EngineOptions {
+    crate::engine_options::EngineOptions {
         skip_mining: true,
         skip_mining_dict: true,
         skip_mining_dom: true,
@@ -20,18 +18,14 @@ fn integration_scan_args(skip_xss: bool) -> crate::cmd::scan::ScanArgs {
         skip_reflection_cookie: true,
         skip_reflection_path: true,
         timeout: 5,
-        no_color: true,
         silence: true,
         workers: 4,
         max_concurrent_targets: 4,
-        max_targets_per_host: 8,
         encoders: vec!["url".to_string()],
         skip_xss_scanning: skip_xss,
         sxss_retries: 1,
         skip_ast_analysis: true,
         waf_bypass: "off".to_string(),
-        skip_waf_probe: true,
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
@@ -159,7 +153,7 @@ fn test_count_matching_results_all() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("ALL").to_string(),
                 min_confidence: None,
                 ..Default::default()
@@ -180,7 +174,7 @@ fn test_count_matching_results_filtered() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("V").to_string(),
                 min_confidence: None,
                 ..Default::default()
@@ -191,7 +185,7 @@ fn test_count_matching_results_filtered() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("R").to_string(),
                 min_confidence: None,
                 ..Default::default()
@@ -202,7 +196,7 @@ fn test_count_matching_results_filtered() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("A").to_string(),
                 min_confidence: None,
                 ..Default::default()
@@ -214,7 +208,7 @@ fn test_count_matching_results_filtered() {
 
 #[test]
 fn test_limit_count_filter_narrows_to_only_poc() {
-    let filter = |limit: &str, only: &[&str]| crate::cmd::scan::ScanArgs {
+    let filter = |limit: &str, only: &[&str]| crate::engine_options::EngineOptions {
         limit_result_type: limit.to_string(),
         only_poc: only.iter().map(|s| s.to_string()).collect(),
         ..Default::default()
@@ -223,7 +217,7 @@ fn test_limit_count_filter_narrows_to_only_poc() {
         make_result(FindingType::Verified),
         make_result(FindingType::Reflected),
     ];
-    let counted = |args: ScanArgs| count_matching_results(&results, &args);
+    let counted = |args: EngineOptions| count_matching_results(&results, &args);
     assert_eq!(counted(filter("all", &[])), 2);
     assert_eq!(counted(filter("all", &["v"])), 1);
     assert_eq!(counted(filter("all", &["v", "r"])), 2);
@@ -241,7 +235,7 @@ fn test_count_matching_results_empty() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("ALL").to_string(),
                 min_confidence: None,
                 ..Default::default()
@@ -252,7 +246,7 @@ fn test_count_matching_results_empty() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("V").to_string(),
                 min_confidence: None,
                 ..Default::default()
@@ -412,7 +406,7 @@ async fn test_collapse_target_results_no_underflow_when_filter_excludes_r() {
     collapse_target_results(
         &results,
         &findings_count,
-        &ScanArgs {
+        &EngineOptions {
             limit_result_type: "V".to_string(),
             min_confidence: None,
             ..Default::default()
@@ -445,7 +439,7 @@ async fn test_collapse_target_results_decrements_matching_r_under_all_filter() {
     collapse_target_results(
         &results,
         &findings_count,
-        &ScanArgs {
+        &EngineOptions {
             limit_result_type: "ALL".to_string(),
             min_confidence: None,
             ..Default::default()
@@ -566,17 +560,13 @@ fn mock_add_reflection_param(target: &mut Target, name: &str, location: Location
     });
 }
 
-fn default_scan_args() -> crate::cmd::scan::ScanArgs {
-    crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+fn default_scan_args() -> crate::engine_options::EngineOptions {
+    crate::engine_options::EngineOptions {
         silence: true,
         workers: 10,
         max_concurrent_targets: 10,
         encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
         skip_xss_scanning: true,
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
@@ -1471,14 +1461,10 @@ async fn test_xss_scanning_get_query() {
     let mut target = parse_target("https://example.com").unwrap();
     mock_add_reflection_param(&mut target, "q", Location::Query);
 
-    let args = crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let args = crate::engine_options::EngineOptions {
         workers: 10,
         max_concurrent_targets: 10,
         skip_xss_scanning: true,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -1502,16 +1488,12 @@ async fn test_xss_scanning_post_body() {
     let mut target = parse_target("https://example.com").unwrap();
     mock_add_reflection_param(&mut target, "data", Location::Body);
 
-    let args = crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let args = crate::engine_options::EngineOptions {
         data: Some("key1=value1&key2=value2".to_string()),
         method: "POST".to_string(),
         workers: 10,
         max_concurrent_targets: 10,
         skip_xss_scanning: true,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -1542,14 +1524,10 @@ async fn test_run_scanning_with_reflection_params() {
         )
     });
 
-    let args = crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let args = crate::engine_options::EngineOptions {
         workers: 10,
         max_concurrent_targets: 10,
         skip_xss_scanning: true,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -2350,7 +2328,7 @@ async fn test_run_ast_dom_analysis_bounds_light_verify_requests_and_evidence() {
         false,
         &mut seen,
         None,
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -2393,7 +2371,7 @@ async fn test_run_ast_dom_analysis_skips_light_verify_once_cancelled() {
         false,
         &mut seen,
         Some(&cancel),
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -2428,7 +2406,7 @@ async fn test_run_ast_dom_analysis_follows_a_global_across_script_blocks() {
         false,
         &mut seen,
         None,
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -2458,7 +2436,7 @@ async fn test_run_ast_dom_analysis_poc_url_uses_param_pre_encoding() {
         false,
         &mut seen,
         None,
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
 
@@ -2496,7 +2474,7 @@ async fn test_run_ast_dom_analysis_reads_a_reflected_script_src_with_external_js
         "<html><body><script src=\"/?msg={}&v=1\"></script></body></html>",
         urlencoding::encode(marker)
     );
-    let on = ScanArgs {
+    let on = EngineOptions {
         analyze_external_js: true,
         ..Default::default()
     };
@@ -2510,7 +2488,7 @@ async fn test_run_ast_dom_analysis_reads_a_reflected_script_src_with_external_js
         false,
         &mut HashSet::new(),
         None,
-        &ScanArgs::default(),
+        &EngineOptions::default(),
     )
     .await;
     assert!(off.is_empty(), "opt-in only: {off:?}");
@@ -2567,14 +2545,10 @@ async fn test_run_ast_dom_analysis_reads_a_reflected_script_src_with_external_js
 async fn test_run_scanning_empty_params() {
     let target = parse_target("https://example.com").unwrap();
 
-    let args = crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
-        targets: vec!["https://example.com".to_string()],
+    let args = crate::engine_options::EngineOptions {
         workers: 10,
         max_concurrent_targets: 10,
         skip_xss_scanning: true,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
 
@@ -2616,11 +2590,8 @@ async fn start_ext_js_server(js_body: &'static str) -> std::net::SocketAddr {
     addr
 }
 
-fn ext_js_scan_args(analyze: bool) -> crate::cmd::scan::ScanArgs {
-    crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        input_type: "url".to_string(),
-        format: "json".to_string(),
+fn ext_js_scan_args(analyze: bool) -> crate::engine_options::EngineOptions {
+    crate::engine_options::EngineOptions {
         skip_mining: true,
         skip_mining_dict: true,
         skip_mining_dom: true,
@@ -2629,19 +2600,15 @@ fn ext_js_scan_args(analyze: bool) -> crate::cmd::scan::ScanArgs {
         skip_reflection_cookie: true,
         skip_reflection_path: true,
         timeout: 5,
-        no_color: true,
         silence: true,
         workers: 2,
         max_concurrent_targets: 2,
-        max_targets_per_host: 10,
         encoders: vec![],
         skip_xss_scanning: true,
         sxss_retries: 1,
         analyze_external_js: analyze,
         waf_bypass: "off".to_string(),
-        skip_waf_probe: true,
         retry_delay: 0,
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
@@ -2871,7 +2838,7 @@ async fn test_accumulate_findings_empty_batch_is_noop() {
         &results,
         &counter,
         vec![],
-        &ScanArgs {
+        &EngineOptions {
             limit_result_type: "ALL".to_string(),
             min_confidence: None,
             discard_below_min_confidence: false,
@@ -2907,7 +2874,7 @@ async fn test_accumulate_findings_counts_only_matching_result_type() {
         &results,
         &counter,
         batch,
-        &ScanArgs {
+        &EngineOptions {
             limit_result_type: "V".to_string(),
             min_confidence: None,
             discard_below_min_confidence: false,
@@ -2947,7 +2914,7 @@ async fn accumulate_findings_discards_below_min_confidence_for_jobs() {
             &results,
             &counter,
             batch(),
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: "ALL".to_string(),
                 min_confidence: Some("high".to_string()),
                 discard_below_min_confidence: discard,
@@ -2975,7 +2942,7 @@ fn count_new_matching_results_folds_ast_duplicates() {
     let existing = vec![reflected, ast("sink-a")];
     let batch = vec![ast("sink-a"), ast("sink-b"), ast("sink-b")];
     assert_eq!(
-        count_new_matching_results(&existing, &batch, &ScanArgs::default()),
+        count_new_matching_results(&existing, &batch, &EngineOptions::default()),
         1
     );
 }
@@ -3523,12 +3490,9 @@ async fn run_scanning_sizes_overall_bar_from_param_jobs() {
         injection_context: Some(InjectionContext::Html(None)),
         ..Param::new("a".to_string(), "1".to_string(), Location::Query)
     });
-    let args = crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
+    let args = crate::engine_options::EngineOptions {
         silence: true,
         max_payloads_per_param: 5,
-        waf_min_confidence: 0.0,
         ..Default::default()
     };
     let (_, expected) = generate_param_jobs(
@@ -5993,7 +5957,7 @@ fn count_matching_results_skips_findings_min_confidence_drops() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("ALL").to_string(),
                 min_confidence: None,
                 ..Default::default()
@@ -6004,7 +5968,7 @@ fn count_matching_results_skips_findings_min_confidence_drops() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("ALL").to_string(),
                 min_confidence: Some("low".to_string()),
                 ..Default::default()
@@ -6015,7 +5979,7 @@ fn count_matching_results_skips_findings_min_confidence_drops() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("ALL").to_string(),
                 min_confidence: Some("high".to_string()),
                 ..Default::default()
@@ -6026,7 +5990,7 @@ fn count_matching_results_skips_findings_min_confidence_drops() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("V").to_string(),
                 min_confidence: Some("high".to_string()),
                 ..Default::default()
@@ -6037,7 +6001,7 @@ fn count_matching_results_skips_findings_min_confidence_drops() {
     assert_eq!(
         count_matching_results(
             &results,
-            &ScanArgs {
+            &EngineOptions {
                 limit_result_type: ("R").to_string(),
                 min_confidence: Some("high".to_string()),
                 ..Default::default()
@@ -6059,7 +6023,7 @@ async fn collapse_under_min_confidence_does_not_underflow_the_tally() {
     let batch = vec![v, r];
     let counted = count_matching_results(
         &batch,
-        &ScanArgs {
+        &EngineOptions {
             limit_result_type: ("ALL").to_string(),
             min_confidence: Some("high".to_string()),
             ..Default::default()
@@ -6072,7 +6036,7 @@ async fn collapse_under_min_confidence_does_not_underflow_the_tally() {
     collapse_target_results(
         &results,
         &findings_count,
-        &ScanArgs {
+        &EngineOptions {
             limit_result_type: "ALL".to_string(),
             min_confidence: Some("high".to_string()),
             ..Default::default()
@@ -6304,7 +6268,7 @@ fn upload_target(addr: std::net::SocketAddr) -> Target {
 async fn run_upload_scan(
     target: &Target,
     param: &str,
-    args: crate::cmd::scan::ScanArgs,
+    args: crate::engine_options::EngineOptions,
 ) -> Vec<crate::scanning::result::Result> {
     let mut target = target.clone();
     target.reflection_params.push(Param {
@@ -6522,7 +6486,7 @@ async fn test_fetch_ext_js_caps_stored_bundle_names() {
     let target = parse_target(&format!("http://{addr}/")).unwrap();
     let client = target.build_client_or_default();
     let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
-    let args = crate::cmd::scan::ScanArgs {
+    let args = crate::engine_options::EngineOptions {
         skip_mining: false,
         skip_mining_dom: false,
         ..ext_js_scan_args(true)

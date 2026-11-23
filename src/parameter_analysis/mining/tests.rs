@@ -29,18 +29,12 @@ fn cap_dom_params_boundary() {
     assert_eq!(capped, None);
 }
 
-fn default_scan_args() -> ScanArgs {
-    ScanArgs {
-        insecure: Some(true),
-        input_type: "url".to_string(),
-        format: "json".to_string(),
-        targets: vec!["http://127.0.0.1:1".to_string()],
+fn default_scan_args() -> EngineOptions {
+    EngineOptions {
         timeout: 1,
         silence: true,
         workers: 1,
         max_concurrent_targets: 1,
-        max_targets_per_host: 1,
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
@@ -1147,7 +1141,7 @@ async fn body_discovery_payload_reaches_last_duplicate_form_value() {
 
 #[tokio::test]
 async fn imported_raw_http_and_har_bodies_are_mined_without_cli_data() {
-    // Request imports store their captured body on Target, not ScanArgs.data.
+    // Request imports store their captured body on Target, not EngineOptions.data.
     // The analysis stage must pass that body into the body miners or both
     // import paths silently scan a POST without ever testing its fields.
     let addr = start_body_reflect_server().await;

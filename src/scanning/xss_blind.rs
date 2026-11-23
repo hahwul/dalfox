@@ -183,7 +183,7 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
 pub async fn blind_scanning_with(
     target: &Target,
     source: CallbackSource<'_>,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) {
     let templates = build_blind_templates(args.custom_blind_xss_payload.as_deref());
     let method = target.parse_method().to_string();
@@ -373,7 +373,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
 pub async fn blind_scan_forms_with(
     target: &Target,
     source: CallbackSource<'_>,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) {
     use tokio::time::{Duration, sleep};
     use url::form_urlencoded;

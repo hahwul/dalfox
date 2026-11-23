@@ -236,7 +236,12 @@ async fn analyze_parameters_covers_discovery_constructors_and_debug_line() {
         ..Default::default()
     };
 
-    analyze_parameters(&mut target, &args, None).await;
+    analyze_parameters(
+        &mut target,
+        &dalfox::engine_options::EngineOptions::from(&args),
+        None,
+    )
+    .await;
 
     // The query param reflects, so discovery must find at least one param
     // (exercising the discovery constructors + the debug summary line).

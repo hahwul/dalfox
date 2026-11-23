@@ -23,7 +23,7 @@ use super::*;
 /// counted, matching the CLI's caveat.
 pub(crate) fn estimate_param_requests(
     p: &Param,
-    scan_args: &ScanArgs,
+    scan_args: &EngineOptions,
     enc_factor: usize,
     apply_cap: &dyn Fn(usize) -> usize,
 ) -> usize {
@@ -147,7 +147,7 @@ pub(crate) fn dedup_wire_identical(
 
 pub(crate) fn generate_param_jobs(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     waf_strategy: Option<&crate::waf::bypass::BypassStrategy>,
     shared_payloads: &[String],
 ) -> (Vec<ParamPayloadJob>, u64) {

@@ -27,6 +27,7 @@ Primary modules:
 - `src/main.rs`: CLI entrypoint, global flags, config load/init, subcommand dispatch
 - `src/cmd/scan/`: scan command, split into focused submodules — `mod.rs` (`run_scan` orchestrator + `ScanArgs`-independent glue), `args.rs` (`ScanArgs` + default/cap constants + value parsers), `validation.rs`, `preflight.rs`, `input.rs` (target resolution), `analysis.rs` (preflight/param loop), `scan_loop.rs` (scanning loop), `output.rs` (dry-run/only-discovery/result rendering), `poc.rs`, `postprocess.rs`, `logging.rs`
 - `src/cmd/mod.rs`: shared `error_codes` constants (used by CLI + server + MCP)
+- `src/engine_options.rs`: `EngineOptions`, the subset of `ScanArgs` the engine (`scanning`, `parameter_analysis`) reads. Built once per run with `EngineOptions::from(&ScanArgs)`; the engine takes no other options type
 - `src/config.rs`: config schema + precedence (`apply_to_scan_args_if_default`)
 - `src/scanning/`: reflection/DOM checks, AST integration, payload execution pipeline, result models. `mod.rs` keeps the scan-worker orchestration (`ScanWorkerCtx` + phases + `run_scanning`); helper clusters are sibling files — `payload_families.rs`, `waf_strategy.rs`, `request_render.rs`, `ast_dom_phase.rs`, `param_jobs.rs`, `progress.rs`. Output serialization is one `format_<fmt>.rs` per format under `src/scanning/result/`.
 - `src/parameter_analysis/`: discovery + mining + parameter filtering. `discovery/` is one file per discovery surface (query/header/path/cookie/form/fragment); `mining/` is one file per probe strategy (`probe_*.rs`) plus `collapse.rs` and the cross-module `context_detect.rs` (`detect_injection_context` family)
@@ -144,6 +145,10 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
     exhaustive field lists at call sites. `scanargs_default_matches_clap_defaults`
     fails if the `Default` entry disagrees with the `default_value` you declared.
   - behavior in `src/cmd/scan/mod.rs` (`run_scan`)
+  - If `scanning/` or `parameter_analysis/` reads it: add the field to
+    `EngineOptions` in `src/engine_options.rs` and to its `From<&ScanArgs>`
+    impl (the impl names every field, so a missing one does not compile).
+    Engine code takes `&EngineOptions`, never `&ScanArgs`.
   - `src/config.rs` (`ScanConfig`, template, precedence mapping)
   - If relevant: `src/server/types.rs` `ScanOptions` (plus its mapping into
     `ScanArgs` in `src/server/job_runner.rs`)

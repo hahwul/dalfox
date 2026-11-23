@@ -13,7 +13,7 @@ use super::*;
 /// at least one `-p :multipart` spec.
 pub async fn probe_multipart_params(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
     pb: Option<ShimmerSpinner>,

@@ -65,6 +65,7 @@ pub(crate) fn estimate_target_requests(args: &ScanArgs, target: &Target) -> usiz
     let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
     let cap = crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
     let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
+    let engine_opts = crate::engine_options::EngineOptions::from(args);
     target
         .reflection_params
         .iter()
@@ -72,7 +73,10 @@ pub(crate) fn estimate_target_requests(args: &ScanArgs, target: &Target) -> usiz
         .filter(|p| crate::scanning::param_is_http_scannable(p))
         .fold(0usize, |acc, p| {
             acc.saturating_add(crate::scanning::estimate_param_requests(
-                p, args, enc_factor, &apply_cap,
+                p,
+                &engine_opts,
+                enc_factor,
+                &apply_cap,
             ))
         })
 }

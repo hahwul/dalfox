@@ -21,6 +21,7 @@ pub(crate) async fn arm_and_dispatch(
     host_groups: &BTreeMap<String, Vec<Target>>,
     cancel_flag: &AtomicBool,
 ) -> Option<Arc<crate::oob::OobSession>> {
+    let engine_opts = crate::engine_options::EngineOptions::from(args);
     // Blind XSS: the static `-b/--blind` callback and/or OOB/OAST (interactsh)
     // callbacks. Skipped in preview-only modes — `--dry-run` (which advertises
     // "without sending attack payloads") and `--only-discovery` — because blind
@@ -108,8 +109,8 @@ pub(crate) async fn arm_and_dispatch(
                 };
                 tokio::select! {
                     _ = async {
-                        crate::scanning::blind_scanning_with(target, source, args).await;
-                        crate::scanning::blind_scan_forms_with(target, source, args).await;
+                        crate::scanning::blind_scanning_with(target, source, &engine_opts).await;
+                        crate::scanning::blind_scan_forms_with(target, source, &engine_opts).await;
                     } => {}
                     _ = super::scan_loop::poll_cancel(cancel_flag) => break 'dispatch,
                 }

@@ -56,7 +56,7 @@ async fn detect_blanket_header_echo(target: &Target) -> bool {
 
 pub async fn check_header_discovery(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
