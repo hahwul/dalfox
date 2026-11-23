@@ -1,8 +1,14 @@
 package server
 
 import (
+	"crypto/subtle"
+	"fmt"
+	"mime"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	printing "github.com/hahwul/dalfox/v2/internal/printing"
@@ -46,29 +52,28 @@ func RunAPIServer(options model.Options) {
 	if options.Scan == nil {
 		options.Scan = make(map[string]model.Scan)
 	}
+	printServerWarnings(&options)
 	e := setupEchoServer(&options, &scans)                      // Pass address of options
 	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options) // Pass options by value
-	graceful.ListenAndServe(e.Server, 5*time.Second)
+	if err := graceful.ListenAndServe(e.Server, 5*time.Second); err != nil {
+		fmt.Fprintln(os.Stderr, "[ERROR] REST API server: "+err.Error())
+	}
 }
 
 func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // options is now a pointer
 	e := echo.New()
 	options.IsAPI = true
-	e.Server.Addr = options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
-
-	// CORS Middleware
-	if options.ServerType == "rest" && len(options.AllowedOrigins) > 0 {
-		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-			AllowOrigins: options.AllowedOrigins,
-			AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete},
-		}))
+	// This is the REST server whatever --type said: every gate below used to
+	// key on ServerType == "rest", so `--type REST` or a library caller with
+	// an empty ServerType silently ran without the API key check.
+	options.ServerType = "rest"
+	host := strings.TrimSuffix(strings.TrimPrefix(options.ServerHost, "["), "]")
+	e.Server.Addr = net.JoinHostPort(host, strconv.Itoa(options.ServerPort))
+	for i, o := range options.AllowedOrigins {
+		options.AllowedOrigins[i] = strings.TrimSpace(o)
 	}
 
-	// API Key Authentication Middleware
-	if options.ServerType == "rest" && options.APIKey != "" {
-		e.Use(apiKeyAuth(options.APIKey, options)) // Pass options for JSONP check
-	}
-
+	// Logging and security headers first, so rejected requests are logged too.
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:      "",
 		ContentTypeNosniff: "",
@@ -81,6 +86,29 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 			`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
 			`"bytes_out":${bytes_out}}` + "\n",
 	}))
+
+	// Without an API key, the request source is the only thing keeping a web
+	// page out (GHSA-c98c-mph6-6hm9). With one, a page cannot attach the
+	// X-API-KEY header without CORS approval, so the guard would add nothing
+	// but breakage for clients that address the server by a service name.
+	// It runs before CORS so preflights get the Host check as well.
+	if !authEnabled(options) {
+		e.Use(requestSourceGuard(options))
+	}
+
+	// CORS Middleware (before the API key so preflights, which carry no key,
+	// are answered)
+	if len(options.AllowedOrigins) > 0 {
+		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+			AllowOrigins: options.AllowedOrigins,
+			AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete},
+		}))
+	}
+
+	// API Key Authentication Middleware
+	if authEnabled(options) {
+		e.Use(apiKeyAuth(options.APIKey, options)) // Pass options for JSONP check
+	}
 	e.GET("/health", func(c echo.Context) error {
 		return healthHandler(c, options)
 	})
@@ -108,7 +136,7 @@ func apiKeyAuth(validAPIKey string, options *model.Options) echo.MiddlewareFunc 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			apiKey := c.Request().Header.Get(APIKeyHeader)
-			if apiKey == "" || apiKey != validAPIKey {
+			if apiKey == "" || subtle.ConstantTimeCompare([]byte(apiKey), []byte(validAPIKey)) != 1 {
 				res := Res{Code: http.StatusUnauthorized, Msg: "Unauthorized: Invalid or missing API Key"}
 				return respondJSONorJSONP(c, http.StatusUnauthorized, res, options)
 			}
@@ -188,9 +216,51 @@ func sanitizeAPIScanOptions(o *model.Options) {
 	// by voltFile.ReadLinesOrLiteral; lines become probed parameter names and
 	// are exfiltrated through scan traffic — same class as CustomPayloadFile.
 	o.MiningWordlist = ""
+	// CookieFromRaw is a server-side path too: it is opened per request, its
+	// Cookie header is sent to the scan target, and a missing or unparsable
+	// file calls os.Exit(1), so one request could stop the server.
+	o.CookieFromRaw = ""
 }
 
+// stripRawHTTPOutput drops raw request/response capture from findings. With
+// no API key, whoever can reach the port would otherwise read the full body
+// of any internal page dalfox can reach (GHSA-c98c-mph6-6hm9).
+func stripRawHTTPOutput(o *model.Options) {
+	o.OutputRequest = false
+	o.OutputResponse = false
+	// "http-request" PoCs embed a full request dump in the finding's data.
+	if strings.EqualFold(strings.TrimSpace(o.PoCType), "http-request") {
+		o.PoCType = "plain"
+	}
+}
+
+// authEnabled reports whether the REST server checks X-API-KEY.
+func authEnabled(server *model.Options) bool {
+	return server.APIKey != ""
+}
+
+// prepareRESTScanOptions applies every scrub a REST scan request goes through.
+func prepareRESTScanOptions(rq *model.Options, server *model.Options) {
+	sanitizeAPIScanOptions(rq)
+	if !authEnabled(server) {
+		stripRawHTTPOutput(rq)
+	}
+}
+
+// startAPIScan is swapped in tests to observe the options a scan starts with.
+var startAPIScan = ScanFromAPI
+
 func postScanHandler(c echo.Context, scans *[]string, options *model.Options) error {
+	// JSON only. Req has no `form` tags, so a form-encoded body never filled
+	// in the URL anyway; this turns that silent empty-URL scan into an error
+	// and keeps preflight-free cross-site bodies out by construction.
+	if mt, _, err := mime.ParseMediaType(c.Request().Header.Get(echo.HeaderContentType)); err != nil || mt != echo.MIMEApplicationJSON {
+		res := &Res{
+			Code: http.StatusUnsupportedMediaType,
+			Msg:  "Content-Type must be application/json",
+		}
+		return respondJSONorJSONP(c, http.StatusUnsupportedMediaType, res, options)
+	}
 	rq := new(Req)
 	if err := c.Bind(rq); err != nil {
 		res := &Res{
@@ -199,7 +269,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 		}
 		return respondJSONorJSONP(c, http.StatusInternalServerError, res, options)
 	}
-	sanitizeAPIScanOptions(&rq.Options)
+	prepareRESTScanOptions(&rq.Options, options)
 	sid := utils.GenerateRandomToken(rq.URL)
 	res := &Res{
 		Code: http.StatusOK,
@@ -209,7 +279,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 	if options.Scan == nil {
 		options.Scan = make(map[string]model.Scan)
 	}
-	go ScanFromAPI(rq.URL, rq.Options, *options, sid)
+	go startAPIScan(rq.URL, rq.Options, *options, sid)
 
 	return respondJSONorJSONP(c, http.StatusOK, res, options)
 }

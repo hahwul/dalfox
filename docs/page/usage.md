@@ -36,7 +36,7 @@ dalfox file targets.txt
 cat urls.txt | dalfox pipe
 
 # Start Dalfox as a REST API server
-dalfox server --host 0.0.0.0 --port 8080
+dalfox server --port 8080
 ```
 
 ## Available Modes
@@ -160,7 +160,7 @@ Different modes have specific flags to customize their behavior. Here's a summar
 
 ### Server Mode Flags
 ```
-      --host string   Bind address (default "0.0.0.0")
+      --host string   Bind address (default "127.0.0.1")
       --port int      Bind Port (default 6664)
 ```
 

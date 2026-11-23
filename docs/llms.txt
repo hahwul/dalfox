@@ -23,7 +23,7 @@ dalfox file urls.txt
 cat urls.txt | dalfox pipe
 
 # Start as a REST API server
-dalfox server --host 0.0.0.0 --port 8080
+dalfox server --port 8080
 
 # Start as a MCP server
 dalfox server --type=mcp
