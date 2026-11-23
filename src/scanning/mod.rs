@@ -368,7 +368,16 @@ const INERT_ECHO_BUDGET: u32 = 256;
 /// — which by construction excludes sanitizer-stripped output (markup removed,
 /// not escaped, so the payload never surfaces whole), truncated/partial echoes,
 /// event-handler and URL-attribute landing sites (an escaped echo there
-/// executes), and `+`→space-only form decoding. Callers additionally exclude
+/// executes), and `+`→space-only form decoding.
+///
+/// A *verbatim* echo that is inert at every occurrence
+/// (`check_reflection::reflection_inert_at_every_occurrence`) accrues too. The
+/// DOM phase has always counted those: its counter takes any byte-exact
+/// reflection that did not verify. Here they used to be reported as `R`, which
+/// ended the phase on the first one; now that they are not findings, leaving
+/// them out of the budget made a parameter that strips `<` and echoes the rest
+/// cost the whole catalog (measured on xssmaze: ~450 requests before, ~2650
+/// after). Callers additionally exclude
 /// 4xx responses (a WAF block page that echoes the payload is a block, not an
 /// inert echo — a later variant may bypass it) and non-renderable bodies (the
 /// 3xx `Location:` stand-in).
@@ -1146,10 +1155,12 @@ impl ScanWorkerCtx {
                 }
                 // Fold this response into the transformed-inert-echo budget
                 // BEFORE `process_reflection_result` consumes the body. Only a
-                // renderable, non-4xx body that is a whole-payload escaped echo
-                // (`is_escaped_echo`) counts — that is the uniformly-escaping
-                // endpoint the reflection short-circuit can never see, because it
-                // mints no `R`. `reflected_kind.is_some()` responses are handled
+                // renderable, non-4xx body counts, and only when it is a
+                // whole-payload escaped echo (`is_escaped_echo`) or a verbatim
+                // echo that is inert wherever it landed
+                // (`reflection_inert_at_every_occurrence`). Both are the
+                // endpoint the reflection short-circuit can never see, because
+                // it mints no `R`. `reflected_kind.is_some()` responses are handled
                 // by that short-circuit and never reach the budget. The status
                 // rides alongside the body (not on the public `ReflectionBody`)
                 // via the crate-private status-aware fetch; `0` (a request
@@ -1167,7 +1178,13 @@ impl ScanWorkerCtx {
                     && !(400..500).contains(&status)
                     && reflection_body.as_ref().is_some_and(|b| {
                         b.renderable
-                            && check_reflection::is_escaped_echo(&b.text, reflection_payload)
+                            && (check_reflection::is_escaped_echo(&b.text, reflection_payload)
+                                || (!b.js_content_type
+                                    && !xml_content_type
+                                    && check_reflection::reflection_inert_at_every_occurrence(
+                                        &b.text,
+                                        reflection_payload,
+                                    )))
                     })
                 {
                     inert_echo_count += 1;

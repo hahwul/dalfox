@@ -1,16 +1,16 @@
 {
-  "generated_at": "2026-09-13T09:06:07Z",
+  "generated_at": "2026-11-23T15:22:08Z",
   "tool": "replay_corpus",
-  "dalfox_version": "3.2.2",
+  "dalfox_version": "3.3.0",
   "strict": "va",
   "base_url": "http://127.0.0.1:4804",
   "total": {
     "fixtures": 21,
-    "clean": 21,
-    "warn": 0,
+    "clean": 20,
+    "warn": 1,
     "failed": 0,
     "errored": 0,
-    "findings": 0
+    "findings": 1
   },
   "fixtures": [
     {
@@ -225,14 +225,22 @@
       "status": 302,
       "escape": "html",
       "url_decode": false,
-      "verdict": "clean",
+      "verdict": "warn",
       "counts": {
         "V": 0,
         "A": 0,
-        "R": 0,
+        "R": 1,
         "I": 0
       },
-      "findings": []
+      "findings": [
+        {
+          "type": "R",
+          "param": "q",
+          "payload": "onabort=alert(1)",
+          "evidence": "Reflected XSS detected for param q (reflected)",
+          "detection_method": "reflection"
+        }
+      ]
     },
     {
       "name": "script_html_entities",

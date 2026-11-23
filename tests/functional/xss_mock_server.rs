@@ -2928,32 +2928,14 @@ async fn test_escaped_quote_breakout_v2() {
     println!("[#9201] escaped-quote breakout attributed to #1072 synthesis");
 }
 
-/// Safe cases the scanner reports anyway, with the reason each is inert. All
-/// five are `R` ("reflected") findings: the payload needs no character the
-/// filter touches, so it comes back verbatim, in a place where it is text.
+/// Safe cases the scanner reports anyway, with the reason each is inert.
 /// Fixing one means deleting its line; the test fails until that happens.
-const FILTERED_KNOWN_FALSE_POSITIVES: &[(u32, &str)] = &[
-    (
-        5019,
-        "`alert(1)` echoed into element text and a quote-encoded JS string",
-    ),
-    (
-        5106,
-        "attribute-style payload (`' onerror=…`) echoed as element text",
-    ),
-    (
-        5143,
-        "attribute-style payload (`' onerror=…`) echoed as element text",
-    ),
-    (
-        5289,
-        "`alert(1)` echoed with every HTML special encoded, quotes included",
-    ),
-    (
-        5534,
-        "attribute-style payload echoed as element text, angles double-encoded",
-    ),
-];
+///
+/// Empty since the per-occurrence reflection gate
+/// (`reflection_inert_at_every_occurrence`): the five cases listed here until
+/// then were all a payload that needs no character the filter touches, echoed
+/// verbatim into element text, a quoted attribute or a JavaScript string.
+const FILTERED_KNOWN_FALSE_POSITIVES: &[(u32, &str)] = &[];
 
 /// Cases labelled exploitable that the scanner does not report.
 ///

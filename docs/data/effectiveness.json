@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-22T15:55:24Z",
+  "generated_at": "2026-11-23T13:48:47Z",
   "tool": "effectiveness",
   "dalfox_version": "3.3.0",
   "corpus": {
@@ -77,13 +77,13 @@
       "metrics": {
         "cases": 809,
         "expected": 730,
-        "tp": 68,
+        "tp": 49,
         "fp": 0,
-        "fn": 662,
+        "fn": 681,
         "tn": 79,
         "precision": 100.0,
-        "recall": 9.32,
-        "f1": 17.05
+        "recall": 6.71,
+        "f1": 12.58
       }
     },
     {
@@ -107,13 +107,13 @@
       "metrics": {
         "cases": 809,
         "expected": 730,
-        "tp": 475,
+        "tp": 494,
         "fp": 0,
-        "fn": 255,
+        "fn": 236,
         "tn": 79,
         "precision": 100.0,
-        "recall": 65.07,
-        "f1": 78.84
+        "recall": 67.67,
+        "f1": 80.72
       }
     },
     {
@@ -303,9 +303,9 @@
     }
   ],
   "timing": {
-    "wall_clock_seconds": 2.0,
-    "median_seconds": 0.018,
-    "slowest_seconds": 0.08,
+    "wall_clock_seconds": 1.7,
+    "median_seconds": 0.015,
+    "slowest_seconds": 0.09,
     "concurrency": 8
   },
   "ast_only": 109,

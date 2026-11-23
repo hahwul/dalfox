@@ -137,7 +137,7 @@ fn script_blocks(html: &str) -> impl Iterator<Item = (&str, &str)> {
 /// `application/json`, `application/ld+json`, …). Babel-standalone blocks
 /// (`text/babel`, `text/jsx`) are not JS to the browser but an in-page loader
 /// transpiles and runs them, so they count as executing.
-fn open_tag_is_javascript(open_tag: &str) -> bool {
+pub(crate) fn open_tag_is_javascript(open_tag: &str) -> bool {
     // Cheap path for the common attribute-less / type-less tag.
     if !open_tag
         .as_bytes()
@@ -189,24 +189,66 @@ struct SpanIndex {
     /// can nest (a literal inside a template `${…}`), so the latest-starting
     /// literal alone does not decide containment.
     strings_max_end: Vec<u32>,
+    /// The same running maximum over `sinks`, for "is this range inside a
+    /// sink call or assignment".
+    sinks_max_end: Vec<u32>,
 }
 
+/// Running maximum of span ends, for containment queries on spans sorted by
+/// start.
+fn running_max_end(spans: &[(u32, u32)]) -> Vec<u32> {
+    spans
+        .iter()
+        .scan(0u32, |max, &(_, e)| {
+            *max = (*max).max(e);
+            Some(*max)
+        })
+        .collect()
+}
+
+/// How far back [`SpanIndex::enclosing_string`] looks for the literal that
+/// holds a range. Literals nest only through template substitutions, so the
+/// holder is normally the nearest one.
+const MAX_ENCLOSING_STRING_STEPS: usize = 64;
+
 impl SpanIndex {
+    /// Strict containment: some string literal with `s < start` and `e > end`,
+    /// so the range consumed neither of its quotes.
+    fn range_strictly_inside_string(&self, start: u32, end: u32) -> bool {
+        let before = self.strings.partition_point(|&(s, _)| s < start);
+        before > 0 && self.strings_max_end[before - 1] > end
+    }
+
     fn new(mut sinks: Vec<(u32, u32)>, mut strings: Vec<(u32, u32)>) -> Self {
         sinks.sort_unstable();
         strings.sort_unstable();
-        let strings_max_end = strings
-            .iter()
-            .scan(0u32, |max, &(_, e)| {
-                *max = (*max).max(e);
-                Some(*max)
-            })
-            .collect();
+        let strings_max_end = running_max_end(&strings);
+        let sinks_max_end = running_max_end(&sinks);
         Self {
             sinks,
             strings,
             strings_max_end,
+            sinks_max_end,
         }
+    }
+
+    /// The innermost recorded string literal that strictly contains the range.
+    fn enclosing_string(&self, start: u32, end: u32) -> Option<(u32, u32)> {
+        let before = self.strings.partition_point(|&(s, _)| s < start);
+        self.strings[..before]
+            .iter()
+            .rev()
+            .take(MAX_ENCLOSING_STRING_STEPS)
+            .find(|&&(_, e)| e > end)
+            .copied()
+    }
+
+    /// Whether the range lies inside a sink call or a sink assignment:
+    /// `eval(…)`, `document.write(…)`, `el.innerHTML = …`, and the rest of
+    /// what the walk records as a sink.
+    fn range_inside_sink(&self, start: u32, end: u32) -> bool {
+        let before = self.sinks.partition_point(|&(s, _)| s <= start);
+        before > 0 && self.sinks_max_end[before - 1] >= end
     }
 
     /// Returns true when the payload range introduced a real sink call into
@@ -224,10 +266,7 @@ impl SpanIndex {
     /// - Sink containment: a sink-call span lies fully within the payload's
     ///   byte range, meaning the payload itself produced the call.
     fn payload_range_hits_sink(&self, payload_start: u32, payload_end: u32) -> bool {
-        // Strict containment: some literal with `s < payload_start` and
-        // `e > payload_end`.
-        let before = self.strings.partition_point(|&(s, _)| s < payload_start);
-        if before > 0 && self.strings_max_end[before - 1] > payload_end {
+        if self.range_strictly_inside_string(payload_start, payload_end) {
             return false;
         }
         let first = self.sinks.partition_point(|&(s, _)| s < payload_start);
@@ -1097,6 +1136,98 @@ fn any_payload_occurrence_hits_sink(src: &str, payload: &str) -> bool {
     occurrences.any(|(start, _)| {
         let end = start + payload.len();
         spans.payload_range_hits_sink(start as u32, end as u32)
+    })
+}
+
+/// Whether the string literal starting at `lit_start` sits where a script only
+/// *keeps* a string: the right-hand side of an assignment to a bare identifier
+/// (`var q = "…"`, `q = "…"`), or the first argument of a `console.*` call.
+///
+/// Everything else is refused, because the literal may be handed to something
+/// that interprets it and the span index only knows the sinks it models: a
+/// member assignment (`s.text = "…"`), any other call argument
+/// (`$.globalEval("…")`, `el.setAttribute("onclick", "…")`,
+/// `setTimeout.call(window, "…")`, `(0, eval)("…")`), a conditional or a
+/// concatenation, an object property, a `return`.
+///
+/// Textual on purpose: it reads the bytes before the literal, so it needs no
+/// knowledge of which callee names are dangerous.
+fn literal_is_kept_not_used(src: &str, lit_start: usize) -> bool {
+    let bytes = src.as_bytes();
+    let skip_space_back = |mut i: usize| {
+        while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+            i -= 1;
+        }
+        i
+    };
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+    let i = skip_space_back(lit_start.min(bytes.len()));
+    if i == 0 {
+        return false;
+    }
+    match bytes[i - 1] {
+        b'=' => {
+            // `==`, `!=`, `<=`, `+=` and friends are not a plain assignment.
+            if i >= 2 && !is_ident(bytes[i - 2]) && !bytes[i - 2].is_ascii_whitespace() {
+                return false;
+            }
+            let name_end = skip_space_back(i - 1);
+            let mut name_start = name_end;
+            while name_start > 0 && is_ident(bytes[name_start - 1]) {
+                name_start -= 1;
+            }
+            if name_start == name_end {
+                return false;
+            }
+            // A member (`a.b = …`) is not a bare identifier.
+            let before_name = skip_space_back(name_start);
+            before_name == 0 || bytes[before_name - 1] != b'.'
+        }
+        b'(' => {
+            let callee_end = skip_space_back(i - 1);
+            let mut callee_start = callee_end;
+            while callee_start > 0
+                && (is_ident(bytes[callee_start - 1]) || bytes[callee_start - 1] == b'.')
+            {
+                callee_start -= 1;
+            }
+            src[callee_start..callee_end]
+                .strip_prefix("console.")
+                .is_some_and(|method| !method.is_empty() && method.bytes().all(is_ident))
+        }
+        _ => false,
+    }
+}
+
+/// True when `block` — the body of an inline script — parses, and every
+/// occurrence of `payload` in it sits strictly inside a string literal the
+/// script only keeps: assigned to a bare identifier or logged
+/// ([`literal_is_kept_not_used`]), and outside every sink call or sink
+/// assignment the walk records.
+///
+/// Stricter than "no sink call in the payload range": a block that does not
+/// parse, an echo the walk did not see as a string (a comment, a template
+/// literal, a position the walk does not descend into), and a literal passed
+/// to anything answers `false`.
+pub(crate) fn echo_is_string_data(block: &str, payload: &str) -> bool {
+    if payload.is_empty() {
+        return false;
+    }
+    let mut occurrences = block.match_indices(payload).peekable();
+    if occurrences.peek().is_none() {
+        return false;
+    }
+    let Some(spans) = cached_parsed_spans(block, SourceType::default())
+        .or_else(|| cached_parsed_spans(block, SourceType::script()))
+    else {
+        return false;
+    };
+    occurrences.all(|(start, _)| {
+        let (start, end) = (start as u32, (start + payload.len()) as u32);
+        !spans.range_inside_sink(start, end)
+            && spans
+                .enclosing_string(start, end)
+                .is_some_and(|(lit_start, _)| literal_is_kept_not_used(block, lit_start as usize))
     })
 }
 

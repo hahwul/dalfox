@@ -34,6 +34,8 @@ reflection checks never parse HTML and always see the full body.
 
 use std::borrow::Cow;
 
+pub(crate) mod segments;
+
 /// Maximum element nesting depth handed to html5ever. Matches the order of the
 /// caps real browser parsers apply; real-world documents are one to two orders
 /// of magnitude shallower.
@@ -224,26 +226,38 @@ fn skip_to_gt(bytes: &[u8], from: usize) -> usize {
 /// Searching for `-->` alone let a leading `<!-->` hide the whole rest of the
 /// body from the estimator while html5ever parsed it as markup.
 fn skip_comment(bytes: &[u8], body: usize) -> usize {
-    let rest = &bytes[body.min(bytes.len())..];
+    comment_extent(bytes, body).1
+}
+
+/// `(end of the comment text, offset just past the comment)` for the comment
+/// whose text starts at `body`. The text excludes the terminator, and for a
+/// comment the input ends inside, the terminator it was part-way through.
+fn comment_extent(bytes: &[u8], body: usize) -> (usize, usize) {
+    let body = body.min(bytes.len());
+    let rest = &bytes[body..];
     if rest.starts_with(b">") {
-        return body + 1;
+        return (body, body + 1);
     }
     if rest.starts_with(b"->") {
-        return body + 2;
+        return (body, body + 2);
     }
     let mut i = body;
     while i + 1 < bytes.len() {
         if bytes[i] == b'-' && bytes[i + 1] == b'-' {
             if bytes.get(i + 2) == Some(&b'>') {
-                return i + 3;
+                return (i, i + 3);
             }
             if bytes[i + 2..].starts_with(b"!>") {
-                return i + 4;
+                return (i, i + 4);
             }
         }
         i += 1;
     }
-    bytes.len()
+    let tail = [&b"--!"[..], b"--", b"-"]
+        .iter()
+        .find(|t| rest.ends_with(t))
+        .map_or(0, |t| t.len());
+    (bytes.len() - tail, bytes.len())
 }
 
 /// Offset just past the first `>` at or after `from`, or the end of input.
