@@ -92,9 +92,8 @@ impl<'a> DomXssVisitor<'a> {
                 SinkCtx::Url => coercion || builtin == "encodeURIComponent",
                 SinkCtx::Code => coercion,
             };
-            if (self.sanitizers.contains(func_name.as_str())
-                || coercion
-                || Self::is_likely_sanitizer_name(&func_name))
+            let summary_key = self.get_summary_key_for_callee_expr(&call.callee);
+            if (self.sanitizes_by_name(&func_name, summary_key.as_deref()) || coercion)
                 && !shadowed
                 && helps_here
             {
@@ -137,8 +136,7 @@ impl<'a> DomXssVisitor<'a> {
                 .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
 
             if let Some(target_name) = target_key.as_ref()
-                && (self.sanitizers.contains(target_name.as_str())
-                    || Self::is_likely_sanitizer_name(target_name))
+                && self.sanitizes_by_name(target_name, None)
             {
                 return (false, None);
             }
@@ -568,8 +566,10 @@ impl<'a> DomXssVisitor<'a> {
         // A tag with a sanitizer's name neutralizes its inputs, like any other
         // sanitizing call.
         if let Some(tag_name) = self.get_expr_string(&tagged.tag)
-            && (self.sanitizers.contains(tag_name.as_str())
-                || Self::is_likely_sanitizer_name(&tag_name))
+            && self.sanitizes_by_name(
+                &tag_name,
+                self.get_summary_key_for_callee_expr(&tagged.tag).as_deref(),
+            )
         {
             return None;
         }

@@ -530,6 +530,10 @@ struct DomXssVisitor<'a> {
     sanitizers: &'static HashSet<&'static str>,
     /// Function summaries used for lightweight inter-procedural taint tracking
     function_summaries: HashMap<String, FunctionSummary>,
+    /// Functions the page defines under a sanitizer's name, by that name:
+    /// `true` while every definition seen returns its parameter unchanged
+    /// (see `returns_param_unchanged`). Such a name is not believed.
+    passthrough_sanitizers: HashMap<String, bool>,
     /// Summaries of declared functions whose name stands for another
     /// function right now, by the span of their parameter list (see
     /// `collect_function_declarations`).
@@ -1113,6 +1117,7 @@ impl<'a> DomXssVisitor<'a> {
             sinks: &*STATIC_SINKS,
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
+            passthrough_sanitizers: HashMap::new(),
             declaration_summaries: HashMap::new(),
             shadow_params: Default::default(),
             value_locals: Default::default(),

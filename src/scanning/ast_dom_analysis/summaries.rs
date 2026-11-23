@@ -12,6 +12,9 @@ type Report = (u32, u32, String);
 const MAX_URL_LEAD_PARAMS: usize = 32;
 pub(super) const MAX_DECLARATION_SUMMARIES: usize = 4096;
 
+/// Sanitizer-named definitions remembered per script. A page has a handful.
+const MAX_NOTED_SANITIZERS: usize = 1024;
+
 impl<'a> DomXssVisitor<'a> {
     /// Suppression facts require a stable bare callable and unshifted arguments.
     pub(super) fn stable_call_summary(
@@ -174,6 +177,26 @@ impl<'a> DomXssVisitor<'a> {
         &mut self,
         stmts: &[Statement<'a>],
     ) -> Vec<(String, FunctionSummary)> {
+        // Before any body below is analyzed: a declaration further down may
+        // be the "sanitizer" an earlier one calls.
+        for stmt in stmts {
+            let func = match stmt {
+                Statement::FunctionDeclaration(func) => func,
+                Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                    Some(Declaration::FunctionDeclaration(func)) => func,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            if let (Some(id), Some(body)) = (&func.id, &func.body) {
+                self.note_sanitizer_definition(
+                    id.name.as_str(),
+                    &func.params,
+                    &body.statements,
+                    false,
+                );
+            }
+        }
         let mut displaced = Vec::new();
         let declarations_here: HashSet<_> = if self.webpack_scope.is_some() {
             stmts
@@ -347,6 +370,236 @@ impl<'a> DomXssVisitor<'a> {
             })
             .collect()
     }
+    /// Whether `expr` is one of the function's parameters, or a view of one
+    /// that leaves markup in it as it was: `s`, `(s)`, `s.trim()`,
+    /// `String(s)`, `s + ''`, `s || ''`, `c ? s : ''`.
+    fn is_param_unchanged(expr: &Expression<'a>, params: &[&str]) -> bool {
+        const TRANSPARENT_METHODS: &[&str] = &[
+            "trim",
+            "trimStart",
+            "trimEnd",
+            "trimLeft",
+            "trimRight",
+            "toString",
+            "valueOf",
+            "toLowerCase",
+            "toUpperCase",
+            "normalize",
+        ];
+        let is_text = |e: &Expression<'a>| {
+            matches!(e, Expression::StringLiteral(_))
+                || matches!(e, Expression::TemplateLiteral(t) if t.expressions.is_empty())
+        };
+        match expr {
+            Expression::Identifier(id) => params.contains(&id.name.as_str()),
+            Expression::ParenthesizedExpression(p) => {
+                Self::is_param_unchanged(&p.expression, params)
+            }
+            Expression::CallExpression(call) => match &call.callee {
+                Expression::StaticMemberExpression(member) => {
+                    TRANSPARENT_METHODS.contains(&member.property.name.as_str())
+                        && Self::is_param_unchanged(&member.object, params)
+                }
+                Expression::Identifier(id) => {
+                    id.name == "String"
+                        && call.arguments.len() == 1
+                        && call.arguments[0]
+                            .as_expression()
+                            .is_some_and(|arg| Self::is_param_unchanged(arg, params))
+                }
+                _ => false,
+            },
+            Expression::BinaryExpression(b) if b.operator == BinaryOperator::Addition => {
+                (Self::is_param_unchanged(&b.left, params) && is_text(&b.right))
+                    || (is_text(&b.left) && Self::is_param_unchanged(&b.right, params))
+            }
+            Expression::LogicalExpression(l) => {
+                Self::is_param_unchanged(&l.left, params) && is_text(&l.right)
+            }
+            Expression::ConditionalExpression(c) => {
+                let side = |e: &Expression<'a>| Self::is_param_unchanged(e, params) || is_text(e);
+                side(&c.consequent)
+                    && side(&c.alternate)
+                    && (Self::is_param_unchanged(&c.consequent, params)
+                        || Self::is_param_unchanged(&c.alternate, params))
+            }
+            _ => false,
+        }
+    }
+
+    /// Collect the argument of every `return` in `stmts` that belongs to this
+    /// function (nested functions are expressions, so they are never entered).
+    /// `false` when a `return` has no argument.
+    fn collect_returns<'b>(
+        stmts: &'b [Statement<'a>],
+        returns: &mut Vec<&'b Expression<'a>>,
+    ) -> bool {
+        stmts
+            .iter()
+            .all(|stmt| Self::collect_returns_in(stmt, returns))
+    }
+
+    fn collect_returns_in<'b>(
+        stmt: &'b Statement<'a>,
+        returns: &mut Vec<&'b Expression<'a>>,
+    ) -> bool {
+        match stmt {
+            Statement::ReturnStatement(ret) => match &ret.argument {
+                Some(arg) => {
+                    returns.push(arg);
+                    true
+                }
+                None => false,
+            },
+            Statement::BlockStatement(block) => Self::collect_returns(&block.body, returns),
+            Statement::IfStatement(branch) => {
+                Self::collect_returns_in(&branch.consequent, returns)
+                    && branch
+                        .alternate
+                        .as_ref()
+                        .is_none_or(|alt| Self::collect_returns_in(alt, returns))
+            }
+            Statement::TryStatement(attempt) => {
+                Self::collect_returns(&attempt.block.body, returns)
+                    && attempt
+                        .handler
+                        .as_ref()
+                        .is_none_or(|h| Self::collect_returns(&h.body.body, returns))
+                    && attempt
+                        .finalizer
+                        .as_ref()
+                        .is_none_or(|f| Self::collect_returns(&f.body, returns))
+            }
+            Statement::SwitchStatement(switch) => switch
+                .cases
+                .iter()
+                .all(|case| Self::collect_returns(&case.consequent, returns)),
+            Statement::ForStatement(l) => Self::collect_returns_in(&l.body, returns),
+            Statement::ForInStatement(l) => Self::collect_returns_in(&l.body, returns),
+            Statement::ForOfStatement(l) => Self::collect_returns_in(&l.body, returns),
+            Statement::WhileStatement(l) => Self::collect_returns_in(&l.body, returns),
+            Statement::DoWhileStatement(l) => Self::collect_returns_in(&l.body, returns),
+            Statement::LabeledStatement(l) => Self::collect_returns_in(&l.body, returns),
+            _ => true,
+        }
+    }
+
+    /// Whether `body` assigns to `name` anywhere: `s = …`, `s += …`, `s++`,
+    /// `var s = …`. Textual, like `identifier_referenced`, and only ever errs
+    /// toward "assigned".
+    fn assigns_to(body: &str, name: &str) -> bool {
+        let bytes = body.as_bytes();
+        let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+        let mut from = 0;
+        while let Some(rel) = body[from..].find(name) {
+            let start = from + rel;
+            let end = start + name.len();
+            from = end;
+            if (start > 0 && is_ident(bytes[start - 1]))
+                || bytes.get(end).is_some_and(|&b| is_ident(b))
+            {
+                continue;
+            }
+            let before = body[..start].trim_end();
+            if before.ends_with("++") || before.ends_with("--") {
+                return true;
+            }
+            let after = body[end..].trim_start();
+            // `=` alone (not `==`, `=>`), `++`, `--`, or a compound operator.
+            let plain =
+                after.starts_with('=') && !after.starts_with("==") && !after.starts_with("=>");
+            let compound = [
+                "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "**=",
+                "&&=", "||=", "??=",
+            ]
+            .iter()
+            .any(|op| after.starts_with(op));
+            if plain || compound {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Positive evidence that a function hands its parameter back unchanged:
+    /// every `return` yields a parameter, or a view of one that leaves markup
+    /// as it was ([`is_param_unchanged`]), and the body never assigns to that
+    /// parameter. This is what a stub looks like — `function escapeHtml(s) {
+    /// return s }` — and nothing a real escaping helper does.
+    ///
+    /// Anything else is "unknown", not "passes through": a body that returns
+    /// a constant, a number, another call's result or a DOM read may well be
+    /// safe, and guessing otherwise reports real sanitizers.
+    ///
+    /// [`is_param_unchanged`]: DomXssVisitor::is_param_unchanged
+    fn returns_param_unchanged(
+        &self,
+        formal_params: &FormalParameters<'a>,
+        body_stmts: &[Statement<'a>],
+        concise: bool,
+    ) -> bool {
+        let params: Vec<&str> = formal_params
+            .items
+            .iter()
+            .filter_map(|p| match &p.pattern {
+                BindingPattern::BindingIdentifier(id) if p.initializer.is_none() => {
+                    Some(id.name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        if params.is_empty() {
+            return false;
+        }
+        let mut returns = Vec::new();
+        if concise {
+            match body_stmts.first() {
+                Some(Statement::ExpressionStatement(stmt)) => returns.push(&stmt.expression),
+                _ => return false,
+            }
+        } else if !Self::collect_returns(body_stmts, &mut returns) {
+            return false;
+        }
+        if returns.is_empty()
+            || !returns
+                .iter()
+                .all(|ret| Self::is_param_unchanged(ret, &params))
+        {
+            return false;
+        }
+        let body = self.stmts_source(body_stmts);
+        !params.iter().any(|p| Self::assigns_to(body, p))
+    }
+
+    /// Record what the body of a function defined under a sanitizer's name
+    /// does. Called for hoisted declarations before any body is analyzed, and
+    /// again wherever a summary is registered.
+    ///
+    /// Where several functions share the name (the analyzer does not tell
+    /// their scopes apart), the name stays believed unless all of them hand
+    /// their parameter back: an unused inner stub must not discredit the
+    /// escaping helper around it.
+    pub(super) fn note_sanitizer_definition(
+        &mut self,
+        name: &str,
+        formal_params: &FormalParameters<'a>,
+        body_stmts: &[Statement<'a>],
+        concise: bool,
+    ) {
+        if !self.sanitizers.contains(name) && !Self::is_likely_sanitizer_name(name) {
+            return;
+        }
+        let passes = self.returns_param_unchanged(formal_params, body_stmts, concise);
+        let room = self.passthrough_sanitizers.len() < MAX_NOTED_SANITIZERS;
+        match self.passthrough_sanitizers.get_mut(name) {
+            Some(all_pass) => *all_pass &= passes,
+            None if room => {
+                self.passthrough_sanitizers.insert(name.to_string(), passes);
+            }
+            None => {}
+        }
+    }
+
     pub(super) fn register_function_summary(
         &mut self,
         function_name: String,
@@ -372,6 +625,7 @@ impl<'a> DomXssVisitor<'a> {
         // The scope being walked binds this name to a function after all
         // (`var t = 0; if (x) { const t = function (h) { … } }`).
         self.value_locals.remove(function_name.as_str());
+        self.note_sanitizer_definition(&function_name, formal_params, body_stmts, concise);
         if let Some(existing) = self.function_summaries.get_mut(&function_name) {
             // Another function under the same name (minified bundles reuse
             // `e`/`t`): a call that leaves an argument out may be either.
