@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -15,7 +16,7 @@ import (
 	printing "github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/internal/utils"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	_ "github.com/hahwul/dalfox/v2/pkg/server/docs"
+	"github.com/hahwul/dalfox/v2/pkg/server/docs"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	echoSwagger "github.com/swaggo/echo-swagger"
@@ -68,6 +69,10 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	// key on ServerType == "rest", so `--type REST` or a library caller with
 	// an empty ServerType silently ran without the API key check.
 	options.ServerType = "rest"
+	// Let Swagger UI call the address it was opened on. The generated spec
+	// says localhost:6664, which is cross-origin when the UI is opened at the
+	// 127.0.0.1 address the server prints, or on any other port.
+	docs.SwaggerInfo.Host = ""
 	host := strings.TrimSuffix(strings.TrimPrefix(options.ServerHost, "["), "]")
 	e.Server.Addr = net.JoinHostPort(host, strconv.Itoa(options.ServerPort))
 	for i, o := range options.AllowedOrigins {
@@ -239,6 +244,35 @@ func sanitizeAPIScanOptions(o *model.Options) {
 	// Cookie header is sent to the scan target, and a missing or unparsable
 	// file calls os.Exit(1), so one request could stop the server.
 	o.CookieFromRaw = ""
+
+	// Values the CLI never produces but that crash the whole process when a
+	// scan goroutine panics: make(chan, -1) for a negative worker count, and
+	// a nil request from an unparsable trigger URL. 0 means "default" to
+	// dalfox.Initialize.
+	if o.Concurrence < 0 {
+		o.Concurrence = 0
+	}
+	if o.Concurrence > maxAPIWorkers {
+		o.Concurrence = maxAPIWorkers
+	}
+	if o.Timeout < 0 {
+		o.Timeout = 0
+	}
+	if o.Delay < 0 {
+		o.Delay = 0
+	}
+	if o.Trigger != "" && !isHTTPURL(o.Trigger) {
+		o.Trigger = ""
+	}
+}
+
+// maxAPIWorkers caps the per-scan worker count an API caller can request.
+// Workers size channel buffers, so an unbounded value is an allocation.
+const maxAPIWorkers = 1000
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // stripRawHTTPOutput drops raw request/response capture from findings. With

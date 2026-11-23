@@ -1883,7 +1883,9 @@ The Dalfox server provides a Swagger UI for easy API exploration and testing. Ac
 http://your-server-address:port/swagger/index.html
 ```
 
-For example: `http://localhost:8090/swagger/index.html`
+For example: `http://127.0.0.1:8090/swagger/index.html`. Swagger UI sends its requests to the address you opened it on.
+
+Swagger UI cannot attach the `X-API-KEY` header to page loads, so with `--api-key` set the page itself returns `401`. Use it on a server without an API key, or call the API directly.
 
 ![Swagger UI Screenshot](https://user-images.githubusercontent.com/13212227/89736705-5002ab80-daa6-11ea-9ee8-d2def396c25a.png)
 
@@ -1893,10 +1895,13 @@ Dalfox's server mode provides several RESTful endpoints for scan management:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/scan`  | POST   | Submit a new scan request |
-| `/result/:id` | GET | Retrieve scan results by scan ID |
-| `/status/:id` | GET | Check the status of a scan by ID |
-| `/stop/:id`   | GET | Stop a running scan by ID |
+| `/scan`  | POST   | Submit a new scan request (`Content-Type: application/json`) |
+| `/scan/:id` | GET | Scan status and results: `msg` is `scanning` while it runs and `finish` with `data` when done |
+| `/scan/:id` | DELETE | Delete a scan record |
+| `/scans` | GET | List scan IDs |
+| `/scans/all` | DELETE | Delete all scan records |
+| `/health` | GET | Health check |
+| `/swagger/*` | GET | Swagger UI |
 
 ## Basic Scanning Example
 
@@ -1921,7 +1926,7 @@ The response contains a scan ID (`msg` field) that you'll use to retrieve result
 ### Retrieving Scan Results
 
 ```bash
-curl -X GET "http://localhost:8090/result/28846e5b355577ecd60766f45735c4c687e8c1c200db65700e3f458b73234984" \
+curl -X GET "http://localhost:8090/scan/28846e5b355577ecd60766f45735c4c687e8c1c200db65700e3f458b73234984" \
   -H "X-API-KEY: your-secret-key"
 ```
 
@@ -1977,7 +1982,6 @@ The server mode accepts the same options available in CLI mode. Below are some c
     // Output control
     "format": "json",               // Output format
     "silence": true,                // Minimal output mode
-    "found-action": "webhook.sh",   // Action on finding vulnerability
     "debug": false                  // Enable debug mode
   }
 }
@@ -2005,7 +2009,7 @@ def start_scan(url, options=None):
     return response.json()["msg"]  # Return the scan ID
 
 def get_scan_results(scan_id):
-    response = requests.get(f"{DALFOX_SERVER}/result/{scan_id}")
+    response = requests.get(f"{DALFOX_SERVER}/scan/{scan_id}")
     return response.json()
 
 def main():
@@ -2021,7 +2025,7 @@ def main():
     # Poll for results
     while True:
         result = get_scan_results(scan_id)
-        if result["status"] == "done":
+        if result["msg"] == "finish":
             print("Scan completed!")
             print(json.dumps(result["data"], indent=2))
             break
@@ -2078,15 +2082,17 @@ When deploying Dalfox in server mode, consider the following security practices:
 
 1. **Access Control**: The server listens on `127.0.0.1` by default. If you bind it to another address, set `--api-key`: without one, anyone who can reach the port can make Dalfox send requests to any host it can reach, including internal services. Dalfox prints a warning at startup in that case.
 2. **Raw HTTP output**: Without `--api-key`, the REST API ignores `output-request` and `output-response` and turns a `poc-type` of `http-request` into `plain`, so scan results carry no raw request or response dumps. `evidence` keeps the line numbers and the payload but not the surrounding response text.
-3. **Server-side files**: The REST and MCP APIs ignore options that name a file on the server (`cookie-from-raw`, `custom-payload-file`, `mining-dict-word`, `output`, `har-file-path`, and so on) and `found-action`, with or without an API key.
+3. **Server-side files and limits**: The REST and MCP APIs ignore options that name a file on the server (`cookie-from-raw`, `custom-payload-file`, `mining-dict-word`, `output`, `har-file-path`, and so on) and `found-action`, with or without an API key. They also cap `worker` at 1000, drop negative `worker`/`timeout`/`delay` values, and drop a `trigger` that is not an `http(s)` URL.
 4. **Browser requests (no API key)**: Without `--api-key`, the REST API rejects requests that a web page could make on your behalf:
    - cross-site requests, judged by `Origin` and `Sec-Fetch-Site`. Same-origin requests (the bundled Swagger UI) and origins listed in `--allowed-origins` are accepted.
    - requests whose `Host` header is a hostname other than `localhost`, the `--host` value, or one listed in `--allowed-hosts`. This blocks DNS rebinding. IP addresses are always accepted. If clients reach the server by a name (a Docker Compose service, a Kubernetes Service, an internal DNS name), add it with `--allowed-hosts`, or set `--api-key`.
 
+   Behind a reverse proxy that rewrites `Host` (for example to `127.0.0.1:6664`), a browser UI on the proxy's public address is no longer same-origin as far as Dalfox can tell; list that address in `--allowed-origins`.
+
    With `--api-key`, these checks are skipped: a web page cannot attach the `X-API-KEY` header without CORS approval.
 
    Every response also carries `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: same-origin` (`cross-origin` with `--jsonp`), so other sites cannot load it through `<img>` or `<script>` even where the browser sends no `Sec-Fetch-Site` (plain HTTP to a non-loopback address).
-5. **JSONP**: `--jsonp` lets any web page read results through `<script src>`, so it also turns off the cross-site check for `GET` requests. A `<script>` tag cannot send `X-API-KEY`, so JSONP only works on a server without an API key. Use it only on a trusted network.
+5. **JSONP**: `--jsonp` lets any web page read results through `<script src>`, so it also turns off the cross-site check for `GET` and `HEAD` requests. A `<script>` tag cannot send `X-API-KEY`, so JSONP only works on a server without an API key. Use it only on a trusted network.
 6. **Request format**: `POST /scan` accepts only `Content-Type: application/json`.
 7. **Resource Limits**: Set appropriate worker and timeout values to avoid resource exhaustion
 8. **Monitoring**: Implement monitoring for the Dalfox server to track resource usage and scan activity

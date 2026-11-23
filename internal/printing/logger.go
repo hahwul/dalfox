@@ -2,8 +2,10 @@ package printing
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/hahwul/dalfox/v2/internal/utils"
@@ -34,7 +36,7 @@ func Summary(options model.Options, target string) {
 
 		targetStr := target
 		methodStr := options.Method
-		listenAddrStr := options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
+		listenAddrStr := net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(options.ServerHost, "["), "]"), strconv.Itoa(options.ServerPort))
 		blindURLStr := options.BlindURL
 
 		if options.AuroraObject != nil {
