@@ -56,6 +56,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # v2 is a maintenance line: `latest` belongs to v3 (main). The
+          # action's default, latest=auto, adds it to every tag push.
+          flavor: |
+            latest=false
 
       # Build and push Docker image with Buildx (don't push on PR)
       # https://github.com/docker/build-push-action

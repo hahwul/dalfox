@@ -15,6 +15,10 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: hahwul/dalfox
+          # v2 is a maintenance line: `latest` belongs to v3 (main). The
+          # action's default, latest=auto, adds it to every semver tag push.
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern=v{{major}}
             type=semver,pattern=v{{major}}.{{minor}}
