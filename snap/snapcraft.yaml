@@ -8,7 +8,7 @@ base: core20
 grade: stable
 confinement: strict
 license: MIT
-version: v2.13.0
+version: v2.13.1
 
 apps:
   dalfox:
