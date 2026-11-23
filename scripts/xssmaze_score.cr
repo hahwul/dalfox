@@ -8,9 +8,14 @@
 #   3. Scan every endpoint with dalfox, targeting the injection point the
 #      catalog declares (query / body / header / path). An endpoint counts as
 #      detected when dalfox returns at least one finding.
-#   4. Aggregate detection per category and overall, write the machine-readable
-#      snapshot to `docs/data/xssmaze-score.json`, and re-render the table +
-#      graph block in `docs/content/reference/xssmaze.md`.
+#   4. Score the two kinds of endpoint the catalog distinguishes separately.
+#      Most are exploitable, and a finding there is a detection. A few are
+#      controls (`vuln.exploitable: false`: a reflection the lab knows to be
+#      inert), and a finding there is a false positive. Counting a control as
+#      a detection, as this script used to, rewards exactly the wrong result.
+#   5. Aggregate per category and overall, write the machine-readable snapshot
+#      to `docs/data/xssmaze-score.json`, and re-render the table + graph block
+#      in `docs/content/reference/xssmaze.md`.
 #
 # Invoked by `just xssmaze-score`. Tunable via environment variables:
 #   XSSMAZE_URL          base URL                (default http://localhost:3000)
@@ -20,6 +25,8 @@
 #   XSSMAZE_CONCURRENCY  parallel endpoint scans (default 8)
 #   XSSMAZE_LIMIT        scan only the first N endpoints (smoke testing)
 #   XSSMAZE_RENDER_ONLY  1 = skip scanning, re-render the page from the JSON snapshot
+#   XSSMAZE_ALLOW_UNRELIABLE  1 = write the snapshot even if scans stayed
+#                        unreliable (errored, or half their requests failed)
 #   DALFOX_BIN           dalfox binary           (default target/release/dalfox)
 
 require "json"
@@ -36,6 +43,8 @@ CONCURRENCY = ENV.fetch("XSSMAZE_CONCURRENCY", "8").to_i
 LIMIT       = ENV["XSSMAZE_LIMIT"]?.try(&.to_i?)
 RENDER_ONLY = ENV["XSSMAZE_RENDER_ONLY"]? == "1"
 MANAGE      = ENV.fetch("XSSMAZE_MANAGE", "true") != "false"
+# Write the snapshot even if some scans stayed unreliable after their retries.
+ALLOW_UNRELIABLE = ENV["XSSMAZE_ALLOW_UNRELIABLE"]? == "1"
 
 DATA_PATH = ENV.fetch("XSSMAZE_DATA_PATH", "docs/data/xssmaze-score.json")
 PAGE_PATH = ENV.fetch("XSSMAZE_PAGE_PATH", "docs/content/reference/xssmaze.md")
@@ -48,6 +57,14 @@ HEADER_PARAMS = Set{"Cookie", "Referer", "User-Agent", "Authorization"}
 # Catalog models (shape of /map/json — see xssmaze src/maze.cr#to_json_object).
 # ---------------------------------------------------------------------------
 
+# The catalog's ground truth for one endpoint. Older lab images have no `vuln`
+# object; every endpoint is then taken as exploitable, which is what the score
+# assumed before the lab said otherwise.
+struct Vuln
+  include JSON::Serializable
+  getter exploitable : Bool? = nil
+end
+
 struct Maze
   include JSON::Serializable
   getter name : String
@@ -56,6 +73,13 @@ struct Maze
   getter desc : String
   getter method : String
   getter params : Array(String)
+  getter vuln : Vuln? = nil
+
+  # A control: the lab marks it not exploitable, so the right result is no
+  # finding.
+  def control? : Bool
+    vuln.try(&.exploitable) == false
+  end
 end
 
 struct MapResponse
@@ -63,11 +87,18 @@ struct MapResponse
   getter endpoints : Array(Maze)
 end
 
-# Per-category tally accumulated during scanning.
+# A run whose scans could not all be trusted; nothing is written for it.
+class UnreliableRun < Exception
+end
+
+# Per-category tally accumulated during scanning. `endpoints`, `detected` and
+# `verified` count exploitable endpoints only; controls are tallied apart.
 class Tally
   property endpoints = 0
   property detected = 0
   property verified = 0
+  property controls = 0
+  property control_findings = 0
 end
 
 # ---------------------------------------------------------------------------
@@ -209,8 +240,16 @@ def build_args(maze : Maze, out_file : String, json_body : Bool) : Array(String)
   args
 end
 
-# Run dalfox once with the given body encoding. Returns {detected, verified}.
-def run_dalfox(maze : Maze, json_body : Bool) : {Bool, Bool}
+# Run dalfox once with the given body encoding. Returns {detected, verified,
+# unreliable}.
+#
+# `unreliable` marks a clean result that cannot be trusted: dalfox exited with
+# an error, wrote no report, was cut short (`meta.incomplete`: the scan timeout
+# among other things), or at least half of its requests failed. That is what a
+# scan looks like while the lab (or this machine's supply of ephemeral ports)
+# is exhausted, and recording it as "not detected" wrote a whole category off
+# at the tail of a run more than once.
+def run_dalfox(maze : Maze, json_body : Bool) : {Bool, Bool, Bool}
   out_file = File.tempname("dalfox-xssmaze", ".json")
   args = build_args(maze, out_file, json_body)
   status = Process.run(DALFOX_BIN, args,
@@ -218,21 +257,57 @@ def run_dalfox(maze : Maze, json_body : Bool) : {Bool, Bool}
     error: Process::Redirect::Close)
 
   findings = Dalfox.parse_report(out_file)
+  meta = Dalfox.parse_meta(out_file)
   detected = !findings.empty? || status.exit_code == 1
   verified = findings.any?(&.verified?)
-  {detected, verified}
+  total = meta.try(&.["total_requests"]?).try(&.as_i64?) || 0_i64
+  failed = meta.try(&.["failed_requests"]?).try(&.as_i64?) || 0_i64
+  incomplete = meta.try(&.["incomplete"]?).try(&.as_bool?) || false
+  unreliable = !detected &&
+               (status.exit_code == 2 || meta.nil? || incomplete || (failed > 0 && failed * 2 >= total))
+  {detected, verified, unreliable}
 ensure
   File.delete(out_file) if out_file && File.exists?(out_file)
 end
 
-# Scan one maze. Returns {detected, verified}. The catalog does not record
-# whether a POST endpoint reads urlencoded or JSON, so POST bodies are tried as
-# a form first and re-tried as JSON only if the form pass finds nothing.
-def scan(maze : Maze) : {Bool, Bool}
-  detected, verified = run_dalfox(maze, false)
-  return {detected, verified} if detected
-  return {detected, verified} if body_params(maze).empty?
-  run_dalfox(maze, true)
+# Pauses before each retry of an unreliable scan: long enough for sockets in
+# TIME_WAIT to drain.
+RETRY_PAUSES = [5.seconds, 20.seconds, 60.seconds]
+
+# Endpoints that may stay unreliable before the rest stop retrying. Past this
+# the lab is down rather than busy, and waiting 85 s per endpoint only delays
+# the abort.
+MAX_UNRELIABLE = 20
+
+# Endpoints that ended unreliable so far, across workers.
+UNRELIABLE_COUNT = Atomic(Int32).new(0)
+
+# One pass over an endpoint: the form body first, then JSON when the form pass
+# found nothing. The catalog does not record which one a POST endpoint reads,
+# so the JSON pass runs before the form pass's result is judged. The pair is
+# unreliable when nothing was found and either pass could not be trusted.
+def scan_once(maze : Maze) : {Bool, Bool, Bool}
+  detected, verified, unreliable = run_dalfox(maze, false)
+  return {detected, verified, unreliable} if detected || body_params(maze).empty?
+  json_detected, json_verified, json_unreliable = run_dalfox(maze, true)
+  {json_detected, json_verified, !json_detected && (unreliable || json_unreliable)}
+end
+
+# Scan one maze. Returns {detected, verified, unreliable}. An unreliable
+# result is retried after a pause; one that stays unreliable is reported as
+# such, never as a miss.
+def scan(maze : Maze) : {Bool, Bool, Bool}
+  attempt = 0
+  loop do
+    detected, verified, unreliable = scan_once(maze)
+    return {detected, verified, false} unless unreliable
+    if attempt >= RETRY_PAUSES.size || UNRELIABLE_COUNT.get >= MAX_UNRELIABLE
+      UNRELIABLE_COUNT.add(1)
+      return {detected, verified, true}
+    end
+    sleep RETRY_PAUSES[attempt]
+    attempt += 1
+  end
 end
 
 # ---------------------------------------------------------------------------
@@ -254,56 +329,98 @@ def collect : JSON::Any
   puts "==> scanning #{mazes.size} endpoints with #{CONCURRENCY} workers (dalfox: #{DALFOX_BIN})"
 
   jobs = Channel(Maze).new(mazes.size)
-  done = Channel({String, Bool, Bool}).new(mazes.size)
+  done = Channel({Maze, Bool, Bool, Bool}).new(mazes.size)
   mazes.each { |m| jobs.send(m) }
   jobs.close
 
   CONCURRENCY.times do
     spawn do
       while maze = jobs.receive?
-        detected, verified = scan(maze)
-        done.send({maze.type, detected, verified})
+        detected, verified, unreliable = scan(maze)
+        done.send({maze, detected, verified, unreliable})
       end
     end
   end
 
   tallies = Hash(String, Tally).new { |h, k| h[k] = Tally.new }
+  reported_controls = [] of String
+  unreliable_scans = [] of String
   done_count = 0
   mazes.size.times do
-    cat, detected, verified = done.receive
-    t = tallies[cat]
-    t.endpoints += 1
-    t.detected += 1 if detected
-    t.verified += 1 if verified
+    maze, detected, verified, unreliable = done.receive
+    unreliable_scans << maze.name if unreliable
+    t = tallies[maze.type]
+    if maze.control?
+      t.controls += 1
+      if detected
+        t.control_findings += 1
+        reported_controls << maze.name
+      end
+    else
+      t.endpoints += 1
+      t.detected += 1 if detected
+      t.verified += 1 if verified
+    end
     done_count += 1
     print "\r==> scanned #{done_count}/#{mazes.size}"
   end
   puts ""
 
+  unless unreliable_scans.empty?
+    names = unreliable_scans.sort
+    shown = names.first(12).join(", ")
+    shown += ", … (#{names.size - 12} more)" if names.size > 12
+    message = "#{names.size} scan(s) could not be trusted (errored, cut short, or half the " \
+              "requests failed), retries included: #{shown}"
+    if ALLOW_UNRELIABLE
+      puts "==> WARNING: #{message}; recorded as not detected (XSSMAZE_ALLOW_UNRELIABLE=1)"
+    else
+      # Raised, not `abort`ed: the caller still has a container to stop.
+      raise UnreliableRun.new("#{message}\nNo snapshot written: these would be recorded as " \
+                              "misses. Lower XSSMAZE_CONCURRENCY, or set " \
+                              "XSSMAZE_ALLOW_UNRELIABLE=1 to write it anyway.")
+    end
+  end
+
+  JSON.parse(build_snapshot(tallies, reported_controls.sort, xm_version).to_json)
+end
+
+# Turn the tallies into the snapshot. A category that holds only controls has
+# no detection rate, so it is listed with `rate: nil` and sorted last.
+def build_snapshot(tallies : Hash(String, Tally), reported_controls : Array(String), xm_version : String)
   categories = tallies.map do |cat, t|
     {
-      category:  cat,
-      endpoints: t.endpoints,
-      detected:  t.detected,
-      verified:  t.verified,
-      rate:      rate(t.detected, t.endpoints),
+      category:         cat,
+      endpoints:        t.endpoints,
+      detected:         t.detected,
+      verified:         t.verified,
+      rate:             t.endpoints.zero? ? nil : rate(t.detected, t.endpoints),
+      controls:         t.controls,
+      control_findings: t.control_findings,
     }
-  end.sort_by! { |c| {-c[:rate], c[:category]} }
+  end.sort_by! { |c| {-(c[:rate] || -1.0), c[:category]} }
 
   total_eps = tallies.sum { |_, t| t.endpoints }
   total_det = tallies.sum { |_, t| t.detected }
   total_ver = tallies.sum { |_, t| t.verified }
 
-  snapshot = {
+  {
     generated_at:    Time.utc.to_s("%Y-%m-%dT%H:%M:%SZ"),
     dalfox_version:  dalfox_version,
     xssmaze_version: xm_version,
     xssmaze_image:   IMAGE,
     xssmaze_digest:  image_digest,
-    total:           {endpoints: total_eps, detected: total_det, verified: total_ver, rate: rate(total_det, total_eps)},
-    categories:      categories,
+    total:           {
+      endpoints:        total_eps,
+      detected:         total_det,
+      verified:         total_ver,
+      rate:             rate(total_det, total_eps),
+      controls:         tallies.sum { |_, t| t.controls },
+      control_findings: tallies.sum { |_, t| t.control_findings },
+    },
+    reported_controls: reported_controls,
+    categories:        categories,
   }
-  JSON.parse(snapshot.to_json)
 end
 
 # ---------------------------------------------------------------------------
@@ -341,7 +458,53 @@ def tile(label : String, value : String, sub : String,
   end
 end
 
-def render_block(data : JSON::Any) : String
+# The prose of the generated block, per page language. The score board and the
+# tiles above it are the same on both pages.
+record Labels,
+  heading : String,
+  all_detected : String,
+  summary : Proc(Int32, Int32, Int32, String),
+  table_header : String,
+  total : String,
+  controls_heading : String,
+  controls_intro : Proc(Int32, String),
+  controls_none : String,
+  controls_some : Proc(Int32, String)
+
+LABELS = {
+  "en" => Labels.new(
+    heading: "Coverage by category",
+    all_detected: "Every catalogued category detects all of its endpoints.",
+    summary: ->(perfect : Int32, scored : Int32, gaps : Int32) {
+      "**#{perfect} of #{scored}** categories detect every endpoint. The chart highlights the **#{gaps}** with gaps (worst first); the full breakdown is in the table."
+    },
+    table_header: "| Category | Endpoints | Detected | Verified | Rate |",
+    total: "Total",
+    controls_heading: "Controls",
+    controls_intro: ->(controls : Int32) {
+      "**#{controls}** endpoints are controls: a reflection the lab knows to be inert. They are left out of the score above, and a finding on one is a false positive."
+    },
+    controls_none: "Dalfox reports none of them.",
+    controls_some: ->(findings : Int32) { "Dalfox reports **#{findings}**" },
+  ),
+  "ko" => Labels.new(
+    heading: "카테고리별 커버리지",
+    all_detected: "모든 카테고리가 엔드포인트를 전부 탐지합니다.",
+    summary: ->(perfect : Int32, scored : Int32, gaps : Int32) {
+      "**#{scored}개 중 #{perfect}개** 카테고리가 모든 엔드포인트를 탐지합니다. 차트는 갭이 있는 **#{gaps}**개(가장 심한 것부터)를 강조하며, 전체 분석은 표에 있습니다."
+    },
+    table_header: "| 카테고리 | 엔드포인트 | 탐지 | 검증 | 비율 |",
+    total: "합계",
+    controls_heading: "통제군",
+    controls_intro: ->(controls : Int32) {
+      "**#{controls}**개 엔드포인트는 통제군입니다. 랩이 비활성임을 알고 있는 반사이며, 위 점수에서 제외합니다. 여기에 탐지 결과가 나오면 오탐입니다."
+    },
+    controls_none: "Dalfox는 하나도 보고하지 않습니다.",
+    controls_some: ->(findings : Int32) { "Dalfox는 이 중 **#{findings}**개를 보고합니다" },
+  ),
+}
+
+def render_block(data : JSON::Any, labels : Labels) : String
   total = data["total"]
   cats = data["categories"].as_a
   digest = data["xssmaze_digest"]?.try(&.as_s?)
@@ -349,8 +512,17 @@ def render_block(data : JSON::Any) : String
   detected = total["detected"]
   endpoints = total["endpoints"]
   hex, rgb = meter_palette(rate)
-  perfect = cats.count { |c| c["rate"].as_f >= 100.0 }
-  gaps = cats.reject { |c| c["rate"].as_f >= 100.0 }.sort_by { |c| c["rate"].as_f }
+  # A category of controls only has no rate (`null`); a snapshot written
+  # before controls were scored apart has neither field.
+  scored = cats.select { |c| c["rate"].as_f? || c["rate"].as_i? }
+  rate_of = ->(c : JSON::Any) { c["rate"].as_f? || c["rate"].as_i.to_f }
+  perfect = scored.count { |c| rate_of.call(c) >= 100.0 }
+  gaps = scored.reject { |c| rate_of.call(c) >= 100.0 }.sort_by { |c| rate_of.call(c) }
+  # A snapshot written before controls were scored apart counted them in.
+  kind = total["controls"]? ? "exploitable" : "catalogued"
+  controls = total["controls"]?.try(&.as_i?) || 0
+  control_findings = total["control_findings"]?.try(&.as_i?) || 0
+  reported_controls = data["reported_controls"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String
   gen_date = data["generated_at"].as_s.split("T").first
 
   String.build do |io|
@@ -358,7 +530,7 @@ def render_block(data : JSON::Any) : String
     io << %(<div style="margin:1.5rem 0;padding:1.6rem 1.75rem;background:radial-gradient(120% 140% at 100% 0%,rgba(139,148,232,0.10),transparent 55%),linear-gradient(135deg,var(--bg-surface,#11141f),var(--bg-sidebar,#0b0d18));border:1px solid var(--border-light,#222741);border-radius:14px">)
     io << %(<div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--text-muted,#636980)">Detection score</div>)
     io << %(<div style="display:flex;align-items:baseline;margin-top:.4rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums"><span style="font-size:clamp(2.6rem,9vw,3.6rem);font-weight:700;line-height:1;letter-spacing:-.02em">#{rate}</span><span style="font-size:1.6rem;font-weight:600;color:var(--text-secondary,#9aa0bb)">%</span></div>)
-    io << %(<div style="margin-top:.55rem;font-size:.95rem;color:var(--text-secondary,#9aa0bb)"><strong style="color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">#{detected}</strong> / #{endpoints} endpoints detected across #{cats.size} categories</div>)
+    io << %(<div style="margin-top:.55rem;font-size:.95rem;color:var(--text-secondary,#9aa0bb)"><strong style="color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">#{detected}</strong> / #{endpoints} #{kind} endpoints detected across #{scored.size} categories</div>)
     io << %(<div style="margin-top:1.4rem;height:.6rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><div style="height:100%;width:#{rate}%;background:#{hex};box-shadow:0 0 16px rgba(#{rgb},0.45);border-radius:999px"></div></div>)
     io << %(<div style="margin-top:1.3rem;padding-top:1rem;border-top:1px solid var(--border,#161a28);display:flex;flex-wrap:wrap;gap:.4rem 1.25rem;font-size:.8rem;color:var(--text-muted,#636980)">)
     io << %(<span><span style="color:var(--text-secondary,#9aa0bb)">dalfox</span> v#{data["dalfox_version"].as_s}</span>)
@@ -369,21 +541,25 @@ def render_block(data : JSON::Any) : String
 
     # --- Stat tiles: flat, no left accent; values tinted for meaning ---
     io << %(<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.75rem;margin:1rem 0">)
-    io << tile("Endpoints", endpoints.to_s, "catalogued")
-    io << tile("Categories", cats.size.to_s, "test groups")
+    io << tile("Endpoints", endpoints.to_s, kind)
+    io << tile("Categories", scored.size.to_s, "test groups")
     io << tile("Fully detected", perfect.to_s, "categories at 100%", "#34d399")
     io << tile("With gaps", gaps.size.to_s, "below 100%", gaps.empty? ? "#34d399" : "#f59e0b")
+    if controls > 0
+      io << tile("False positives", control_findings.to_s, "of #{controls} controls reported",
+        control_findings.zero? ? "#34d399" : "#f59e0b")
+    end
     io << %(</div>)
 
     # --- Detailed scores ---
-    io << "\n\n### Coverage by category\n\n"
+    io << "\n\n### #{labels.heading}\n\n"
     if gaps.empty?
-      io << %(<div style="margin:1.1rem 0;padding:.9rem 1.1rem;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.3);border-radius:10px;color:#34d399;font-size:.9rem">Every catalogued category detects all of its endpoints.</div>)
+      io << %(<div style="margin:1.1rem 0;padding:.9rem 1.1rem;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.3);border-radius:10px;color:#34d399;font-size:.9rem">#{labels.all_detected}</div>)
     else
-      io << "**#{perfect} of #{cats.size}** categories detect every endpoint. The chart highlights the **#{gaps.size}** with gaps (worst first); the full breakdown is in the table.\n\n"
+      io << labels.summary.call(perfect, scored.size, gaps.size) << "\n\n"
       io << %(<div style="margin:1.1rem 0">)
       gaps.each do |c|
-        r = c["rate"].as_f
+        r = rate_of.call(c)
         io << %(<div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0">)
         io << %(<span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">#{c["category"].as_s}</span>)
         io << %(<span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:#{r}%;background:#{bar_color(r)}"></span></span>)
@@ -394,12 +570,25 @@ def render_block(data : JSON::Any) : String
     end
 
     # --- Full reference table (alphabetical, every category) ---
-    io << "\n\n| Category | Endpoints | Detected | Verified | Rate |\n"
+    io << "\n\n" << labels.table_header << "\n"
     io << "| --- | ---: | ---: | ---: | ---: |\n"
-    cats.each do |c|
+    scored.each do |c|
       io << "| `#{c["category"].as_s}` | #{c["endpoints"]} | #{c["detected"]} | #{c["verified"]} | #{c["rate"]}% |\n"
     end
-    io << "| **Total** | **#{endpoints}** | **#{detected}** | **#{total["verified"]}** | **#{rate}%** |\n"
+    io << "| **#{labels.total}** | **#{endpoints}** | **#{detected}** | **#{total["verified"]}** | **#{rate}%** |\n"
+
+    # --- Controls: endpoints the lab marks not exploitable ---
+    if controls > 0
+      io << "\n\n### #{labels.controls_heading}\n\n"
+      io << labels.controls_intro.call(controls) << " "
+      if control_findings.zero?
+        io << labels.controls_none << "\n"
+      else
+        io << labels.controls_some.call(control_findings)
+        io << ": " << reported_controls.map { |n| "`#{n}`" }.join(", ") unless reported_controls.empty?
+        io << ".\n"
+      end
+    end
 
     io << "\n_Generated #{data["generated_at"].as_s} · image `#{data["xssmaze_image"].as_s}`"
     io << " (`#{digest}`)" if digest
@@ -410,16 +599,24 @@ end
 BEGIN_MARKER = "<!-- XSSMAZE:BEGIN — generated by `just xssmaze-score`; do not edit by hand -->"
 END_MARKER   = "<!-- XSSMAZE:END -->"
 
+# Re-render the block in the page and in its Korean sibling (`<page>.ko.md`),
+# which carries the same block with translated prose.
 def render_page(data : JSON::Any)
   abort "missing page: #{PAGE_PATH}" unless File.exists?(PAGE_PATH)
-  content = File.read(PAGE_PATH)
-  block = "#{BEGIN_MARKER}\n\n#{render_block(data)}\n#{END_MARKER}"
+  render_into(PAGE_PATH, data, LABELS["en"])
+  ko_page = PAGE_PATH.sub(/\.md\z/, ".ko.md")
+  render_into(ko_page, data, LABELS["ko"]) if ko_page != PAGE_PATH && File.exists?(ko_page)
+end
+
+def render_into(path : String, data : JSON::Any, labels : Labels)
+  content = File.read(path)
+  block = "#{BEGIN_MARKER}\n\n#{render_block(data, labels)}\n#{END_MARKER}"
   replaced = content.sub(/#{Regex.escape(BEGIN_MARKER)}[\s\S]*?#{Regex.escape(END_MARKER)}/, block)
   if replaced == content && !content.includes?(BEGIN_MARKER)
-    abort "markers not found in #{PAGE_PATH}; expected #{BEGIN_MARKER} ... #{END_MARKER}"
+    abort "markers not found in #{path}; expected #{BEGIN_MARKER} ... #{END_MARKER}"
   end
-  File.write(PAGE_PATH, replaced)
-  puts "==> wrote #{PAGE_PATH}"
+  File.write(path, replaced)
+  puts "==> wrote #{path}"
 end
 
 # ---------------------------------------------------------------------------
@@ -433,6 +630,7 @@ if RENDER_ONLY
 end
 
 started = ensure_xssmaze
+failure = nil
 begin
   data = collect
   FileUtils.mkdir_p(File.dirname(DATA_PATH))
@@ -440,7 +638,13 @@ begin
   puts "==> wrote #{DATA_PATH}"
   render_page(data)
   t = data["total"]
-  puts "==> done: #{t["detected"]}/#{t["endpoints"]} endpoints detected (#{t["rate"]}%)"
+  puts "==> done: #{t["detected"]}/#{t["endpoints"]} exploitable endpoints detected (#{t["rate"]}%), " \
+       "#{t["control_findings"]}/#{t["controls"]} controls reported"
+rescue ex : UnreliableRun
+  failure = ex.message
 ensure
   stop_xssmaze if started
 end
+# After the `ensure`: `abort` exits without unwinding, which would leave the
+# container this run started behind.
+abort failure if failure
