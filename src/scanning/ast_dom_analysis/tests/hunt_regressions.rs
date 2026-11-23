@@ -189,6 +189,78 @@ fn a_page_defined_sanitizer_is_believed_unless_it_is_plainly_a_stub() {
     }
 }
 
+/// Every kind of statement a `return` can sit in is followed, and every way
+/// of rewriting the parameter is seen.
+#[test]
+fn stub_detection_follows_control_flow_and_assignments() {
+    let sink = "document.getElementById('a').innerHTML";
+    let src = "location.hash.slice(1)";
+    // Still a stub: each path returns the parameter as it came in.
+    for body in [
+        "try { return s } catch (e) { return s } finally { log() }",
+        "switch (mode) { case 1: return s; default: return s.trim() }",
+        "for (;;) { return s }",
+        "for (var k in o) { return s } return s",
+        "for (var v of o) { return s } return s",
+        "while (true) { return s }",
+        "do { return s } while (false)",
+        "out: { return s }",
+        "{ return `${1}` ? s : '' }",
+    ] {
+        let js = format!("function escapeHtml(s){{{body}}} {sink} = escapeHtml({src});");
+        assert!(!found(&js).is_empty(), "{js}");
+    }
+    // Not a stub: the parameter is rewritten somewhere, or a path returns
+    // something else.
+    for body in [
+        "s += ''; return s",
+        "s++; return s",
+        "++s; return s",
+        "--s; return s",
+        "s ||= ''; return s",
+        "s ??= ''; return s",
+        "s <<= 1; return s",
+        "try { return s } catch (e) { return clean(s) }",
+        "switch (mode) { case 1: return s; default: return clean(s) }",
+        "while (true) { return clean(s) }",
+        "return s.concat(other)",
+        "return other",
+        "return s && clean(s)",
+        "return mode ? clean(s) : s",
+        "log(s)",
+    ] {
+        let js = format!("function escapeHtml(s){{{body}}} {sink} = escapeHtml({src});");
+        assert!(found(&js).is_empty(), "{js}");
+    }
+    // A parameter the check cannot name is not evidence either.
+    for params in ["{s}", "[s]", "...s", "s = ''"] {
+        let js = format!("function escapeHtml({params}){{return s}} {sink} = escapeHtml({src});");
+        assert!(found(&js).is_empty(), "{js}");
+    }
+    // A comparison or an arrow is not an assignment.
+    for body in [
+        "if (s == null) return s; return s",
+        "var f = s => 1; return s",
+    ] {
+        let js = format!("function escapeHtml(s){{{body}}} {sink} = escapeHtml({src});");
+        assert!(!found(&js).is_empty(), "{js}");
+    }
+}
+
+/// Past the cap no further definition is remembered, so its name is believed.
+#[test]
+fn sanitizer_definitions_are_remembered_up_to_a_cap() {
+    let sink = "document.getElementById('a').innerHTML";
+    let mut js = String::new();
+    for i in 0..1100 {
+        js.push_str(&format!("function escapeHtml{i}(s){{return s}}\n"));
+    }
+    let early = format!("{js}{sink} = escapeHtml0(location.hash.slice(1));");
+    assert!(!found(&early).is_empty());
+    let late = format!("{js}{sink} = escapeHtml1099(location.hash.slice(1));");
+    assert!(found(&late).is_empty());
+}
+
 /// The analyzer does not tell same-named functions in different scopes apart,
 /// so a stub only discredits the name when every definition is one.
 #[test]
