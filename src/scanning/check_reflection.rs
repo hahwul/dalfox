@@ -328,6 +328,13 @@ pub(crate) fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     if raw_reflection_inert_in_text(html, payload) {
         return true;
     }
+    // Inert at every landing site: the echo is judged one occurrence at a
+    // time, so a page that reflects the same value into text, a quoted
+    // attribute and a JavaScript string is covered even though no single
+    // gate above owns all three.
+    if reflection_inert_at_every_occurrence(html, payload) {
+        return true;
+    }
     false
 }
 
@@ -1540,6 +1547,314 @@ pub(crate) fn raw_reflection_inert_in_text(html: &str, payload: &str) -> bool {
         }
     }
     surfaced
+}
+
+/// Attribute-name prefixes a client-side framework reads as an expression or a
+/// binding (AngularJS, Vue, Alpine, Angular templates, htmx, Knockout,
+/// hyperscript). A value there is evaluated by the framework, not rendered.
+const DIRECTIVE_ATTR_PREFIXES: &[&str] = &[
+    "ng-",
+    "data-ng-",
+    "v-",
+    "x-",
+    "data-x-",
+    ":",
+    "@",
+    "[",
+    "(",
+    "*",
+    "hx-",
+    "data-hx-",
+    "data-bind",
+    "_",
+];
+
+/// Raw-text elements whose content a browser shows as text and never runs.
+/// The same set [`SAFE_TAG_PATTERNS`] trusts.
+const INERT_RAW_TEXT_ELEMENTS: &[&str] = &["textarea", "title", "xmp", "noscript", "plaintext"];
+
+/// Shortest [`payload_anchor`] the per-occurrence gate works with.
+const MIN_PAYLOAD_ANCHOR_LEN: usize = 4;
+
+/// The part of `payload` an output encoder leaves alone: the scan's own
+/// class/id marker when the payload carries one, otherwise its longest run of
+/// ASCII letters and digits. Entity-, percent- and JS-escaping all rewrite
+/// punctuation and keep these bytes, so finding the anchor in an attribute
+/// value means the payload came back there in *some* encoding.
+fn payload_anchor(payload: &str) -> &str {
+    for marker in [
+        crate::scanning::markers::class_marker(),
+        crate::scanning::markers::id_marker(),
+    ] {
+        if let Some(at) = payload.find(marker) {
+            return &payload[at..at + marker.len()];
+        }
+    }
+    payload
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .max_by_key(|run| run.len())
+        .unwrap_or("")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AttrEcho {
+    /// The payload did not come back in this attribute value.
+    Absent,
+    /// It did, and the value is one a browser only stores or displays.
+    Inert,
+    /// It did, somewhere a browser (or a framework) acts on the value.
+    Live,
+}
+
+/// Verdict for one attribute value, given as the raw bytes between its quotes.
+///
+/// `raw_hit` says a payload variant occurs byte-exact inside the value. An
+/// echo the server encoded is looked for as well, because the positions that
+/// stay live are exactly the ones where the browser undoes the encoding before
+/// using the value: an event handler, `srcdoc`, a URL.
+fn attr_echo(
+    element: &str,
+    name: &str,
+    raw_value: &str,
+    variants: &[String],
+    anchor: &str,
+    raw_hit: bool,
+) -> AttrEcho {
+    let name = name.to_ascii_lowercase();
+    let acted_on = name.starts_with("on")
+        || name == "srcdoc"
+        || name == "style"
+        || DIRECTIVE_ATTR_PREFIXES.iter().any(|p| name.starts_with(p));
+    let url_valued = URL_VALUED_ATTRS
+        .iter()
+        .any(|n| name.as_bytes().eq_ignore_ascii_case(n));
+    let meta_content = name == "content" && element.eq_ignore_ascii_case("meta");
+    if !acted_on && !url_valued && !meta_content {
+        // `value`, `title`, `alt`, `placeholder`, `class`, `data-*`, …: the
+        // segmenter already proved the echo did not leave the value.
+        return if raw_hit {
+            AttrEcho::Inert
+        } else {
+            AttrEcho::Absent
+        };
+    }
+
+    // The value as the browser holds it, then as a URL parser would read it:
+    // percent-decoded, and form-decoded (`+` for a space, as a self-link built
+    // from a submitted form carries it).
+    let decoded = decode_html_entities(raw_value);
+    let mut views: Vec<String> = Vec::with_capacity(3);
+    if let Ok(url_decoded) = urlencoding::decode(&decoded)
+        && url_decoded.as_ref() != decoded.as_str()
+    {
+        views.push(url_decoded.into_owned());
+    }
+    if let Some(form_decoded) = decode_form_urlencoded_like(&decoded) {
+        views.push(form_decoded);
+    }
+    views.push(decoded);
+    let decoded = &views[views.len() - 1];
+    let exact = raw_hit
+        || views
+            .iter()
+            .any(|view| variants.iter().any(|v| view.contains(v.as_str())));
+    if !exact && !raw_value.contains(anchor) && !decoded.contains(anchor) {
+        return AttrEcho::Absent;
+    }
+    if acted_on {
+        return AttrEcho::Live;
+    }
+    if meta_content {
+        // `<meta http-equiv=refresh content="0;url=…">` navigates.
+        return if decoded.to_ascii_lowercase().contains("url=") {
+            AttrEcho::Live
+        } else {
+            AttrEcho::Inert
+        };
+    }
+    // URL-valued. An echo in an encoding this gate cannot undo has an unknown
+    // position; a URL the page can read back is a DOM source; a value that
+    // already opens an executable scheme runs whatever is appended to it.
+    if !exact
+        || URL_READBACK_ELEMENTS
+            .iter()
+            .any(|e| element.as_bytes().eq_ignore_ascii_case(e))
+    {
+        return AttrEcho::Live;
+    }
+    let mut window = decoded.len().min(MAX_SCHEME_WINDOW);
+    while !decoded.is_char_boundary(window) {
+        window -= 1;
+    }
+    if decoded_is_dangerous_scheme(&decoded[..window]) {
+        return AttrEcho::Live;
+    }
+    // At the start of the value the echo *is* the URL, scheme included.
+    let leads = views.iter().any(|view| {
+        let view = view.trim_start_matches(|c: char| (c as u32) <= 0x20);
+        variants.iter().any(|v| view.starts_with(v.as_str()))
+    });
+    if leads {
+        return AttrEcho::Live;
+    }
+    AttrEcho::Inert
+}
+
+/// Suppression gate that judges an echo **one occurrence at a time**, with a
+/// forward HTML segmenter ([`crate::utils::html::segments`]) deciding where
+/// each occurrence sits.
+///
+/// Every gate above asks whether *all* echoes share one context — all in
+/// `<textarea>`, all in scripts, all in text. A page template that prints the
+/// same value into a heading, an `<input value="…">` and a JavaScript string
+/// is none of those, so `alert(1)` echoed there was reported even though each
+/// of the three is inert. And [`raw_reflection_inert_in_text`] has to refuse
+/// any payload carrying a quote, because its backward walk cannot tell text
+/// from a quoted attribute value that contains a `>`.
+///
+/// An occurrence is inert when the segmenter places it wholly inside
+///
+/// * **text** — the tokenizer saw no tag in it, so nothing in it is markup;
+/// * a **raw-text element** a browser only displays
+///   ([`INERT_RAW_TEXT_ELEMENTS`]);
+/// * an **attribute value** a browser only stores (see [`attr_echo`]);
+/// * a **string literal** of an executable inline script that parses, with no
+///   backslash in the payload for the string to decode
+///   ([`crate::scanning::js_context_verify::echo_is_string_data`]).
+///
+/// Anything else keeps the finding: an occurrence that crosses a segment
+/// boundary (it opened a tag, closed a quote, ended an element), one in a tag
+/// outside any value, in a comment, in `<style>`, in a data block or an
+/// unclosed script, and anything after the point where the segmenter stops.
+///
+/// Encoded echoes are checked where they matter: in attribute values a browser
+/// acts on, [`attr_echo`] also looks for the payload entity- or
+/// percent-encoded, and for its [`payload_anchor`] alone.
+///
+/// Scope, as for [`raw_reflection_inert_in_text`]:
+///
+/// * attack payloads only — the scan's class/id marker or a JavaScript sink
+///   name. A reflection *probe* echoed as text is the signal the pipeline
+///   needs and is never suppressed here;
+/// * no executable URL scheme and no template delimiter in any variant: those
+///   are judged by position ([`dangerous_scheme_reflection_is_inert`]) or are
+///   live exactly in text;
+/// * at least [`MIN_ESCAPED_ECHO_PAYLOAD_LEN`] bytes.
+pub(crate) fn reflection_inert_at_every_occurrence(html: &str, payload: &str) -> bool {
+    use crate::scanning::js_context_verify as js;
+    use crate::utils::html::segments::{SegmentKind, segments};
+
+    if payload.len() < MIN_ESCAPED_ECHO_PAYLOAD_LEN {
+        return false;
+    }
+    let attack_shaped = payload.contains(crate::scanning::markers::class_marker())
+        || payload.contains(crate::scanning::markers::id_marker())
+        || js::payload_carries_js_sink(payload);
+    if !attack_shaped {
+        return false;
+    }
+    let anchor = payload_anchor(payload);
+    if anchor.len() < MIN_PAYLOAD_ANCHOR_LEN {
+        return false;
+    }
+    let variants: Vec<String> = payload_variants(payload)
+        .into_iter()
+        .filter(|v| !v.is_empty())
+        .collect();
+    if variants.iter().any(|v| {
+        decoded_is_dangerous_scheme(v) || TEMPLATE_DELIMITERS.iter().any(|d| v.contains(d))
+    }) {
+        return false;
+    }
+    // An XML document is not tokenized this way (no raw-text elements).
+    if html
+        .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
+        .starts_with("<?xml")
+    {
+        return false;
+    }
+    // The payload produced a sink call in a script (or in a JavaScript body):
+    // that is evidence, not an inert echo.
+    if variants
+        .iter()
+        .any(|v| js::has_js_context_evidence(v, html))
+    {
+        return false;
+    }
+
+    // Every byte-exact occurrence of every variant, in document order.
+    let mut occurrences: Vec<(usize, usize, usize)> = Vec::new();
+    for (index, v) in variants.iter().enumerate() {
+        let mut from = 0;
+        while let Some(pos) = html[from..].find(v.as_str()) {
+            if occurrences.len() >= MAX_PAYLOAD_OCCURRENCES {
+                // Couldn't vet them all — keep the finding.
+                return false;
+            }
+            let at = from + pos;
+            occurrences.push((at, at + v.len(), index));
+            from = next_char_boundary(html, at + 1);
+        }
+    }
+    if occurrences.is_empty() {
+        return false;
+    }
+    occurrences.sort_unstable();
+
+    let mut next = 0;
+    for segment in segments(html) {
+        // An occurrence that starts before this segment sits in markup
+        // structure: a tag, an attribute name, a comment.
+        if occurrences.get(next).is_some_and(|o| o.0 < segment.start) {
+            return false;
+        }
+        let first = next;
+        while occurrences.get(next).is_some_and(|o| o.0 < segment.end) {
+            if occurrences[next].1 > segment.end {
+                // It runs past the end of the segment, so it closed it.
+                return false;
+            }
+            next += 1;
+        }
+        let hits = &occurrences[first..next];
+        let body = &html[segment.start..segment.end];
+        match segment.kind {
+            SegmentKind::Text => {}
+            SegmentKind::Unparsed => return false,
+            SegmentKind::AttrValue { element, name } => {
+                if attr_echo(element, name, body, &variants, anchor, !hits.is_empty())
+                    == AttrEcho::Live
+                {
+                    return false;
+                }
+            }
+            SegmentKind::RawText { .. } if hits.is_empty() => {}
+            SegmentKind::RawText {
+                element,
+                open_tag,
+                closed,
+            } => {
+                let inert = if element.eq_ignore_ascii_case("script") {
+                    closed
+                        && js::open_tag_is_javascript(open_tag)
+                        && variants.iter().enumerate().all(|(index, v)| {
+                            !hits.iter().any(|h| h.2 == index)
+                                || (!v.contains('\\') && js::echo_is_string_data(body, v))
+                        })
+                } else {
+                    INERT_RAW_TEXT_ELEMENTS
+                        .iter()
+                        .any(|e| element.eq_ignore_ascii_case(e))
+                };
+                if !inert {
+                    return false;
+                }
+            }
+        }
+    }
+    // Occurrences left over lie in markup the segmenter consumed last (a
+    // trailing tag or comment).
+    next == occurrences.len()
 }
 
 /// Verdict for ONE occurrence of an escaped payload: can a browser still make
@@ -3359,3 +3674,6 @@ pub async fn check_reflection_with_hpp_url(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod occurrence_gate_tests;

@@ -578,6 +578,7 @@ dependencies = [
  "ctr",
  "futures",
  "hex",
+ "html5ever",
  "hyper",
  "hyper-util",
  "indicatif",

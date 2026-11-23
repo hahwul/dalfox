@@ -2328,7 +2328,11 @@ fn test_occurrence_inside_url_attr_value_handles_query_string() {
 
 /// One long quoted URL value holding many echoes made every occurrence walk
 /// back to the opening quote (occurrences x value length). The walk is floored
-/// like its siblings; past the floor the finding is kept, never suppressed.
+/// like its siblings; past the floor that gate abstains, never suppresses.
+///
+/// The echo itself *is* inert (inside a quoted value, with no quote of its
+/// own), and the forward pass of `reflection_inert_at_every_occurrence`, which
+/// has no floor to run past, now proves it.
 #[test]
 fn test_url_value_backwalk_is_bounded_and_keeps_the_finding() {
     let payload = "x onmouseover=alert(1) y";
@@ -2342,14 +2346,20 @@ fn test_url_value_backwalk_is_bounded_and_keeps_the_finding() {
 
     let start = std::time::Instant::now();
     assert!(
-        !is_in_safe_context_decoded(&html, payload),
-        "an echo the walk cannot place must keep the finding"
+        !reflection_trapped_in_url_value(&html, payload),
+        "an echo the walk cannot place must not be suppressed by it"
+    );
+    assert!(
+        is_in_safe_context_decoded(&html, payload),
+        "the forward pass places the echo inside the quoted value"
     );
     assert!(
         start.elapsed() < std::time::Duration::from_secs(2),
         "backwalk took {:?}",
         start.elapsed()
     );
+    // The same echoes in a value the payload can leave keep the finding.
+    assert!(!is_in_safe_context_decoded(&html.replace('"', ""), payload));
 
     // Within the floor the verdict is unchanged: trapped in the href value.
     let short = format!("<a href=\"/{payload}\">x</a>");

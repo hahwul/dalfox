@@ -46,7 +46,10 @@ name = "waf_double_encoding"
 description = "WAF encodes angles once; already-encoded input may decode at browser"
 handler_type = "realworld"
 reflection = "<div>{input}</div>"
-expected_detection = true
+# Element text with `<` and `>` encoded has no way to open a tag. An input that
+# arrives already encoded (`&lt;svg onload=…&gt;`) comes back unchanged and the
+# browser shows it as the text `<svg onload=…>`; it is never parsed as markup.
+expected_detection = false
 filter = "encode_angles"
 category = "waf_bypass"
 

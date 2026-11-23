@@ -137,7 +137,7 @@ fn script_blocks(html: &str) -> impl Iterator<Item = (&str, &str)> {
 /// `application/json`, `application/ld+json`, …). Babel-standalone blocks
 /// (`text/babel`, `text/jsx`) are not JS to the browser but an in-page loader
 /// transpiles and runs them, so they count as executing.
-fn open_tag_is_javascript(open_tag: &str) -> bool {
+pub(crate) fn open_tag_is_javascript(open_tag: &str) -> bool {
     // Cheap path for the common attribute-less / type-less tag.
     if !open_tag
         .as_bytes()
@@ -192,6 +192,13 @@ struct SpanIndex {
 }
 
 impl SpanIndex {
+    /// Strict containment: some string literal with `s < start` and `e > end`,
+    /// so the range consumed neither of its quotes.
+    fn range_strictly_inside_string(&self, start: u32, end: u32) -> bool {
+        let before = self.strings.partition_point(|&(s, _)| s < start);
+        before > 0 && self.strings_max_end[before - 1] > end
+    }
+
     fn new(mut sinks: Vec<(u32, u32)>, mut strings: Vec<(u32, u32)>) -> Self {
         sinks.sort_unstable();
         strings.sort_unstable();
@@ -224,10 +231,7 @@ impl SpanIndex {
     /// - Sink containment: a sink-call span lies fully within the payload's
     ///   byte range, meaning the payload itself produced the call.
     fn payload_range_hits_sink(&self, payload_start: u32, payload_end: u32) -> bool {
-        // Strict containment: some literal with `s < payload_start` and
-        // `e > payload_end`.
-        let before = self.strings.partition_point(|&(s, _)| s < payload_start);
-        if before > 0 && self.strings_max_end[before - 1] > payload_end {
+        if self.range_strictly_inside_string(payload_start, payload_end) {
             return false;
         }
         let first = self.sinks.partition_point(|&(s, _)| s < payload_start);
@@ -1097,6 +1101,32 @@ fn any_payload_occurrence_hits_sink(src: &str, payload: &str) -> bool {
     occurrences.any(|(start, _)| {
         let end = start + payload.len();
         spans.payload_range_hits_sink(start as u32, end as u32)
+    })
+}
+
+/// True when `block` — the body of an inline script — parses, and every
+/// occurrence of `payload` in it sits strictly inside a string literal that the
+/// script does not hand to `eval` / `setTimeout` / `Function` (those are parsed
+/// as code and are not recorded as strings).
+///
+/// Stricter than "no sink call in the payload range": a block that does not
+/// parse, or an echo the walk did not see as a string (a comment, a template
+/// literal, a position the walk does not descend into), answers `false`.
+pub(crate) fn echo_is_string_data(block: &str, payload: &str) -> bool {
+    if payload.is_empty() {
+        return false;
+    }
+    let mut occurrences = block.match_indices(payload).peekable();
+    if occurrences.peek().is_none() {
+        return false;
+    }
+    let Some(spans) = cached_parsed_spans(block, SourceType::default())
+        .or_else(|| cached_parsed_spans(block, SourceType::script()))
+    else {
+        return false;
+    };
+    occurrences.all(|(start, _)| {
+        spans.range_strictly_inside_string(start as u32, (start + payload.len()) as u32)
     })
 }
 

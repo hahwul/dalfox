@@ -1057,3 +1057,40 @@ fn detect_js_exec_sink_descends_into_function_bodies() {
         assert!(detect_js_exec_sink_with_marker(&src, m), "{src}");
     }
 }
+
+#[test]
+fn echo_is_string_data_requires_every_occurrence_inside_a_string() {
+    assert!(echo_is_string_data(
+        r#"var a = "x alert(1) y";"#,
+        "alert(1)"
+    ));
+    assert!(echo_is_string_data(
+        r#"log("alert(1)"); var b = 'alert(1)';"#,
+        "alert(1)"
+    ));
+    // One occurrence outside a string literal is enough to refuse.
+    assert!(!echo_is_string_data(
+        "var a = \"alert(1)\"; // alert(1)\n",
+        "alert(1)"
+    ));
+    assert!(!echo_is_string_data("var a = alert(1);", "alert(1)"));
+    // The payload consumed a quote: not strictly inside.
+    assert!(!echo_is_string_data(r#"var a = "x";"#, r#""x""#));
+}
+
+#[test]
+fn echo_is_string_data_refuses_what_it_cannot_read_as_a_string() {
+    // Does not parse.
+    assert!(!echo_is_string_data("var a = 'alert(1)", "alert(1)"));
+    // A string handed to an evaluator is parsed as code, not recorded.
+    assert!(!echo_is_string_data(r#"eval("alert(1)");"#, "alert(1)"));
+    assert!(!echo_is_string_data(
+        r#"setTimeout("alert(1)", 1);"#,
+        "alert(1)"
+    ));
+    // Template literals are not recorded as strings.
+    assert!(!echo_is_string_data("var a = `alert(1)`;", "alert(1)"));
+    // Absent, or empty.
+    assert!(!echo_is_string_data(r#"var a = "x";"#, "alert(1)"));
+    assert!(!echo_is_string_data(r#"var a = "x";"#, ""));
+}

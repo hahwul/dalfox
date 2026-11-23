@@ -116,6 +116,9 @@ assets = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
+# Already in the tree through `scraper`; named here so the HTML segmenter can
+# be compared with a real tokenizer (`src/utils/html/segments/tests.rs`).
+html5ever = "0.40"
 
 [package.metadata.generate-rpm]
 license = "MIT"

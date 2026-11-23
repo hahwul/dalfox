@@ -4681,10 +4681,11 @@ async fn test_sxss_applies_the_same_response_gates_as_the_normal_path() {
 ///
 /// Under a `--limit` the phase loops now flush before every limit check
 /// (`limit_reached_in_phase`), so the abort can no longer be holding a batched
-/// finding. `victim` below reflects entity-escaped: it records an `R` on its
-/// first reflection payload, that `R` alone trips `--limit 1`, and the worker
-/// aborts mid-catalog. The finding that tripped the limit must be in the
-/// results — `--limit` is a stop condition, not an instruction to destroy
+/// finding. `victim` below reflects entity-escaped into an HTML comment, a
+/// position the scanner neither verifies nor proves inert: it records an `R`
+/// on its first reflection payload, that `R` alone trips `--limit 1`, and the
+/// worker aborts mid-catalog. The finding that tripped the limit must be in
+/// the results — `--limit` is a stop condition, not an instruction to destroy
 /// evidence.
 #[tokio::test]
 async fn test_run_scanning_limit_abort_keeps_already_confirmed_findings() {
@@ -4702,7 +4703,9 @@ async fn test_run_scanning_limit_abort_keeps_already_confirmed_findings() {
                 .replace('<', "&lt;")
                 .replace('>', "&gt;")
                 .replace('"', "&quot;");
-            Html(format!("<html><body><div>{escaped}</div></body></html>"))
+            Html(format!(
+                "<html><body><!-- debug: {escaped} --></body></html>"
+            ))
         }
     };
     let addr = spawn_regression_app(Router::new().route("/", get(handler))).await;
@@ -6146,7 +6149,10 @@ async fn test_run_scanning_limit_ignores_findings_only_poc_hides() {
             .replace('<', "&lt;")
             .replace('>', "&gt;")
             .replace('"', "&quot;");
-        Html(format!("<html><body><div>{escaped}</div></body></html>"))
+        // A comment: reported as `R`, never verified (see the fixture above).
+        Html(format!(
+            "<html><body><!-- debug: {escaped} --></body></html>"
+        ))
     };
     let addr = spawn_regression_app(Router::new().route("/", get(handler))).await;
 
@@ -6174,7 +6180,7 @@ async fn test_run_scanning_limit_ignores_findings_only_poc_hides() {
             .await
             .iter()
             .any(|r| r.result_type == FindingType::Reflected),
-        "fixture: the escaped echo records an R"
+        "fixture: the echo inside the comment records an R"
     );
     assert_eq!(findings_count.load(Ordering::Relaxed), 0);
     assert!(
@@ -6486,20 +6492,19 @@ async fn test_run_scanning_escaped_echo_sends_no_wire_repeats() {
         repeats.is_empty(),
         "wire requests sent more than once: {repeats:?}"
     );
-    // Reflection phase: ~REFLECTION_INERT_ECHO_BUDGET requests. A DOM phase that
-    // did not count the reused verdicts would send ~INERT_ECHO_BUDGET more.
+    // The reflection phase runs until REFLECTION_INERT_ECHO_BUDGET escaped
+    // echoes. Payloads this server has nothing to escape in come back verbatim
+    // as inert text and do not count, so that takes about 480 requests. A DOM
+    // phase that did not count the reused verdicts would send
+    // ~INERT_ECHO_BUDGET more.
     let sent: usize = seen.values().sum();
     assert!(
-        sent < 400,
+        sent < 600,
         "DOM phase must stop on the reused echoes; sent {sent}"
     );
     assert!(
-        !results
-            .lock()
-            .await
-            .iter()
-            .any(|r| r.result_type == FindingType::Verified),
-        "an escaped echo never verifies"
+        results.lock().await.is_empty(),
+        "a fully escaped echo into element text is not a finding"
     );
 }
 

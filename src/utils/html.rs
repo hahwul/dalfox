@@ -34,6 +34,8 @@ reflection checks never parse HTML and always see the full body.
 
 use std::borrow::Cow;
 
+pub(crate) mod segments;
+
 /// Maximum element nesting depth handed to html5ever. Matches the order of the
 /// caps real browser parsers apply; real-world documents are one to two orders
 /// of magnitude shallower.
