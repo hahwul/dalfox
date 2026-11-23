@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -312,4 +313,55 @@ func Test_postScanHandler_stripsRawOutputWithoutAPIKey(t *testing.T) {
 		assert.Equal(t, tc.keep, rq.OutputRequest, "api key %q", tc.apiKey)
 		assert.Equal(t, tc.keep, rq.OutputResponse, "api key %q", tc.apiKey)
 	}
+}
+
+func Test_redactEvidence(t *testing.T) {
+	in := []model.PoC{
+		{Payload: "<x>", Evidence: "3 line:  <p>SECRET=abc <x> tail-secret</p>\n    9 line:  y <x>\n    "},
+		{Payload: "", Evidence: "1 line:  leak\n    "},
+		{Payload: "<x>"},
+	}
+	out := redactEvidence(in)
+	assert.Equal(t, "3 line:  <x>\n    9 line:  <x>\n    ", out[0].Evidence)
+	assert.Equal(t, "1 line:  [redacted]\n    ", out[1].Evidence)
+	assert.Empty(t, out[2].Evidence)
+	assert.Equal(t, "[redacted]", redactEvidence([]model.PoC{{Payload: "p", Evidence: "free-form SECRET"}})[0].Evidence)
+	assert.Contains(t, in[0].Evidence, "SECRET", "stored results must not be modified")
+}
+
+func Test_scanHandler_redactsEvidenceWithoutAPIKey(t *testing.T) {
+	for _, tc := range []struct {
+		apiKey string
+		want   string
+	}{{"", "1 line:  <x>\n    "}, {"k", "1 line:  SECRET <x>\n    "}} {
+		scans := []string{"sid"}
+		options := model.Options{APIKey: tc.apiKey, Scan: map[string]model.Scan{
+			"sid": {URL: "http://internal/", Results: []model.PoC{{Payload: "<x>", Evidence: "1 line:  SECRET <x>\n    "}}},
+		}}
+		e := setupEchoServer(&options, &scans)
+		rec := serve(e, http.MethodGet, "/scan/sid", "", func(r *http.Request) { r.Header.Set(APIKeyHeader, tc.apiKey) })
+		if !assert.Equal(t, http.StatusOK, rec.Code) {
+			continue
+		}
+		var res Res
+		if assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res)) && assert.Len(t, res.Data, 1) {
+			assert.Equal(t, tc.want, res.Data[0].Evidence, "api key %q", tc.apiKey)
+		}
+	}
+}
+
+func Test_responseHeaders_blockCrossOriginLoads(t *testing.T) {
+	scans := []string{}
+	e := setupEchoServer(&model.Options{Scan: map[string]model.Scan{}}, &scans)
+	rec := serve(e, http.MethodGet, "/health", "", nil)
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "same-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
+	// Rejected requests carry the headers too.
+	rec = serve(e, http.MethodGet, "/health", "", func(r *http.Request) { r.Host = "evil.example" })
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, "same-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
+
+	e = setupEchoServer(&model.Options{JSONP: true, Scan: map[string]model.Scan{}}, &scans)
+	rec = serve(e, http.MethodGet, "/health?callback=cb", "", nil)
+	assert.Equal(t, "cross-origin", rec.Header().Get("Cross-Origin-Resource-Policy"), "JSONP is loaded cross-origin by design")
 }

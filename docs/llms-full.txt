@@ -2077,13 +2077,15 @@ jobs:
 When deploying Dalfox in server mode, consider the following security practices:
 
 1. **Access Control**: The server listens on `127.0.0.1` by default. If you bind it to another address, set `--api-key`: without one, anyone who can reach the port can make Dalfox send requests to any host it can reach, including internal services. Dalfox prints a warning at startup in that case.
-2. **Raw HTTP output**: Without `--api-key`, the REST API ignores `output-request` and `output-response` and turns a `poc-type` of `http-request` into `plain`, so scan results carry no raw request or response dumps. Findings still include a short `evidence` snippet of the response around the payload.
+2. **Raw HTTP output**: Without `--api-key`, the REST API ignores `output-request` and `output-response` and turns a `poc-type` of `http-request` into `plain`, so scan results carry no raw request or response dumps. `evidence` keeps the line numbers and the payload but not the surrounding response text.
 3. **Server-side files**: The REST and MCP APIs ignore options that name a file on the server (`cookie-from-raw`, `custom-payload-file`, `mining-dict-word`, `output`, `har-file-path`, and so on) and `found-action`, with or without an API key.
 4. **Browser requests (no API key)**: Without `--api-key`, the REST API rejects requests that a web page could make on your behalf:
    - cross-site requests, judged by `Origin` and `Sec-Fetch-Site`. Same-origin requests (the bundled Swagger UI) and origins listed in `--allowed-origins` are accepted.
    - requests whose `Host` header is a hostname other than `localhost`, the `--host` value, or one listed in `--allowed-hosts`. This blocks DNS rebinding. IP addresses are always accepted. If clients reach the server by a name (a Docker Compose service, a Kubernetes Service, an internal DNS name), add it with `--allowed-hosts`, or set `--api-key`.
 
    With `--api-key`, these checks are skipped: a web page cannot attach the `X-API-KEY` header without CORS approval.
+
+   Every response also carries `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: same-origin` (`cross-origin` with `--jsonp`), so other sites cannot load it through `<img>` or `<script>` even where the browser sends no `Sec-Fetch-Site` (plain HTTP to a non-loopback address).
 5. **JSONP**: `--jsonp` lets any web page read results through `<script src>`, so it also turns off the cross-site check for `GET` requests. A `<script>` tag cannot send `X-API-KEY`, so JSONP only works on a server without an API key. Use it only on a trusted network.
 6. **Request format**: `POST /scan` accepts only `Content-Type: application/json`.
 7. **Resource Limits**: Set appropriate worker and timeout values to avoid resource exhaustion

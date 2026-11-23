@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -76,7 +77,7 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	// Logging and security headers first, so rejected requests are logged too.
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:      "",
-		ContentTypeNosniff: "",
+		ContentTypeNosniff: "nosniff",
 		XFrameOptions:      "",
 		HSTSMaxAge:         3600,
 	}))
@@ -86,6 +87,21 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 			`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
 			`"bytes_out":${bytes_out}}` + "\n",
 	}))
+
+	// Cross-Origin-Resource-Policy stops other sites from loading responses
+	// through <img>/<script>, which matters where browsers send no
+	// Sec-Fetch-Site (plain HTTP to a non-loopback address). JSONP exists to
+	// be loaded that way, so it gets cross-origin.
+	corp := "same-origin"
+	if options.JSONP {
+		corp = "cross-origin"
+	}
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Response().Header().Set("Cross-Origin-Resource-Policy", corp)
+			return next(c)
+		}
+	})
 
 	// Without an API key, the request source is the only thing keeping a web
 	// page out (GHSA-c98c-mph6-6hm9). With one, a page cannot attach the
@@ -192,6 +208,9 @@ func scanHandler(c echo.Context, scans *[]string, options *model.Options) error 
 		} else {
 			res.Msg = "finish"
 			res.Data = scanData.Results
+			if !authEnabled(options) {
+				res.Data = redactEvidence(scanData.Results)
+			}
 		}
 	}
 
@@ -232,6 +251,40 @@ func stripRawHTTPOutput(o *model.Options) {
 	if strings.EqualFold(strings.TrimSpace(o.PoCType), "http-request") {
 		o.PoCType = "plain"
 	}
+}
+
+// evidenceLine matches one CodeView entry: "<n> line:  <response excerpt>".
+var evidenceLine = regexp.MustCompile(`(\d+) line:  `)
+
+// redactEvidence returns a copy of results whose evidence keeps the line
+// numbers and the payload but none of the surrounding response text, which
+// can belong to any internal page dalfox was pointed at.
+func redactEvidence(results []model.PoC) []model.PoC {
+	if len(results) == 0 {
+		return results
+	}
+	out := make([]model.PoC, len(results))
+	copy(out, results)
+	for i := range out {
+		if out[i].Evidence == "" {
+			continue
+		}
+		shown := out[i].Payload
+		if shown == "" {
+			shown = "[redacted]"
+		}
+		matches := evidenceLine.FindAllStringSubmatch(out[i].Evidence, -1)
+		if len(matches) == 0 {
+			out[i].Evidence = "[redacted]"
+			continue
+		}
+		var b strings.Builder
+		for _, m := range matches {
+			b.WriteString(m[1] + " line:  " + shown + "\n    ")
+		}
+		out[i].Evidence = b.String()
+	}
+	return out
 }
 
 // authEnabled reports whether the REST server checks X-API-KEY.
