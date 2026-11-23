@@ -67,6 +67,7 @@
 pub mod cmd;
 pub mod config;
 pub mod encoding;
+pub mod engine_options;
 pub(crate) mod job;
 pub mod mcp;
 pub(crate) mod oob;

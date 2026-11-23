@@ -4,7 +4,7 @@ use super::*;
 
 pub async fn check_cookie_discovery(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {

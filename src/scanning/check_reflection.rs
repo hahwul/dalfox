@@ -96,7 +96,7 @@ fn waf_block_cooldown_ms(status_code: u16, consecutive: u32, waf_evasion: bool) 
 async fn apply_injection_waf_accounting(
     status_code: u16,
     target: &Target,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
     streak: &std::sync::atomic::AtomicU32,
 ) {
     use std::sync::atomic::Ordering;
@@ -2582,7 +2582,7 @@ fn ascii_ci_contains(haystack: &str, needle: &str) -> bool {
 pub(crate) fn resolve_sxss_check_urls(
     target: &Target,
     param: &Param,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> Vec<url::Url> {
     let mut seen = std::collections::HashSet::new();
     let mut urls = Vec::new();
@@ -2827,7 +2827,7 @@ fn injection_response_suppressed(
     status_code: u16,
     headers: &reqwest::header::HeaderMap,
     param: &Param,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> bool {
     // Skip processing if the status code is in the ignore_return list
     if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
@@ -3065,7 +3065,7 @@ pub(crate) async fn capture_sxss_baseline(
     client: &Client,
     target: &Target,
     param: &Param,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> Vec<String> {
     let mut bodies = Vec::new();
     for url in resolve_sxss_check_urls(target, param, args) {
@@ -3110,7 +3110,7 @@ pub(crate) struct StoreProbeOutcome {
 /// `--sxss-url`, form origin, form action, target): each attempt fetches every
 /// URL, so with a repeatable `--sxss-url` an uncapped count grows with the
 /// square of the URL count on every non-storing parameter.
-fn store_probe_attempts(args: &crate::cmd::scan::ScanArgs, url_count: usize) -> u64 {
+fn store_probe_attempts(args: &crate::engine_options::EngineOptions, url_count: usize) -> u64 {
     let base = args.sxss_retries.max(1) as u64;
     base + url_count.saturating_sub(1).min(3) as u64
 }
@@ -3129,7 +3129,7 @@ pub(crate) async fn sxss_store_probe(
     client: &Client,
     target: &Target,
     param: &Param,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> StoreProbeOutcome {
     let check_urls = resolve_sxss_check_urls(target, param, args);
     let attempts = store_probe_attempts(args, check_urls.len());
@@ -3214,7 +3214,7 @@ async fn fetch_injection_response(
     target: &Target,
     param: &Param,
     payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
     streak: &std::sync::atomic::AtomicU32,
     want_dom: bool,
 ) -> FetchedInjection {
@@ -3288,7 +3288,7 @@ async fn fetch_injection_response(
             resp: reqwest::Response,
             param: &Param,
             payload: &str,
-            args: &crate::cmd::scan::ScanArgs,
+            args: &crate::engine_options::EngineOptions,
         ) -> Option<(ReflectionBody, bool, bool)> {
             let status_code = resp.status().as_u16();
             if injection_response_suppressed(status_code, resp.headers(), param, args) {
@@ -3695,7 +3695,7 @@ pub async fn check_reflection_with_response(
     target: &Target,
     param: &Param,
     payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
     streak: &std::sync::atomic::AtomicU32,
 ) -> (Option<ReflectionKind>, Option<ReflectionBody>, u16, bool) {
     let (kind, body, status, xml_content_type, _, _) =
@@ -3713,7 +3713,7 @@ pub(crate) async fn check_reflection_with_dom_outcome(
     target: &Target,
     param: &Param,
     payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
     streak: &std::sync::atomic::AtomicU32,
     want_dom: bool,
 ) -> (
@@ -3765,7 +3765,7 @@ pub async fn check_reflection_with_hpp_url(
     param: &Param,
     payload: &str,
     hpp_url: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> (Option<ReflectionKind>, Option<String>) {
     if args.skip_xss_scanning {
         return (None, None);

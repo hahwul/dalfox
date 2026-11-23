@@ -15,20 +15,22 @@ async fn check_form_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
-    check_form_discovery_with(target, &ScanArgs::default(), reflection_params, semaphore).await;
+    check_form_discovery_with(
+        target,
+        &EngineOptions::default(),
+        reflection_params,
+        semaphore,
+    )
+    .await;
 }
 
-fn default_scan_args() -> crate::cmd::scan::ScanArgs {
-    crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        input_type: "url".to_string(),
-        format: "json".to_string(),
+fn default_scan_args() -> crate::engine_options::EngineOptions {
+    crate::engine_options::EngineOptions {
         silence: true,
         workers: 4,
         max_concurrent_targets: 4,
         encoders: vec!["none".to_string()],
         skip_xss_scanning: true,
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
@@ -1654,7 +1656,7 @@ async fn test_check_form_discovery_keeps_unreflected_fields_only_when_asked() {
 
     for keep in [false, true] {
         let params = Arc::new(Mutex::new(Vec::new()));
-        let args = ScanArgs {
+        let args = EngineOptions {
             sxss: keep,
             ..Default::default()
         };
@@ -1718,11 +1720,11 @@ async fn test_check_form_discovery_respects_url_scope() {
     let target = crate::target_parser::parse_target(&format!("http://{addr}/")).expect("target");
 
     for args in [
-        ScanArgs {
+        EngineOptions {
             exclude_url: vec!["/logout".to_string()],
             ..Default::default()
         },
-        ScanArgs {
+        EngineOptions {
             include_url: vec![r"/$".to_string()],
             ..Default::default()
         },
@@ -1740,7 +1742,7 @@ async fn test_check_form_discovery_respects_url_scope() {
     let params = Arc::new(Mutex::new(Vec::new()));
     check_form_discovery_with(
         &target,
-        &ScanArgs::default(),
+        &EngineOptions::default(),
         params,
         Arc::new(Semaphore::new(4)),
     )

@@ -209,7 +209,7 @@ pub(crate) fn hoist_angle_free_payloads(
     pad
 }
 pub(crate) fn get_fallback_reflection_payloads(
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut base_payloads = if args.only_custom_payload {
         vec![]
@@ -396,7 +396,7 @@ pub(crate) fn effective_payload_cap(max_payloads: usize, deep_scan: bool) -> usi
 }
 pub(crate) fn get_dom_payloads(
     param: &Param,
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut payloads = get_dom_payloads_for_context(param, args)?;
 
@@ -433,7 +433,7 @@ pub(crate) fn get_xml_namespace_payloads(content_type: &str) -> Vec<String> {
 
 pub(crate) fn get_dom_payloads_for_context(
     param: &Param,
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     // `--only-custom-payload` restricts both the reflection catalog and its DOM
     // verification catalog. The context-specific branches below generate

@@ -63,9 +63,11 @@ async fn discovery_peak(url: &str, cookies: usize, body_bytes: usize) -> usize {
         silence: true,
         ..Default::default()
     };
+    // Built before the baseline: the options are the caller's, not discovery's.
+    let options = dalfox::engine_options::EngineOptions::from(&args);
     let before = LIVE.load(Relaxed);
     PEAK.store(before, Relaxed);
-    analyze_parameters(&mut target, &args, None).await;
+    analyze_parameters(&mut target, &options, None).await;
     PEAK.load(Relaxed).saturating_sub(before)
 }
 

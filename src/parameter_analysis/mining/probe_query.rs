@@ -12,7 +12,8 @@ use super::{
     MiningSampleStats, SENTINEL_PROBE_COUNT, collapse_mined_params, pre_collapse_query_probe,
     unique_query_candidates,
 };
-use crate::cmd::scan::{DEFAULT_MINING_BUCKET_SIZE, MINING_BISECT_WAYS, ScanArgs};
+use crate::cmd::scan::{DEFAULT_MINING_BUCKET_SIZE, MINING_BISECT_WAYS};
+use crate::engine_options::EngineOptions;
 use crate::parameter_analysis::{InjectionContext, Location, Param, ReflectionAnalysis};
 use crate::target_parser::Target;
 use crate::utils::http::{build_request, read_body_counted, send_counted};
@@ -129,7 +130,7 @@ impl BucketProbe {
 
 pub(super) struct QueryMiningContext<'a> {
     pub(super) target: &'a Target,
-    pub(super) args: &'a ScanArgs,
+    pub(super) args: &'a EngineOptions,
     pub(super) reflection_params: Arc<Mutex<Vec<Param>>>,
     pub(super) semaphore: Arc<Semaphore>,
     pub(super) pb: Option<ShimmerSpinner>,

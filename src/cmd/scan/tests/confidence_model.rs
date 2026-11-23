@@ -74,13 +74,37 @@ fn limit_selection_uses_mapped_tiers_and_ast_method() {
         limit_result_type: "v".into(),
         ..Default::default()
     };
-    assert_eq!(crate::scanning::count_matching_results(&rows, &args), 1);
+    assert_eq!(
+        crate::scanning::count_matching_results(
+            &rows,
+            &crate::engine_options::EngineOptions::from(&args)
+        ),
+        1
+    );
     args.limit_result_type = "r".into();
-    assert_eq!(crate::scanning::count_matching_results(&rows, &args), 1);
+    assert_eq!(
+        crate::scanning::count_matching_results(
+            &rows,
+            &crate::engine_options::EngineOptions::from(&args)
+        ),
+        1
+    );
     args.limit_result_type = "a".into();
-    assert_eq!(crate::scanning::count_matching_results(&rows, &args), 2);
+    assert_eq!(
+        crate::scanning::count_matching_results(
+            &rows,
+            &crate::engine_options::EngineOptions::from(&args)
+        ),
+        2
+    );
     args.min_confidence = Some("high".into());
-    assert_eq!(crate::scanning::count_matching_results(&rows, &args), 1);
+    assert_eq!(
+        crate::scanning::count_matching_results(
+            &rows,
+            &crate::engine_options::EngineOptions::from(&args)
+        ),
+        1
+    );
 }
 
 #[test]

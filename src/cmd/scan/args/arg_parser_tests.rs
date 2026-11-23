@@ -589,9 +589,10 @@ fn url_in_scope_reuses_the_compiled_patterns() {
         exclude_url: vec!["/api/admin".to_string()],
         ..Default::default()
     };
-    assert!(args.url_in_scope("https://a.test/api/x"));
-    assert!(!args.url_in_scope("https://a.test/api/admin"));
-    assert!(!args.url_in_scope("https://a.test/other"));
+    let in_scope = |url: &str| url_in_scope(&args.include_url, &args.exclude_url, url);
+    assert!(in_scope("https://a.test/api/x"));
+    assert!(!in_scope("https://a.test/api/admin"));
+    assert!(!in_scope("https://a.test/other"));
     let first = compiled_url_scope(&args.include_url, &args.exclude_url);
     let again = compiled_url_scope(&args.include_url, &args.exclude_url);
     assert!(std::sync::Arc::ptr_eq(&first, &again));

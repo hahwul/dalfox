@@ -79,7 +79,7 @@ fn candidate_wordlist() -> TempWordlist {
 async fn duplicate_words_do_not_hide_a_later_real_parameter() {
     let (target, requests, server) = mining_server().await;
     let wordlist = TempWordlist::new("duplicate-mining", &("selected\n".repeat(500) + "hidden\n"));
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -108,7 +108,7 @@ async fn duplicate_words_do_not_hide_a_later_real_parameter() {
 async fn dictionary_bucketing_keeps_mined_params_without_detached_requests() {
     let (target, requests, server) = mining_server().await;
     let wordlist = candidate_wordlist();
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -193,7 +193,7 @@ async fn dom_bucketing_keeps_the_full_reflected_candidate_set() {
 async fn known_query_candidates_are_probed_once_at_most() {
     let (target, requests, server) = mining_server().await;
     let wordlist = candidate_wordlist();
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -235,7 +235,7 @@ async fn known_query_candidates_are_probed_once_at_most() {
 async fn existing_body_slot_does_not_suppress_a_query_candidate() {
     let (target, requests, server) = mining_server().await;
     let wordlist = TempWordlist::new("location-mining", "hidden\nhidden\n");
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -264,7 +264,7 @@ async fn existing_body_slot_does_not_suppress_a_query_candidate() {
 async fn mining_pipeline_preserves_dictionary_findings_through_dom_bucketing() {
     let (mut target, requests, server) = mining_server().await;
     let wordlist = TempWordlist::new("pipeline-mining", &("selected\n".repeat(500) + "hidden\n"));
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -299,7 +299,7 @@ async fn nonreflecting_prefix_does_not_skip_a_late_hidden_parameter() {
     let (target, requests, server) = mining_server().await;
     let words = (0..30).map(|i| format!("miss_{i}\n")).collect::<String>() + "hidden\n";
     let wordlist = TempWordlist::new("late-mining", &words);
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -328,7 +328,7 @@ async fn metric_only_parameter_is_found_by_four_way_bisection() {
     let (target, requests, server) = metric_only_server().await;
     let words = (0..63).map(|i| format!("miss_{i}\n")).collect::<String>() + "hidden\n";
     let wordlist = TempWordlist::new("metric-only-mining", &words);
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -360,7 +360,7 @@ async fn concurrent_mining_bounds_overshoot_to_active_workers() {
         target.workers,
     )));
     let wordlist = candidate_wordlist();
-    let args = ScanArgs {
+    let args = EngineOptions {
         workers: target.workers,
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()

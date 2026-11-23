@@ -1969,7 +1969,11 @@ async fn execute_scan_honours_force_waf_and_waf_bypass_off() {
             "bypass state armed only when waf_bypass != off (waf_bypass={bypass})"
         );
         assert_eq!(
-            crate::scanning::compute_waf_strategy(&target, &args).is_some(),
+            crate::scanning::compute_waf_strategy(
+                &target,
+                &crate::engine_options::EngineOptions::from(args.as_ref())
+            )
+            .is_some(),
             armed
         );
     }

@@ -19,7 +19,7 @@ pub(crate) const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 4;
 /// mutation / extra-encoder expansion entirely.
 pub(crate) fn compute_waf_strategy(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) -> Option<crate::waf::bypass::BypassStrategy> {
     if args.waf_bypass == "off" {
         return None;

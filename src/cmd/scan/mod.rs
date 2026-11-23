@@ -61,6 +61,7 @@ pub use args::{
 };
 pub(crate) use args::{
     MIN_CONFIDENCE_HIGH, parse_base_url_arg, parse_force_waf_arg, parse_http_method_arg,
+    url_in_scope,
 };
 pub(crate) use logging::log_info;
 pub(crate) use postprocess::{ast_dedup_parts, dedupe_ast_results_for_model};

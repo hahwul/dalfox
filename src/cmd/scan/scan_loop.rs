@@ -226,6 +226,8 @@ pub(crate) async fn run_scan_loop(
     // One `ScanArgs` for the whole run. This used to be cloned per host group —
     // a deep copy of every `String`/`Vec<String>` field once per distinct host.
     let args_arc = Arc::new(args.clone());
+    // What the engine reads of it, resolved once for the whole run.
+    let engine_opts = Arc::new(crate::engine_options::EngineOptions::from(args));
 
     // Bound on host-group tasks alive at once. Previously one task was spawned
     // per distinct host with no gate, so a target file spanning N hosts created
@@ -283,6 +285,7 @@ pub(crate) async fn run_scan_loop(
         let global_semaphore_clone = global_semaphore.clone();
         let multi_pb_clone = multi_pb.clone();
         let args_arc = args_arc.clone();
+        let engine_opts = engine_opts.clone();
         let results_clone = results.clone();
         let findings_count_group = findings_count.clone();
         let finding_tx_group = finding_tx.clone();
@@ -307,6 +310,7 @@ pub(crate) async fn run_scan_loop(
             global_semaphore_clone,
             multi_pb_clone,
             args_arc,
+            engine_opts,
             results_clone,
             findings_count_group,
             finding_tx_group,
@@ -377,6 +381,8 @@ pub(crate) struct HostGroupCtx {
     pub(crate) global_semaphore_clone: Arc<tokio::sync::Semaphore>,
     pub(crate) multi_pb_clone: Option<Arc<indicatif::MultiProgress>>,
     pub(crate) args_arc: Arc<ScanArgs>,
+    /// What the engine reads of `args_arc`, resolved once for the run.
+    pub(crate) engine_opts: Arc<crate::engine_options::EngineOptions>,
     pub(crate) results_clone: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     pub(crate) findings_count_group: Arc<std::sync::atomic::AtomicUsize>,
     pub(crate) finding_tx_group:
@@ -414,6 +420,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
         global_semaphore_clone,
         multi_pb_clone,
         args_arc,
+        engine_opts,
         results_clone,
         findings_count_group,
         finding_tx_group,
@@ -529,6 +536,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
             continue;
         }
         let args_clone = args_arc.clone();
+        let engine_opts = engine_opts.clone();
         let results_clone_inner = results_clone.clone();
         let multi_pb_clone_inner = multi_pb_clone.clone();
         let overall_pb_clone = overall_pb.clone();
@@ -622,7 +630,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     }
                     let scan_fut = crate::scanning::run_scanning(
                         &target,
-                        args_clone.clone(),
+                        engine_opts.clone(),
                         // No `params_done`: the CLI renders its own
                         // indicatif progress bar instead.
                         crate::scanning::ScanRunHandles::new(

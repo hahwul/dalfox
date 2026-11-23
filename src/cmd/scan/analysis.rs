@@ -10,6 +10,7 @@ use super::args::ScanArgs;
 use super::logging::start_spinner;
 use super::preflight::{PreflightOutcome, preflight_content_type};
 use super::session::SessionBaseline;
+use crate::engine_options::EngineOptions;
 use crate::parameter_analysis::analyze_parameters;
 use crate::target_parser::Target;
 use crate::utils::is_xss_scannable_content_type;
@@ -449,7 +450,7 @@ pub(crate) async fn preflight_and_analyze_target(
     } else {
         None
     };
-    let mut __analysis_args = args_clone.clone();
+    let mut __analysis_args = EngineOptions::from(&args_clone);
     __analysis_args.silence = true;
     if let Some(ref marker) = args_clone.inject_marker {
         // Custom injection marker mode: skip normal discovery/mining
@@ -505,6 +506,7 @@ pub(crate) async fn preflight_and_analyze_target(
         {
             // Encoder expansion factor, taken from the encoder pipeline so it
             // can't drift from the expansion the scan actually performs.
+            let engine_opts = EngineOptions::from(&args_clone);
             let enc_factor = crate::encoding::encoder_expansion_factor(&args_clone.encoders);
             // Match the scan-time effective cap so the preflight
             // request estimate reflects the built-in safety cap.
@@ -524,7 +526,7 @@ pub(crate) async fn preflight_and_analyze_target(
                 // this remains a lower bound.
                 total = total.saturating_add(crate::scanning::estimate_param_requests(
                     p,
-                    &args_clone,
+                    &engine_opts,
                     enc_factor,
                     &apply_cap,
                 ));
@@ -915,12 +917,13 @@ pub(crate) async fn detect_outdated_libs(
             &target.method,
         );
         if !lib_findings.is_empty() {
+            let engine_opts = EngineOptions::from(args_clone);
             crate::scanning::result::stamp_origin(&mut lib_findings, &target.state_key());
             crate::scanning::accumulate_findings(
                 results_clone,
                 findings_count_clone,
                 lib_findings,
-                args_clone,
+                &engine_opts,
             )
             .await;
         }
@@ -951,6 +954,7 @@ async fn run_initial_ast_pass(
     if !args_clone.skip_ast_analysis
         && let Some(response_text) = preflight_response_body
     {
+        let engine_opts = EngineOptions::from(args_clone);
         let (mut ast_batch, mut skips) =
             crate::scanning::ast_integration::run_initial_ast_dom_analysis_with_skips(
                 response_text,
@@ -964,7 +968,7 @@ async fn run_initial_ast_pass(
             results_clone,
             findings_count_clone,
             ast_batch,
-            args_clone,
+            &engine_opts,
         )
         .await;
         if args_clone.analyze_external_js
@@ -976,7 +980,7 @@ async fn run_initial_ast_pass(
                     &ext_client,
                     target,
                     response_text,
-                    args_clone,
+                    &engine_opts,
                 )
                 .await;
             target.bundle_param_names = bundle_names;
@@ -986,7 +990,7 @@ async fn run_initial_ast_pass(
                 results_clone,
                 findings_count_clone,
                 ext_batch,
-                args_clone,
+                &engine_opts,
             )
             .await;
         }

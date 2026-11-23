@@ -182,7 +182,7 @@ pub(super) fn dom_candidate_names(text: &str) -> Vec<String> {
 
 pub async fn probe_response_id_params(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
     pb: Option<ShimmerSpinner>,

@@ -77,7 +77,7 @@ async fn known_slots_keep_arbitrary_name_coverage() {
     let (target, _requests, server) = echo_all_server().await;
     let words = (0..20).map(|i| format!("known_{i}\n")).collect::<String>();
     let wordlist = TempWordlist::new("collapse-recall-known", &words);
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -111,7 +111,7 @@ async fn unconfirmed_high_reflection_keeps_the_real_params() {
     let (target, _requests, server) = selective_server().await;
     let words = (0..20).map(|i| format!("cand_{i}\n")).collect::<String>();
     let wordlist = TempWordlist::new("collapse-recall-ewma", &words);
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -148,7 +148,7 @@ async fn unprobed_wordlist_confirms_before_folding() {
         .map(|i| format!("cand_{i}\n"))
         .collect::<String>();
     let wordlist = TempWordlist::new("collapse-recall-confirm", &words);
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };
@@ -209,7 +209,7 @@ async fn unprobed_dom_candidates_confirm_before_folding() {
 async fn form_param_at_another_endpoint_does_not_shadow_the_page_slot() {
     let (target, _requests, server) = selective_server().await;
     let wordlist = TempWordlist::new("collapse-recall-form-endpoint", "cand_q\n");
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };

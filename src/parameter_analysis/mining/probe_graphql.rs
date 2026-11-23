@@ -16,7 +16,7 @@ use super::*;
 /// unaffected. Bounded by the pipeline walker's leaf cap (≤32 fields).
 pub async fn probe_graphql_params(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
     pb: Option<ShimmerSpinner>,

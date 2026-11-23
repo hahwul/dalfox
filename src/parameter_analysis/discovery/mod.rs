@@ -2,7 +2,7 @@
 //!
 //! Identifies which parameters reflect user input in the HTTP response.
 //!
-//! **Input:** `Target` (URL, method, headers, cookies) + `ScanArgs` flags.
+//! **Input:** `Target` (URL, method, headers, cookies) + `EngineOptions` flags.
 //!
 //! **Output:** Appends `Param` entries to the shared `reflection_params` list.
 //! Each `Param` carries:
@@ -16,7 +16,7 @@
 //! **Side effects:** HTTP requests (one per parameter per location type).
 //! Respects `--skip-discovery`, `--skip-reflection-header`, etc.
 
-use crate::cmd::scan::ScanArgs;
+use crate::engine_options::EngineOptions;
 use crate::parameter_analysis::{Location, Param, ReflectionAnalysis, extend_with_joined};
 use crate::scanning::url_inject::build_injected_url;
 use crate::target_parser::Target;
@@ -65,7 +65,7 @@ pub(crate) fn explicit_param_names(param_specs: &[String], wanted: &str) -> Vec<
 
 pub async fn check_discovery(
     target: &mut Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {

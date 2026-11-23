@@ -18,7 +18,7 @@ use std::collections::HashSet;
 /// Stage-0 probe still drops any field whose value is never stored.
 pub(crate) async fn check_form_discovery_with(
     target: &Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {

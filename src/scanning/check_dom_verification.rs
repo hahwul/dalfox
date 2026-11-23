@@ -1201,7 +1201,7 @@ async fn verify_sxss_dom(
     target: &Target,
     param: &Param,
     payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
     upload_urls: Vec<url::Url>,
 ) -> (bool, Option<String>, Option<DomEvidenceKind>, bool) {
     let check_urls = crate::scanning::check_reflection::with_extra_urls(
@@ -1504,7 +1504,7 @@ pub(crate) async fn check_dom_verification_with_evidence(
     target: &Target,
     param: &Param,
     payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> DomVerifyEvidenceOutcome {
     if args.skip_xss_scanning {
         return DomVerifyEvidenceOutcome::default();

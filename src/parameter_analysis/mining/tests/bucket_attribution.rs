@@ -33,7 +33,7 @@ async fn serve(
 
 async fn mine(target: &Target, words: &str) -> Vec<Param> {
     let wordlist = TempWordlist::new("bucket-attribution", words);
-    let args = ScanArgs {
+    let args = EngineOptions {
         mining_dict_word: Some(wordlist.as_str()),
         ..default_scan_args()
     };

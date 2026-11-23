@@ -229,7 +229,7 @@ fn test_get_dynamic_payloads_basic() {
     let context = InjectionContext::Html(None);
     // Overrides base_args()'s `encoders: ["none"]` — this test asserts the
     // url/html encoded variants are emitted.
-    let args = ScanArgs {
+    let args = EngineOptions {
         encoders: vec!["url".to_string(), "html".to_string()],
         ..base_args()
     };
@@ -293,7 +293,7 @@ fn protocol_scheme_survives_builtin_safety_cap_in_attribute_context() {
 #[test]
 fn test_get_dynamic_payloads_only_custom() {
     let context = InjectionContext::Html(None);
-    let args = ScanArgs {
+    let args = EngineOptions {
         custom_payload: Some("test_payloads.txt".to_string()),
         only_custom_payload: true,
         ..base_args()
@@ -490,21 +490,18 @@ fn test_load_custom_payloads_caches_by_path() {
 
 // --- custom alert value substitution in get_dynamic_payloads ---
 
-fn base_args() -> ScanArgs {
-    ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
+fn base_args() -> EngineOptions {
+    EngineOptions {
         workers: 10,
         max_concurrent_targets: 10,
         encoders: vec!["none".to_string()],
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
 
 #[test]
 fn test_get_dynamic_payloads_custom_numeric_alert_value() {
-    let args = ScanArgs {
+    let args = EngineOptions {
         custom_alert_value: "9999".to_string(),
         ..base_args()
     };
@@ -517,7 +514,7 @@ fn test_get_dynamic_payloads_custom_numeric_alert_value() {
 
 #[test]
 fn test_get_dynamic_payloads_custom_string_alert_value() {
-    let args = ScanArgs {
+    let args = EngineOptions {
         custom_alert_type: "str".to_string(),
         custom_alert_value: "xss".to_string(),
         ..base_args()
@@ -549,7 +546,7 @@ fn generate_dynamic_payloads_is_memoized_and_stable() {
 
 #[test]
 fn test_apply_custom_alert_substitution_all_patterns() {
-    let args = ScanArgs {
+    let args = EngineOptions {
         custom_alert_value: "test()".to_string(),
         custom_alert_type: "none".to_string(),
         ..base_args()

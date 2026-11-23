@@ -3,7 +3,7 @@
 //! Discovers additional parameters by analyzing HTML forms, JavaScript source,
 //! dictionary wordlists, and GF-pattern lists — then probes each for reflection.
 //!
-//! **Input:** `Target` + `ScanArgs` + the initial `reflection_params` from Stage 1.
+//! **Input:** `Target` + `EngineOptions` + the initial `reflection_params` from Stage 1.
 //!
 //! **Output:** Extends the shared `reflection_params` list with newly discovered
 //! `Param` entries that reflect. Each carries the same naive `valid_specials`,
@@ -24,7 +24,7 @@
 //!
 //! **Skippable via:** `--skip-mining`, `--skip-mining-dict`, `--skip-mining-dom`.
 
-use crate::cmd::scan::ScanArgs;
+use crate::engine_options::EngineOptions;
 use crate::parameter_analysis::{
     DelimiterType, InjectionContext, Location, Param, extend_with_joined,
 };
@@ -69,7 +69,7 @@ use probe_xml::*;
 
 pub async fn mine_parameters(
     target: &mut Target,
-    args: &ScanArgs,
+    args: &EngineOptions,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
     pb: Option<ShimmerSpinner>,

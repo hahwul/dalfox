@@ -39,7 +39,7 @@ pub(crate) async fn run_ast_dom_analysis(
     xml_response: bool,
     ast_seen: &mut HashSet<String>,
     cancel: Option<&std::sync::atomic::AtomicBool>,
-    scan_args: &ScanArgs,
+    scan_args: &EngineOptions,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
     // Light-verify outcome per distinct payload: the request depends only on
@@ -318,7 +318,7 @@ pub(crate) async fn accumulate_findings(
     results: &tokio::sync::Mutex<Vec<crate::scanning::result::Result>>,
     findings_count: &std::sync::atomic::AtomicUsize,
     batch: Vec<crate::scanning::result::Result>,
-    args: &ScanArgs,
+    args: &EngineOptions,
 ) {
     let mut batch = batch;
     if args.discard_below_min_confidence {
@@ -355,7 +355,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
     client: &reqwest::Client,
     target: &Target,
     html: &str,
-    scan_args: &ScanArgs,
+    scan_args: &EngineOptions,
 ) -> (
     Vec<crate::scanning::result::Result>,
     Vec<String>,
@@ -472,7 +472,7 @@ async fn fetch_external_js(
     client: &reqwest::Client,
     target: &Target,
     url: url::Url,
-    scan_args: &ScanArgs,
+    scan_args: &EngineOptions,
 ) -> Option<ExternalJs> {
     let rb = crate::utils::build_request(client, target, reqwest::Method::GET, url, None);
     let send_result =

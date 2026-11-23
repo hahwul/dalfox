@@ -1322,7 +1322,12 @@ async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
         ..Default::default()
     };
 
-    analyze_parameters(&mut target, &args, None).await;
+    analyze_parameters(
+        &mut target,
+        &dalfox::engine_options::EngineOptions::from(&args),
+        None,
+    )
+    .await;
     !target.reflection_params.is_empty()
 }
 

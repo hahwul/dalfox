@@ -24,7 +24,7 @@ async fn reflect(
     target: &Target,
     param: &Param,
     payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
+    args: &crate::engine_options::EngineOptions,
 ) -> (Option<ReflectionKind>, Option<String>) {
     let client = target.build_client_or_default();
     let streak = std::sync::atomic::AtomicU32::new(0);
@@ -37,15 +37,12 @@ fn make_param() -> Param {
     Param::new("q".to_string(), "seed".to_string(), Location::Query)
 }
 
-fn default_scan_args() -> crate::cmd::scan::ScanArgs {
-    crate::cmd::scan::ScanArgs {
-        insecure: Some(true),
-        format: "json".to_string(),
+fn default_scan_args() -> crate::engine_options::EngineOptions {
+    crate::engine_options::EngineOptions {
         silence: true,
         workers: 10,
         max_concurrent_targets: 10,
         encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
-        waf_min_confidence: 0.0,
         ..Default::default()
     }
 }
@@ -3503,7 +3500,7 @@ fn uploaded_file_urls_gates() {
 fn resolve_sxss_check_urls_keeps_every_sxss_url_in_order() {
     let t = parse_target("http://app.test/post").unwrap();
     let p = Param::new("c".to_string(), String::new(), Location::Body);
-    let args = crate::cmd::scan::ScanArgs {
+    let args = crate::engine_options::EngineOptions {
         sxss_url: [
             "http://app.test/b",
             "http://app.test/a",

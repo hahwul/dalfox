@@ -9,7 +9,7 @@ async fn confidence_limit_follows_winners_within_and_across_batches() {
             .evidence("same sink")
             .build()
     };
-    let args = ScanArgs {
+    let args = EngineOptions {
         tier_model: Some("confidence".into()),
         only_poc: vec!["r".into()],
         ..Default::default()

@@ -1513,11 +1513,16 @@ fn dry_run_estimate_includes_dom_half_and_skips_fragment() {
     let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
     let cap = crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
     let apply_cap = |n: usize| if cap == 0 { n } else { n.min(cap) };
-    let shared = crate::scanning::estimate_param_requests(&q, &args, enc_factor, &apply_cap);
+    let shared = crate::scanning::estimate_param_requests(
+        &q,
+        &crate::engine_options::EngineOptions::from(&args),
+        enc_factor,
+        &apply_cap,
+    );
     let reflection_only = apply_cap(
         crate::scanning::xss_common::get_dynamic_payloads(
             q.injection_context.as_ref().unwrap(),
-            &args,
+            &crate::engine_options::EngineOptions::from(&args),
         )
         .unwrap()
         .len(),
@@ -2087,6 +2092,7 @@ async fn scan_host_group_caps_parameter_fanout_and_records_retryable_state() {
         group_permit,
         global_semaphore_clone: Arc::new(tokio::sync::Semaphore::new(1)),
         multi_pb_clone: None,
+        engine_opts: Arc::new(crate::engine_options::EngineOptions::from(args.as_ref())),
         args_arc: args,
         results_clone: Arc::new(Mutex::new(Vec::new())),
         findings_count_group: Arc::new(AtomicUsize::new(0)),
@@ -4526,7 +4532,7 @@ async fn side_channel_pocs_from_a_real_scan_carry_the_wafpad_prefix() {
     let results = Arc::new(Mutex::new(Vec::new()));
     crate::scanning::run_scanning(
         &target,
-        args,
+        Arc::new(crate::engine_options::EngineOptions::from(args.as_ref())),
         crate::scanning::ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
