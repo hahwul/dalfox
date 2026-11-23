@@ -315,3 +315,18 @@ func TestUrlEncode(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateNewRequest_unparsableURLIsInert(t *testing.T) {
+	// Path variants built by splitting on "/" can produce URLs that do not
+	// parse. A nil request here used to panic in callers (req.Host) and take
+	// down the process.
+	for _, opts := range []model.Options{{}, {Data: "a=1"}, {Header: []string{"X-A: 1"}, Cookie: "c=1"}} {
+		req := GenerateNewRequest("http://127.0.0.1/a?/%zz", "a=1", opts)
+		if req == nil {
+			t.Fatalf("GenerateNewRequest returned nil for %+v", opts)
+		}
+		if _, err := (&http.Client{}).Do(req); err == nil {
+			t.Fatalf("inert request should fail to send")
+		}
+	}
+}

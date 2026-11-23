@@ -264,7 +264,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	}
 
 	// Save scan results
-	options.Scan[sid] = scanObject
+	model.StoreScan(options.Scan, sid, scanObject)
 	scanResult.EndTime = time.Now()
 	scanResult.Duration = scanResult.EndTime.Sub(scanResult.StartTime)
 	if !(options.Silence && options.MulticastMode) {

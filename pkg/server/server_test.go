@@ -98,7 +98,8 @@ func TestScanHandler(t *testing.T) {
 
 		scans := []string{sid} // It might or might not be in scans slice if finished, but must be in options.Scan
 		options := model.Options{
-			Scan: make(map[string]model.Scan),
+			APIKey: "k", // results are returned as stored; see Test_scanHandler_redactsEvidenceWithoutAPIKey
+			Scan:   make(map[string]model.Scan),
 		}
 		options.Scan[sid] = model.Scan{URL: "http://test.com/vuln", ScanID: sid, Results: dummyResults}
 

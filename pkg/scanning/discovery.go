@@ -28,22 +28,34 @@ func performDiscovery(target string, options model.Options, rl *rateLimiter) (ma
 	wait.Add(task)
 	printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis to complete", options)
 
+	// sa/pa/bav are progress labels the analysis goroutines update and print
+	// concurrently; guard them so the status line is not a data race.
+	var statusMu sync.Mutex
+	markDone := func(update func()) string {
+		statusMu.Lock()
+		defer statusMu.Unlock()
+		update()
+		return "[" + sa + pa + bav + "] Waiting for analysis to complete"
+	}
+
 	go func() {
 		defer wait.Done()
 		policy, pathReflection = StaticAnalysis(target, options, rl)
-		sa = options.AuroraObject.Green(sa).String()
-		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis to complete", options)
+		line := markDone(func() { sa = options.AuroraObject.Green(sa).String() })
+		printing.DalLog("SYSTEM", line, options)
 	}()
 	go func() {
 		defer wait.Done()
 		params = ParameterAnalysis(target, options, rl)
-		pa = options.AuroraObject.Green(pa).String()
-		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis to complete", options)
+		line := markDone(func() { pa = options.AuroraObject.Green(pa).String() })
+		printing.DalLog("SYSTEM", line, options)
 	}()
 	if options.UseBAV {
 		go func() {
 			defer wait.Done()
-			RunBAVAnalysis(target, options, rl, &bav)
+			label := "BAV: ✓ "
+			RunBAVAnalysis(target, options, rl, &label)
+			markDone(func() { bav = label })
 		}()
 	}
 

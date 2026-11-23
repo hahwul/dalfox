@@ -6,15 +6,18 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	printing "github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/internal/utils"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	_ "github.com/hahwul/dalfox/v2/pkg/server/docs"
+	"github.com/hahwul/dalfox/v2/pkg/server/docs"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	echoSwagger "github.com/swaggo/echo-swagger"
@@ -60,6 +63,10 @@ func RunAPIServer(options model.Options) {
 	}
 }
 
+// scansMu serializes the handlers that read or rewrite the scan ID list;
+// echo serves requests concurrently.
+var scansMu sync.Mutex
+
 func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // options is now a pointer
 	e := echo.New()
 	options.IsAPI = true
@@ -67,6 +74,10 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	// key on ServerType == "rest", so `--type REST` or a library caller with
 	// an empty ServerType silently ran without the API key check.
 	options.ServerType = "rest"
+	// Let Swagger UI call the address it was opened on. The generated spec
+	// says localhost:6664, which is cross-origin when the UI is opened at the
+	// 127.0.0.1 address the server prints, or on any other port.
+	docs.SwaggerInfo.Host = ""
 	host := strings.TrimSuffix(strings.TrimPrefix(options.ServerHost, "["), "]")
 	e.Server.Addr = net.JoinHostPort(host, strconv.Itoa(options.ServerPort))
 	for i, o := range options.AllowedOrigins {
@@ -76,7 +87,7 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	// Logging and security headers first, so rejected requests are logged too.
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:      "",
-		ContentTypeNosniff: "",
+		ContentTypeNosniff: "nosniff",
 		XFrameOptions:      "",
 		HSTSMaxAge:         3600,
 	}))
@@ -86,6 +97,21 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 			`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
 			`"bytes_out":${bytes_out}}` + "\n",
 	}))
+
+	// Cross-Origin-Resource-Policy stops other sites from loading responses
+	// through <img>/<script>, which matters where browsers send no
+	// Sec-Fetch-Site (plain HTTP to a non-loopback address). JSONP exists to
+	// be loaded that way, so it gets cross-origin.
+	corp := "same-origin"
+	if options.JSONP {
+		corp = "cross-origin"
+	}
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Response().Header().Set("Cross-Origin-Resource-Policy", corp)
+			return next(c)
+		}
+	})
 
 	// Without an API key, the request source is the only thing keeping a web
 	// page out (GHSA-c98c-mph6-6hm9). With one, a page cannot attach the
@@ -114,18 +140,28 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	})
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.GET("/scans", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return scansHandler(c, scans, options)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return scanHandler(c, scans, options)
 	})
 	e.POST("/scan", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return postScanHandler(c, scans, options)
 	})
 	e.DELETE("/scans/all", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return deleteScansHandler(c, scans, options)
 	})
 	e.DELETE("/scan/:sid", func(c echo.Context) error {
+		scansMu.Lock()
+		defer scansMu.Unlock()
 		return deleteScanHandler(c, scans, options)
 	})
 	return e
@@ -169,7 +205,7 @@ func scansHandler(c echo.Context, scans *[]string, options *model.Options) error
 
 func scanHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	sid := c.Param("sid")
-	scanData, inOptionsScan := options.Scan[sid]
+	scanData, inOptionsScan := model.LoadScan(options.Scan, sid)
 	scanResult := GetScan(sid, *options)
 
 	res := &Res{}
@@ -192,6 +228,9 @@ func scanHandler(c echo.Context, scans *[]string, options *model.Options) error 
 		} else {
 			res.Msg = "finish"
 			res.Data = scanData.Results
+			if !authEnabled(options) {
+				res.Data = redactEvidence(scanData.Results)
+			}
 		}
 	}
 
@@ -220,6 +259,42 @@ func sanitizeAPIScanOptions(o *model.Options) {
 	// Cookie header is sent to the scan target, and a missing or unparsable
 	// file calls os.Exit(1), so one request could stop the server.
 	o.CookieFromRaw = ""
+
+	// Keep numeric options in a range the scan engine handles. A negative
+	// worker count panicked in make(chan) inside a scan goroutine, which
+	// ends the process; a huge one sizes channel buffers; a huge delay or
+	// timeout leaves scan goroutines asleep for years. 0 means "default" to
+	// dalfox.Initialize.
+	o.Concurrence = clampOption(o.Concurrence, maxAPIWorkers)
+	o.Timeout = clampOption(o.Timeout, maxAPITimeoutSecs)
+	o.Delay = clampOption(o.Delay, maxAPIDelayMs)
+	if o.Trigger != "" && !isHTTPURL(o.Trigger) {
+		o.Trigger = ""
+	}
+}
+
+// Upper bounds for API scan options. The CLI defaults are 100 workers, a
+// 10 s timeout and no delay.
+const (
+	maxAPIWorkers     = 1000
+	maxAPITimeoutSecs = 300
+	maxAPIDelayMs     = 60000
+)
+
+// clampOption maps a negative value to 0 (the default) and caps the rest.
+func clampOption(v, max int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // stripRawHTTPOutput drops raw request/response capture from findings. With
@@ -232,6 +307,40 @@ func stripRawHTTPOutput(o *model.Options) {
 	if strings.EqualFold(strings.TrimSpace(o.PoCType), "http-request") {
 		o.PoCType = "plain"
 	}
+}
+
+// evidenceLine matches one CodeView entry: "<n> line:  <response excerpt>".
+var evidenceLine = regexp.MustCompile(`(?m)^\s*(\d+) line:  `)
+
+// redactEvidence returns a copy of results whose evidence keeps the line
+// numbers and the payload but none of the surrounding response text, which
+// can belong to any internal page dalfox was pointed at.
+func redactEvidence(results []model.PoC) []model.PoC {
+	if len(results) == 0 {
+		return results
+	}
+	out := make([]model.PoC, len(results))
+	copy(out, results)
+	for i := range out {
+		if out[i].Evidence == "" {
+			continue
+		}
+		shown := out[i].Payload
+		if shown == "" {
+			shown = "[redacted]"
+		}
+		matches := evidenceLine.FindAllStringSubmatch(out[i].Evidence, -1)
+		if len(matches) == 0 {
+			out[i].Evidence = "[redacted]"
+			continue
+		}
+		var b strings.Builder
+		for _, m := range matches {
+			b.WriteString(m[1] + " line:  " + shown + "\n    ")
+		}
+		out[i].Evidence = b.String()
+	}
+	return out
 }
 
 // authEnabled reports whether the REST server checks X-API-KEY.
@@ -294,9 +403,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 // deleteScansHandler clears all scan data
 func deleteScansHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	*scans = []string{}
-	if options.Scan != nil {
-		options.Scan = make(map[string]model.Scan)
-	}
+	model.ClearScans(options.Scan)
 	return respondJSONorJSONP(c, http.StatusOK, Res{Code: 200, Msg: "All scans deleted"}, options)
 }
 
@@ -314,7 +421,7 @@ func deleteScanHandler(c echo.Context, scans *[]string, options *model.Options) 
 	sid := c.Param("sid")
 
 	// Check if sid exists in options.Scan (source of truth) or in the scans slice
-	_, inOptionsScan := options.Scan[sid]
+	_, inOptionsScan := model.LoadScan(options.Scan, sid)
 	inScansSlice := contains(*scans, sid)
 
 	if !inOptionsScan && !inScansSlice {
@@ -334,7 +441,7 @@ func deleteScanHandler(c echo.Context, scans *[]string, options *model.Options) 
 
 	// Delete from options.Scan map
 	if inOptionsScan {
-		delete(options.Scan, sid)
+		model.DeleteScan(options.Scan, sid)
 	}
 
 	return respondJSONorJSONP(c, http.StatusOK, Res{Code: 200, Msg: "Scan deleted successfully"}, options)

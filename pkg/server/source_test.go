@@ -1,14 +1,17 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -168,7 +171,13 @@ func Test_requestSourceGuard_preflightGetsHostCheck(t *testing.T) {
 		}).Code
 	}
 	assert.Equal(t, http.StatusForbidden, preflight("rebind.evil.example:6664"))
-	assert.Equal(t, http.StatusNoContent, preflight("127.0.0.1:6664"))
+	rec := serve(e, http.MethodOptions, "/scan", "", func(r *http.Request) {
+		r.Header.Set("Origin", "https://app.example.com")
+		r.Header.Set("Access-Control-Request-Method", "POST")
+	})
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	// echo answers 204 even for a rejected origin; the header is what counts.
+	assert.Equal(t, "https://app.example.com", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
 func Test_jsonpOptsOutReadsOnly(t *testing.T) {
@@ -184,6 +193,9 @@ func Test_jsonpOptsOutReadsOnly(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, serve(e, http.MethodDelete, "/scans/all", "", crossSite).Code)
 	rec := serve(e, http.MethodGet, "/health?callback=cb", "", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") })
 	assert.Equal(t, http.StatusOK, rec.Code, "<script src> reads are what --jsonp is for")
+	assert.True(t, strings.HasPrefix(rec.Body.String(), "cb("), rec.Body.String())
+	rec = serve(e, http.MethodGet, "/health?callback=cb", "", func(r *http.Request) { r.Host = "rebind.evil.example:6664" })
+	assert.Equal(t, http.StatusForbidden, rec.Code, "--jsonp keeps the Host check")
 }
 
 func Test_apiKeyServer_skipsSourceGuard(t *testing.T) {
@@ -206,7 +218,8 @@ func Test_setupEchoServer_enforcesKeyWhateverServerType(t *testing.T) {
 		scans := []string{}
 		options := model.Options{ServerType: st, APIKey: "k", Scan: map[string]model.Scan{}}
 		e := setupEchoServer(&options, &scans)
-		assert.Equal(t, http.StatusUnauthorized, serve(e, http.MethodGet, "/scans", "", nil).Code, "ServerType %q", st)
+		assert.Equal(t, http.StatusUnauthorized, serve(e, http.MethodGet, "/health", "", nil).Code, "ServerType %q", st)
+		assert.Equal(t, http.StatusOK, serve(e, http.MethodGet, "/health", "", func(r *http.Request) { r.Header.Set(APIKeyHeader, "k") }).Code, "ServerType %q", st)
 	}
 }
 
@@ -312,4 +325,217 @@ func Test_postScanHandler_stripsRawOutputWithoutAPIKey(t *testing.T) {
 		assert.Equal(t, tc.keep, rq.OutputRequest, "api key %q", tc.apiKey)
 		assert.Equal(t, tc.keep, rq.OutputResponse, "api key %q", tc.apiKey)
 	}
+}
+
+func Test_redactEvidence(t *testing.T) {
+	in := []model.PoC{
+		{Payload: "<x>", Evidence: "3 line:  <p>SECRET=abc <x> tail-secret</p>\n    9 line:  y <x>\n    "},
+		{Payload: "", Evidence: "1 line:  leak\n    "},
+		{Payload: "<x>"},
+	}
+	out := redactEvidence(in)
+	assert.Equal(t, "3 line:  <x>\n    9 line:  <x>\n    ", out[0].Evidence)
+	assert.Equal(t, "1 line:  [redacted]\n    ", out[1].Evidence)
+	assert.Empty(t, out[2].Evidence)
+	assert.Equal(t, "[redacted]", redactEvidence([]model.PoC{{Payload: "p", Evidence: "free-form SECRET"}})[0].Evidence)
+	// Response text that itself looks like "<n> line:  " must not add entries.
+	got := redactEvidence([]model.PoC{{Payload: "<x>", Evidence: "4 line:  id 12345 line:  <x>\n    "}})[0].Evidence
+	assert.Equal(t, "4 line:  <x>\n    ", got)
+	assert.Contains(t, in[0].Evidence, "SECRET", "stored results must not be modified")
+}
+
+func Test_scanHandler_redactsEvidenceWithoutAPIKey(t *testing.T) {
+	for _, tc := range []struct {
+		apiKey string
+		want   string
+	}{{"", "1 line:  <x>\n    "}, {"k", "1 line:  SECRET <x>\n    "}} {
+		scans := []string{"sid"}
+		options := model.Options{APIKey: tc.apiKey, Scan: map[string]model.Scan{
+			"sid": {URL: "http://internal/", Results: []model.PoC{{Payload: "<x>", Evidence: "1 line:  SECRET <x>\n    "}}},
+		}}
+		e := setupEchoServer(&options, &scans)
+		rec := serve(e, http.MethodGet, "/scan/sid", "", func(r *http.Request) { r.Header.Set(APIKeyHeader, tc.apiKey) })
+		if !assert.Equal(t, http.StatusOK, rec.Code) {
+			continue
+		}
+		var res Res
+		if assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res)) && assert.Len(t, res.Data, 1) {
+			assert.Equal(t, tc.want, res.Data[0].Evidence, "api key %q", tc.apiKey)
+		}
+	}
+}
+
+func Test_responseHeaders_blockCrossOriginLoads(t *testing.T) {
+	scans := []string{}
+	e := setupEchoServer(&model.Options{Scan: map[string]model.Scan{}}, &scans)
+	rec := serve(e, http.MethodGet, "/health", "", nil)
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "same-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
+	// Rejected requests carry the headers too.
+	rec = serve(e, http.MethodGet, "/health", "", func(r *http.Request) { r.Host = "evil.example" })
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, "same-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
+
+	e = setupEchoServer(&model.Options{JSONP: true, Scan: map[string]model.Scan{}}, &scans)
+	rec = serve(e, http.MethodGet, "/health?callback=cb", "", nil)
+	assert.Equal(t, "cross-origin", rec.Header().Get("Cross-Origin-Resource-Policy"), "JSONP is loaded cross-origin by design")
+}
+
+// Test_originMatcher_neverLooserThanEchoCORS runs the real echo CORS
+// middleware next to the guard: anything the guard lets through that CORS
+// would refuse still runs server-side, so the guard may only be stricter.
+func Test_originMatcher_neverLooserThanEchoCORS(t *testing.T) {
+	patterns := [][]string{
+		{"https://*.corp.example"},
+		{"http://ui.local:300?"},
+		{"https://exact.example/"},
+		{"null"},
+		{"https://a.*.corp.example"},
+		{"http://localhost:*"},
+	}
+	origins := []string{
+		"https://ui.corp.example", "https://a.b.corp.example", "https://corp.example",
+		"https://evilcorp.example", "http://ui.local:3001", "http://ui.local:30011",
+		"https://exact.example", "https://exact.example/", "null",
+		"https://x.y.corp.example", "https://a.x.corp.example", "http://localhost:3000",
+		"https://" + strings.Repeat("a", 260) + ".corp.example",
+	}
+	for _, allowed := range patterns {
+		e := echo.New()
+		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{AllowOrigins: allowed}))
+		e.GET("/", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+		m := newOriginMatcher(allowed)
+		for _, o := range origins {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Origin", o)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			cors := rec.Header().Get("Access-Control-Allow-Origin") != ""
+			if m.allows(o) {
+				assert.True(t, cors, "guard allows %q for %v but echo CORS does not", o, allowed)
+			}
+		}
+	}
+	// The everyday shapes must agree in the other direction too.
+	m := newOriginMatcher([]string{"https://*.corp.example", "http://localhost:*"})
+	assert.True(t, m.allows("https://ui.corp.example"))
+	assert.True(t, m.allows("http://localhost:3000"))
+	assert.True(t, newOriginMatcher([]string{"null"}).allows("null"), "exact entries skip the :// pre-check, as in echo")
+}
+
+func Test_sameOrigin_defaultPorts(t *testing.T) {
+	assert.True(t, sameOrigin("https://dalfox.internal", "dalfox.internal:443"))
+	assert.True(t, sameOrigin("http://dalfox.internal", "dalfox.internal:80"))
+	assert.True(t, sameOrigin("http://dalfox.internal:80", "dalfox.internal"))
+	assert.True(t, sameOrigin("http://[::1]:6664", "[::1]:6664"))
+	assert.False(t, sameOrigin("https://dalfox.internal", "dalfox.internal:80"))
+	assert.False(t, sameOrigin("http://dalfox.internal", "dalfox.internal:6664"))
+	assert.False(t, sameOrigin("http://127.0.0.1:6664", "localhost:6664"))
+	assert.False(t, sameOrigin("null", "localhost"))
+}
+
+func Test_sanitizeAPIScanOptions_crashValues(t *testing.T) {
+	o := model.Options{Concurrence: -1, Timeout: -1, Delay: -5, Trigger: "://bad"}
+	sanitizeAPIScanOptions(&o)
+	assert.Equal(t, 0, o.Concurrence, "make(chan, -1) panics")
+	assert.Equal(t, 0, o.Timeout)
+	assert.Equal(t, 0, o.Delay)
+	assert.Empty(t, o.Trigger, "an unparsable trigger yields a nil request")
+
+	o = model.Options{Concurrence: 1 << 30, Timeout: 1 << 30, Delay: 9000000000000, Trigger: "http://127.0.0.1/?s=SEQNC"}
+	sanitizeAPIScanOptions(&o)
+	assert.Equal(t, maxAPIWorkers, o.Concurrence)
+	assert.Equal(t, maxAPITimeoutSecs, o.Timeout)
+	assert.Equal(t, maxAPIDelayMs, o.Delay, "a huge delay parks scan goroutines for years")
+	assert.Equal(t, "http://127.0.0.1/?s=SEQNC", o.Trigger)
+	for _, bad := range []string{"javascript:alert(1)", "file:///etc/passwd", "/relative", "http://"} {
+		o = model.Options{Trigger: bad}
+		sanitizeAPIScanOptions(&o)
+		assert.Empty(t, o.Trigger, bad)
+	}
+}
+
+func Test_postScanHandler_passesSanitizedOptions(t *testing.T) {
+	got := stubScans(t)
+	scans := []string{}
+	options := model.Options{Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	rec := serve(e, http.MethodPost, "/scan", `{"url":"http://127.0.0.1:1/","options":{
+		"found-action":"id","cookie-from-raw":"/x","custom-payload-file":"/etc/hostname",
+		"worker":-1,"trigger":"://bad","poc-type":"http-request","output-response":true}}`, nil)
+	if !assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String()) {
+		return
+	}
+	select {
+	case rq := <-got:
+		assert.Empty(t, rq.FoundAction)
+		assert.Empty(t, rq.CookieFromRaw)
+		assert.Empty(t, rq.CustomPayloadFile)
+		assert.Equal(t, 0, rq.Concurrence)
+		assert.Empty(t, rq.Trigger)
+		assert.Equal(t, "plain", rq.PoCType)
+		assert.False(t, rq.OutputResponse)
+	case <-time.After(5 * time.Second):
+		t.Fatal("scan was never started")
+	}
+}
+
+func Test_swaggerSpecFollowsTheServerAddress(t *testing.T) {
+	scans := []string{}
+	e := setupEchoServer(&model.Options{Scan: map[string]model.Scan{}}, &scans)
+	rec := serve(e, http.MethodGet, "/swagger/doc.json", "", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var spec map[string]interface{}
+	if assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &spec)) {
+		host, _ := spec["host"].(string)
+		assert.Empty(t, host, "a fixed host makes Swagger UI cross-origin when opened on another address")
+	}
+}
+
+// Test_scanStore_concurrentAccess runs under -race: scans store results from
+// background goroutines while handlers read and delete them.
+func Test_scanStore_concurrentAccess(t *testing.T) {
+	scans := []string{}
+	options := model.Options{Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			model.StoreScan(options.Scan, "sid", model.Scan{URL: "http://x/"})
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		serve(e, http.MethodGet, "/scan/sid", "", nil)
+		if i%50 == 0 {
+			serve(e, http.MethodDelete, "/scans/all", "", nil)
+		}
+	}
+	<-done
+	// ClearScans empties the map in place, so a scan that finishes after a
+	// delete-all still lands where GET /scan/:id looks.
+	serve(e, http.MethodDelete, "/scans/all", "", nil)
+	model.StoreScan(options.Scan, "late", model.Scan{URL: "http://x/"})
+	_, ok := model.LoadScan(options.Scan, "late")
+	assert.True(t, ok)
+}
+
+// Test_scanList_concurrentHandlers runs under -race: echo serves requests
+// concurrently, and POST /scan appends to the same ID list GET /scans reads.
+func Test_scanList_concurrentHandlers(t *testing.T) {
+	stubScans(t)
+	scans := []string{}
+	options := model.Options{Scan: map[string]model.Scan{}}
+	e := setupEchoServer(&options, &scans)
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(3)
+		go func() { defer wg.Done(); serve(e, http.MethodPost, "/scan", scanBody, nil) }()
+		go func() { defer wg.Done(); serve(e, http.MethodGet, "/scans", "", nil) }()
+		go func() { defer wg.Done(); serve(e, http.MethodGet, "/scan/unknown", "", nil) }()
+	}
+	wg.Wait()
+	scansMu.Lock()
+	defer scansMu.Unlock()
+	assert.Len(t, scans, 20, "no scan ID may be lost")
 }

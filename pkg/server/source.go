@@ -71,12 +71,28 @@ func checkCrossSite(req *http.Request, options *model.Options, origins originMat
 	return ""
 }
 
+// sameOrigin reports whether origin names the host the request was sent to.
+// Browsers omit default ports in Origin, while a Host header (or a proxy)
+// may spell them out, so :80 / :443 are filled in on both sides.
 func sameOrigin(origin, host string) bool {
 	u, err := url.Parse(origin)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || host == "" {
 		return false
 	}
-	return host != "" && strings.EqualFold(u.Host, host)
+	defaultPort := "80"
+	if u.Scheme == "https" {
+		defaultPort = "443"
+	}
+	oh, op := splitHostPortDefault(u.Host, defaultPort)
+	rh, rp := splitHostPortDefault(host, defaultPort)
+	return strings.EqualFold(oh, rh) && op == rp
+}
+
+func splitHostPortDefault(authority, defaultPort string) (string, string) {
+	if h, p, err := net.SplitHostPort(authority); err == nil {
+		return hostName(h), p
+	}
+	return hostName(authority), defaultPort
 }
 
 // originMatcher accepts exactly what --allowed-origins lets through the echo
@@ -84,6 +100,7 @@ func sameOrigin(origin, host string) bool {
 // in step: anything this accepts that CORS rejects still runs server-side.
 type originMatcher struct {
 	any      bool
+	exact    []string
 	patterns []*regexp.Regexp
 }
 
@@ -95,6 +112,7 @@ func newOriginMatcher(allowed []string) originMatcher {
 			m.any = true
 			continue
 		}
+		m.exact = append(m.exact, a)
 		pattern := regexp.QuoteMeta(a)
 		pattern = strings.ReplaceAll(pattern, `\*`, ".*")
 		pattern = strings.ReplaceAll(pattern, `\?`, ".")
@@ -108,6 +126,15 @@ func newOriginMatcher(allowed []string) originMatcher {
 func (m originMatcher) allows(origin string) bool {
 	if m.any {
 		return true
+	}
+	for _, e := range m.exact {
+		if e == origin {
+			return true
+		}
+	}
+	// Same pre-check as echo CORS before it tries patterns.
+	if len(origin) > 253+3+5 || !strings.Contains(origin, "://") {
+		return false
 	}
 	for _, re := range m.patterns {
 		if re.MatchString(origin) {
