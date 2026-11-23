@@ -862,10 +862,10 @@ pub(crate) async fn execute_scan(
                             warn(&note);
                         }
 
-                        // `args.silence` is already `true` (set at construction), and
-                        // `analyze_parameters` takes `&ScanArgs`, so pass the shared
-                        // Arc directly instead of deep-cloning it just to re-set a
-                        // field that already holds the desired value.
+                        // `args.silence` is already `true` (set at construction), so
+                        // the job's shared options are passed as they are instead of
+                        // being cloned just to re-set a field that already holds the
+                        // desired value.
                         analyze_parameters(target, &engine_opts, None).await;
                     };
                     tokio::select! {

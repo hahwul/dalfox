@@ -1271,7 +1271,7 @@ impl ScanArgs {
 }
 
 /// `--include-url` / `--exclude-url` compiled once and reused by
-/// [`ScanArgs::url_in_scope`], which runs per form action and external script.
+/// [`url_in_scope`], which runs per form action and external script.
 type UrlScope = (
     Vec<String>,
     Vec<String>,

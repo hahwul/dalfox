@@ -5,9 +5,10 @@
 //! used to take that struct whole, so anything that wanted to run a scan had to
 //! build a CLI invocation first, and nothing said which flags the engine reads.
 //!
-//! [`EngineOptions`] is that subset, already resolved: it is built once from
-//! the finalized `ScanArgs` ([`EngineOptions::from`]) and is the only options
-//! type the engine sees. Field names and types match `ScanArgs`, so moving a
+//! [`EngineOptions`] is that subset, already resolved: it is built from the
+//! finalized `ScanArgs` ([`EngineOptions::from`]) where a caller enters the
+//! engine (once per run in the scan loop and in the job runner) and is the
+//! only options type the engine sees. Field names and types match `ScanArgs`, so moving a
 //! reader from one to the other changes its signature and nothing else.
 //!
 //! Adding an engine option: add the field here and to the `From` impl below.

@@ -903,7 +903,6 @@ pub(crate) async fn detect_outdated_libs(
     results_clone: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     findings_count_clone: &Arc<std::sync::atomic::AtomicUsize>,
 ) {
-    let engine_opts = EngineOptions::from(args_clone);
     // Outdated / known-vulnerable JS library detection (issue #1074).
     // OPT-IN (`--detect-outdated-libs`, default off): dalfox's default
     // output is verified XSS, so this informational (CWE-1104) add-on
@@ -918,6 +917,7 @@ pub(crate) async fn detect_outdated_libs(
             &target.method,
         );
         if !lib_findings.is_empty() {
+            let engine_opts = EngineOptions::from(args_clone);
             crate::scanning::result::stamp_origin(&mut lib_findings, &target.state_key());
             crate::scanning::accumulate_findings(
                 results_clone,
@@ -946,7 +946,6 @@ async fn run_initial_ast_pass(
     findings_count_clone: &Arc<std::sync::atomic::AtomicUsize>,
     ast_skipped: &Arc<Mutex<HashMap<String, crate::scanning::ast_integration::AstSkips>>>,
 ) {
-    let engine_opts = EngineOptions::from(args_clone);
     // Run AST-based DOM XSS analysis on the initial response
     // (enabled by default). The helper is shared with the
     // server (`dalfox server`) and MCP (`scan_with_dalfox`)
@@ -955,6 +954,7 @@ async fn run_initial_ast_pass(
     if !args_clone.skip_ast_analysis
         && let Some(response_text) = preflight_response_body
     {
+        let engine_opts = EngineOptions::from(args_clone);
         let (mut ast_batch, mut skips) =
             crate::scanning::ast_integration::run_initial_ast_dom_analysis_with_skips(
                 response_text,
