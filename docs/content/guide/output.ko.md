@@ -378,6 +378,7 @@ GitHub의 `upload-sarif` 액션으로 `dalfox.sarif`를 업로드하면, 탐지 
   run: dalfox scan scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion
 
 - uses: github/codeql-action/upload-sarif@v3
+  if: always()
   with:
     sarif_file: dalfox.sarif
 ```
