@@ -331,6 +331,31 @@ fn a_raw_text_end_tag_is_not_matched_against_the_frames() {
     assert_eq!(texts(html), ["b"]);
 }
 
+/// A body built to make every end tag walk a long list of open elements
+/// (review: 832 KB took 40 s before the bounds).
+#[test]
+fn hostile_nesting_is_bounded() {
+    let nested = format!(
+        "{}{}alert(1)",
+        "<svg><title>".repeat(8_000),
+        "</b>".repeat(80_000)
+    );
+    let wide = format!(
+        "<svg>{}<title>{}alert(1)",
+        "<g>".repeat(4_000),
+        "</b>".repeat(400_000)
+    );
+    for html in [nested, wide] {
+        let start = std::time::Instant::now();
+        assert!(unparsed_from(&html).is_some());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(3),
+            "segmenting took {:?}",
+            start.elapsed()
+        );
+    }
+}
+
 #[test]
 fn deeply_nested_foreign_content_stops_instead_of_growing() {
     let html = format!("<svg>{}<title>t</title>", "<g>".repeat(5000));

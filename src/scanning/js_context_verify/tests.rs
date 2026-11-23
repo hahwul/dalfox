@@ -1065,7 +1065,11 @@ fn echo_is_string_data_requires_every_occurrence_inside_a_string() {
         "alert(1)"
     ));
     assert!(echo_is_string_data(
-        r#"log("alert(1)"); var b = 'alert(1)';"#,
+        r#"console.log("alert(1)"); var b = 'alert(1)';"#,
+        "alert(1)"
+    ));
+    assert!(echo_is_string_data(
+        "let a;\na = 'alert(1)';\nconst b\t=\n\"alert(1)\";",
         "alert(1)"
     ));
     // One occurrence outside a string literal is enough to refuse.
@@ -1082,15 +1086,49 @@ fn echo_is_string_data_requires_every_occurrence_inside_a_string() {
 fn echo_is_string_data_refuses_what_it_cannot_read_as_a_string() {
     // Does not parse.
     assert!(!echo_is_string_data("var a = 'alert(1)", "alert(1)"));
-    // A string handed to an evaluator is parsed as code, not recorded.
-    assert!(!echo_is_string_data(r#"eval("alert(1)");"#, "alert(1)"));
-    assert!(!echo_is_string_data(
-        r#"setTimeout("alert(1)", 1);"#,
-        "alert(1)"
-    ));
     // Template literals are not recorded as strings.
     assert!(!echo_is_string_data("var a = `alert(1)`;", "alert(1)"));
     // Absent, or empty.
     assert!(!echo_is_string_data(r#"var a = "x";"#, "alert(1)"));
     assert!(!echo_is_string_data(r#"var a = "x";"#, ""));
+}
+
+#[test]
+fn echo_is_string_data_refuses_a_literal_something_consumes() {
+    for script in [
+        // Evaluators, in the shapes the sink walk models and the ones it
+        // does not.
+        r#"eval("alert(1)");"#,
+        r#"setTimeout("alert(1)", 1);"#,
+        r#"setTimeout("go(\"x\", alert(1))", 0);"#,
+        r#"var f = new Function("return alert(1)"); f();"#,
+        r#"var f = Function("return alert(1)"); f();"#,
+        r#"eval("go('" + a + "', alert(1))");"#,
+        r#"$.globalEval("x = alert(1)");"#,
+        r#"window.execScript("x = alert(1)");"#,
+        r#"setTimeout.call(window, "x = alert(1)", 0);"#,
+        r#"(0, eval)("x = alert(1)");"#,
+        r#"eval?.("x = alert(1)");"#,
+        r#"setTimeout(c ? "x = alert(1)" : "", 0);"#,
+        // Markup and attribute sinks.
+        r#"document.write("Results for alert(1)");"#,
+        r#"document.getElementById('o').innerHTML = "Results for alert(1)";"#,
+        r#"el.setAttribute("onclick", "x = alert(1)");"#,
+        r#"s.text = "x = alert(1)";"#,
+        r#"location.href = "javascript:go(alert(1))";"#,
+        r#"location = "javascript:go(alert(1))";"#,
+        // Positions that are not "kept": a property, a return, a comparison,
+        // a concatenation, an argument of an ordinary call.
+        r#"var o = {q: "alert(1)"};"#,
+        r#"function f() { return "alert(1)"; }"#,
+        r#"if (q == "alert(1)") {}"#,
+        r#"var a = "x" + "alert(1)";"#,
+        r#"render("alert(1)");"#,
+        r#"window.console.log("alert(1)");"#,
+        r#"a.b = "alert(1)";"#,
+        r#"a["b"] = "alert(1)";"#,
+        r#"q += "alert(1)";"#,
+    ] {
+        assert!(!echo_is_string_data(script, "alert(1)"), "{script}");
+    }
 }

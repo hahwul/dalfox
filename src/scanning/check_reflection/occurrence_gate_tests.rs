@@ -30,7 +30,7 @@ fn text_attribute_and_js_string_together_are_inert() {
   console.log("Search: " + searchTerm);
 </script></body></html>"#;
     assert!(inert(html, "alert(1)"));
-    assert!(is_in_safe_context_decoded(html, "alert(1)"));
+    assert!(reflection_is_inert(html, "alert(1)", true));
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn a_quote_bearing_payload_in_element_text_is_inert() {
     let html = format!("<html><body><div class=\"editor\">{p}</div></body></html>");
     assert!(!raw_reflection_inert_in_text(&html, &p));
     assert!(inert(&html, &p));
-    assert!(is_in_safe_context_decoded(&html, &p));
+    assert!(reflection_is_inert(&html, &p, true));
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn a_single_quoted_attribute_the_payload_closes_is_live() {
     let p = attr_payload();
     let html = format!("<img title='a > {p}'>");
     assert!(!inert(&html, &p));
-    assert!(!is_in_safe_context_decoded(&html, &p));
+    assert!(!reflection_is_inert(&html, &p, true));
 }
 
 #[test]
@@ -311,6 +311,113 @@ fn a_trace_of_the_payload_after_the_segmenter_stops_is_live() {
 fn an_echo_in_a_tag_the_input_ends_inside_is_live() {
     let html = "<p>alert(1)</p><input value=\"alert(1)";
     assert!(!inert(html, "alert(1)"));
+}
+
+#[test]
+fn a_script_string_something_consumes_is_live() {
+    for script in [
+        r#"setTimeout("go(\"x\", alert(1))", 0);"#,
+        r#"var f = Function("return alert(1)"); f();"#,
+        r#"$.globalEval("x = alert(1)");"#,
+        r#"s.text = "x = alert(1)";"#,
+        r#"el.setAttribute("onclick", "x = alert(1)");"#,
+        r#"document.write("Results for alert(1)");"#,
+        r#"document.getElementById('o').innerHTML = "Results for alert(1)";"#,
+        r#"render({q: "alert(1)"});"#,
+    ] {
+        let html = format!("<p>alert(1)</p><script>{script}</script>");
+        assert!(!inert(&html, "alert(1)"), "{script}");
+    }
+}
+
+#[test]
+fn an_attribute_the_gate_does_not_know_is_live() {
+    for attr in [
+        "ng:click",
+        "ng_click",
+        "data-ng:click",
+        "script",
+        "data-script",
+        "up-on-loaded",
+        "data-ajax-success",
+        "data-dojo-props",
+        "data-main",
+        "data-action",
+        "http-equiv",
+        "made-up",
+    ] {
+        let html = format!("<p>alert(1)</p><button {attr}=\"go(alert(1))\">x</button>");
+        assert!(!inert(&html, "alert(1)"), "{attr}");
+    }
+    // An unknown attribute that does not hold the payload is no obstacle.
+    let html = "<p>alert(1)</p><button made-up=\"go()\" ng-click=\"save()\">x</button>";
+    assert!(inert(html, "alert(1)"));
+}
+
+#[test]
+fn a_scheme_the_decoder_cannot_spell_out_is_live() {
+    let p = format!("'-alert(1)-' class={}", marker());
+    for head in [
+        "javascript&colon;",
+        "java&Tab;script:",
+        "java&#9;script:",
+        "&#106avascript:",
+        "javascript&#58",
+        // More leading blanks than the scheme window is long.
+        &format!("\n{}javascript:", " ".repeat(70)),
+    ] {
+        let html = format!("<p>{p}</p><a href=\"{head}go('{p}')\">x</a>");
+        assert!(!inert(&html, &p), "{head:?}");
+    }
+    // SVG animation can set an `href` to the value it carries.
+    let html = format!("<p>{p}</p><svg><a><animate values=\"javascript:go('{p}')\"/></a></svg>");
+    assert!(!inert(&html, &p));
+}
+
+#[test]
+fn every_copy_of_the_scan_marker_has_to_be_placed() {
+    // The same payload came back twice: verbatim as text, and with its quotes
+    // stripped where that makes it two attributes.
+    let p = format!("' onmouseover=alert(1) class={} x='", marker());
+    let stripped = p.replace('\'', "");
+    let html = format!("<p>{p}</p><input value=x{stripped}>");
+    assert!(!inert(&html, &p));
+    // Right after `value=` the tokenizer skips the blank and reads
+    // `onmouseover=alert(1)` as the value: nothing became a handler, but the
+    // payload's `class=` did become an attribute, which is as much as this
+    // gate can see.
+    let html = format!("<p>{p}</p><input value={stripped}>");
+    assert!(!inert(&html, &p));
+    // A transformed copy inside a script is not judged either.
+    let html = format!("<p>{p}</p><script>go({});</script>", stripped.trim());
+    assert!(!inert(&html, &p));
+    // A transformed copy that is text or a display attribute is data.
+    let html = format!("<p>{p}</p><p>{stripped}</p><input value=\"{stripped}\">");
+    assert!(inert(&html, &p));
+    // So is a verbatim copy that happens to be a whole `class` value.
+    let quote_free = format!("x onmouseover=alert(1) class={} ", marker());
+    let html = format!("<p>{quote_free}</p><b class=\"{quote_free}\">x</b>");
+    assert!(inert(&html, &quote_free));
+}
+
+#[test]
+fn a_comment_a_library_reads_is_live() {
+    let p = attr_payload();
+    let html = format!("<p>{p}</p><!-- ko text: '{p}' --><!-- /ko -->");
+    assert!(!inert(&html, &p));
+}
+
+#[test]
+fn only_an_html_document_is_segmented() {
+    let html = "<p>alert(1)</p>";
+    assert!(reflection_is_inert(html, "alert(1)", true));
+    // Served as JavaScript, as XML, or a redirect's `Location:` line.
+    assert!(!reflection_is_inert(html, "alert(1)", false));
+    let location = "HTTP 302 Location: /next?q='-alert(1)-'";
+    assert!(!reflection_is_inert(location, "'-alert(1)-'", false));
+    // The earlier gates do not depend on it.
+    let html = "<textarea><svg onload=alert(1)></textarea>";
+    assert!(reflection_is_inert(html, "<svg onload=alert(1)>", false));
 }
 
 // ---- scope -----------------------------------------------------------------

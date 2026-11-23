@@ -153,6 +153,15 @@ impl Frame<'_> {
 /// one to two orders of magnitude shallower.
 const MAX_OPEN_FOREIGN_ELEMENTS: usize = 4096;
 
+/// Nested foreign roots and integration points before the model gives up.
+const MAX_FRAMES: usize = 32;
+
+/// Open-element names an end tag inside an integration point may be compared
+/// with, over the whole document. Each such end tag is checked against every
+/// enclosing frame, so without a bound a body of `</b>` after a deep SVG costs
+/// (end tags × open elements). Real documents spend a few hundred.
+const MAX_ENCLOSING_LOOKUPS: usize = 1 << 20;
+
 /// Table structure, plus `template`. Their end tags are looked up in "table
 /// scope" (or on the whole stack), which an integration point does not bound,
 /// and in a table insertion mode their start tags close the open cell or row
@@ -355,10 +364,13 @@ pub(crate) struct Segments<'a> {
     in_select: bool,
     /// `<template>` start tags not yet matched by an end tag.
     template_depth: usize,
+    /// What is left of [`MAX_ENCLOSING_LOOKUPS`].
+    lookups_left: usize,
     finished: bool,
 }
 
-/// Segment `html`. Linear in the document length.
+/// Segment `html`. Linear in the document length, plus at most
+/// [`MAX_ENCLOSING_LOOKUPS`] name comparisons.
 pub(crate) fn segments(html: &str) -> Segments<'_> {
     Segments {
         html,
@@ -367,6 +379,7 @@ pub(crate) fn segments(html: &str) -> Segments<'_> {
         frames: Vec::new(),
         in_select: false,
         template_depth: 0,
+        lookups_left: MAX_ENCLOSING_LOOKUPS,
         finished: false,
     }
 }
@@ -492,6 +505,8 @@ impl<'a> Segments<'a> {
             PopFrame,
             Stop,
         }
+        let mut lookups_left = self.lookups_left;
+        let mut stop_for_budget = false;
         let action = match self.frames.split_last() {
             None => Action::Keep,
             Some((Frame::Foreign { root, open }, _)) => {
@@ -524,17 +539,32 @@ impl<'a> Segments<'a> {
                     } else {
                         Action::PopFrame
                     }
-                } else if name_in(name, CROSSES_INTEGRATION_POINT)
-                    || enclosing.iter().any(|f| f.has_element(name))
-                {
+                } else if name_in(name, CROSSES_INTEGRATION_POINT) {
                     Action::Stop
                 } else {
-                    // Matched against the HTML elements inside the integration
-                    // point only.
-                    Action::Keep
+                    let cost: usize = enclosing
+                        .iter()
+                        .map(|f| match f {
+                            Frame::Foreign { open, .. } => open.len() + 1,
+                            Frame::Html { .. } => 1,
+                        })
+                        .sum();
+                    match lookups_left.checked_sub(cost) {
+                        Some(left) => lookups_left = left,
+                        // Out of budget: no answer rather than a slow one.
+                        None => stop_for_budget = true,
+                    }
+                    if stop_for_budget || enclosing.iter().any(|f| f.has_element(name)) {
+                        Action::Stop
+                    } else {
+                        // Matched against the HTML elements inside the
+                        // integration point only.
+                        Action::Keep
+                    }
                 }
             }
         };
+        self.lookups_left = lookups_left;
         match action {
             Action::Keep => {}
             Action::LeaveForeign => self.leave_foreign_content(),
@@ -603,6 +633,11 @@ impl<'a> Segments<'a> {
                     .iter()
                     .find(|p| name.eq_ignore_ascii_case(p))
                 {
+                    if self.frames.len() >= MAX_FRAMES {
+                        self.queue.truncate(queued);
+                        self.stop_at(lt);
+                        return;
+                    }
                     self.frames.push(Frame::Html {
                         element,
                         math: root == ForeignRoot::Math,
@@ -653,6 +688,11 @@ impl<'a> Segments<'a> {
         };
         if let Some(root) = foreign_root {
             if !tag.self_closing {
+                if self.frames.len() >= MAX_FRAMES {
+                    self.queue.truncate(queued);
+                    self.stop_at(lt);
+                    return;
+                }
                 self.frames.push(Frame::Foreign {
                     root,
                     open: Vec::new(),

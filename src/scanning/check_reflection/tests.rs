@@ -2350,7 +2350,7 @@ fn test_url_value_backwalk_is_bounded_and_keeps_the_finding() {
         "an echo the walk cannot place must not be suppressed by it"
     );
     assert!(
-        is_in_safe_context_decoded(&html, payload),
+        reflection_is_inert(&html, payload, true),
         "the forward pass places the echo inside the quoted value"
     );
     assert!(
@@ -2359,7 +2359,7 @@ fn test_url_value_backwalk_is_bounded_and_keeps_the_finding() {
         start.elapsed()
     );
     // The same echoes in a value the payload can leave keep the finding.
-    assert!(!is_in_safe_context_decoded(&html.replace('"', ""), payload));
+    assert!(!reflection_is_inert(&html.replace('"', ""), payload, true));
 
     // Within the floor the verdict is unchanged: trapped in the href value.
     let short = format!("<a href=\"/{payload}\">x</a>");

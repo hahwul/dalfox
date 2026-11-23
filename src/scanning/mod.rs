@@ -1179,10 +1179,12 @@ impl ScanWorkerCtx {
                     && reflection_body.as_ref().is_some_and(|b| {
                         b.renderable
                             && (check_reflection::is_escaped_echo(&b.text, reflection_payload)
-                                || check_reflection::reflection_inert_at_every_occurrence(
-                                    &b.text,
-                                    reflection_payload,
-                                ))
+                                || (!b.js_content_type
+                                    && !xml_content_type
+                                    && check_reflection::reflection_inert_at_every_occurrence(
+                                        &b.text,
+                                        reflection_payload,
+                                    )))
                     })
                 {
                     inert_echo_count += 1;
