@@ -153,7 +153,11 @@ impl<'a> DomXssVisitor<'a> {
         //     another path (e.g. `if (c) return s;`) could leak the raw input.
         if let Some(Expression::CallExpression(call)) = result
             && let Some(name) = self.get_expr_string(&call.callee)
-            && (self.sanitizers.contains(name.as_str()) || Self::is_likely_sanitizer_name(&name))
+            && self.sanitizes_by_name(
+                &name,
+                self.get_summary_key_for_callee_expr(&call.callee)
+                    .as_deref(),
+            )
         {
             let Some(p) = param_name else {
                 return TtStrictness::Strict;

@@ -93,11 +93,158 @@ fn inverse_of_a_sanitizer_does_not_clear_taint() {
         "encodeHtml",
         "xssSanitize",
     ] {
-        let js = format!(
-            "function {name}(s){{return s}} document.getElementById('a').innerHTML = {name}(location.hash.slice(1));"
-        );
+        // Not defined on the page (a library function): the name is all
+        // there is to go on.
+        let js =
+            format!("document.getElementById('a').innerHTML = {name}(location.hash.slice(1));");
         assert!(found(&js).is_empty(), "{name} is a sanitizer");
     }
+}
+
+/// A function the page defines under a sanitizer's name and that hands its
+/// parameter straight back is a stub: the name is not evidence.
+#[test]
+fn a_sanitizer_name_on_a_body_that_returns_its_parameter_is_not_believed() {
+    let sink = "document.getElementById('a').innerHTML";
+    let src = "location.hash.slice(1)";
+    for name in ["escapeHtml", "sanitizeHtml", "encodeHtml", "xssSanitize"] {
+        for body in [
+            "return s",
+            "return (s)",
+            "return s.trim()",
+            "return String(s).trim()",
+            "return s + ''",
+            "return s || ''",
+            "return s ? s.toString() : ''",
+            "console.log(s); return s",
+            // Words and characters that say nothing about what it does.
+            "return /* encode */ s",
+            "var encoded = 0; return s",
+            "if (s.length < 5) return s; return s",
+        ] {
+            for definition in [
+                format!("function {name}(s){{{body}}}"),
+                format!("var {name} = function(s){{{body}}};"),
+                format!("const {name} = (s) => {{{body}}};"),
+            ] {
+                let js = format!("{definition} {sink} = {name}({src});");
+                assert!(!found(&js).is_empty(), "{js}");
+            }
+        }
+    }
+    // A concise arrow body.
+    let js = format!("const escapeHtml = s => s; {sink} = escapeHtml({src});");
+    assert!(!found(&js).is_empty(), "{js}");
+    // Reached through `window.`.
+    let js = format!("function escapeHtml(s){{return s}} {sink} = window.escapeHtml({src});");
+    assert!(!found(&js).is_empty(), "{js}");
+    // As a tagged template and inside a Trusted Types policy.
+    let js = format!("function escapeHtml(s, v){{return v}} {sink} = escapeHtml`${{{src}}}`;");
+    assert!(!found(&js).is_empty(), "{js}");
+    let js = format!(
+        "function escapeHtml(s){{return s}} \
+         var p = trustedTypes.createPolicy('p', {{ createHTML: s => escapeHtml(s) }}); \
+         {sink} = p.createHTML({src});"
+    );
+    assert!(!found(&js).is_empty(), "{js}");
+    // Declared after the function that calls it.
+    let js = format!(
+        "function show(s){{ {sink} = escapeHtml(s) }} function escapeHtml(s){{return s}} show({src});"
+    );
+    assert!(!found(&js).is_empty(), "{js}");
+}
+
+/// Anything short of "returns its parameter unchanged" keeps the name's
+/// benefit of the doubt. Each of these was a new false report when the test
+/// was "the body shows no sign of escaping".
+#[test]
+fn a_page_defined_sanitizer_is_believed_unless_it_is_plainly_a_stub() {
+    let sink = "document.getElementById('a').innerHTML";
+    let src = "location.hash.slice(1)";
+    for body in [
+        r#"return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')"#,
+        r#"return String(s).replace(/[&<>"']/g, function(c){ return MAP[c]; })"#,
+        r#"var d = document.createElement('div'); d.textContent = s; return d.innerHTML"#,
+        r#"var d = document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML"#,
+        "return DOMPurify.sanitize(s)",
+        "return _.escape(s)",
+        // No textual sign of escaping, and still not a stub.
+        "return 'safe'",
+        "return Number(s)",
+        "return parseInt(s, 10)",
+        "return +s",
+        "return new Option(s).innerHTML",
+        "var d = document.createElement('textarea'); d.value = s; return d.innerHTML",
+        "return clean(s)",
+        "return s.replaceAll(new RegExp(pat, 'g'), c => map[c])",
+        r#"return s.replace(/"/g, String.fromCharCode(38,113,117,111,116,59))"#,
+        // The parameter is rewritten before it is returned.
+        "s = s.replace(/</g, '&lt;'); return s",
+        "s = clean(s); return s",
+        // Not every path returns it.
+        "if (!s) return; return s",
+    ] {
+        let js = format!("function escapeHtml(s){{{body}}} {sink} = escapeHtml({src});");
+        assert!(found(&js).is_empty(), "{js}");
+    }
+}
+
+/// The analyzer does not tell same-named functions in different scopes apart,
+/// so a stub only discredits the name when every definition is one.
+#[test]
+fn a_stub_does_not_discredit_an_escaping_function_of_the_same_name() {
+    let sink = "document.getElementById('a').innerHTML";
+    let escaping = "function escapeHtml(s){return s.replace(/</g,'&lt;')}";
+    let call = format!("{sink} = escapeHtml(location.hash.slice(1));");
+    let js = format!(
+        "{escaping} function unused(){{ function escapeHtml(s){{return s.trim()}} return escapeHtml('ok') }} {call}"
+    );
+    assert!(found(&js).is_empty(), "{js}");
+    let js = format!(
+        "function escapeHtml(s){{return s}} function escapeHtml(s){{return s.trim()}} {call}"
+    );
+    assert!(!found(&js).is_empty(), "{js}");
+}
+
+#[test]
+fn a_method_named_like_a_sanitizer_is_judged_by_its_body_too() {
+    let sink = "document.getElementById('a').innerHTML";
+    let src = "location.hash.slice(1)";
+    for (definition, callee) in [
+        (
+            "var Utils = { escapeHtml: function(s){ return s } };",
+            "Utils.escapeHtml",
+        ),
+        (
+            "var Utils = { escapeHtml(s){ return s } };",
+            "Utils.escapeHtml",
+        ),
+        (
+            "class Utils { static escapeHtml(s){ return s } }",
+            "Utils.escapeHtml",
+        ),
+        // An instance's method is summarised under its class.
+        (
+            "class Utils { escapeHtml(s){ return s } } var u = new Utils();",
+            "u.escapeHtml",
+        ),
+    ] {
+        let js = format!("{definition} {sink} = {callee}({src});");
+        assert!(!found(&js).is_empty(), "{js}");
+    }
+    let js = format!(
+        "var Utils = {{ escapeHtml(s){{ return s.replace(/</g, '&lt;') }} }}; \
+         {sink} = Utils.escapeHtml({src});"
+    );
+    assert!(found(&js).is_empty(), "{js}");
+    // Known limits: a method assigned after the object was created and a
+    // webpack export alias get no summary under the sanitizer's name, so
+    // there is no body to judge and the name is still believed.
+    let js = format!(
+        "var Utils = {{}}; Utils.escapeHtml = function(s){{ return s }}; \
+         {sink} = Utils.escapeHtml({src});"
+    );
+    assert!(found(&js).is_empty(), "{js}");
 }
 
 #[test]

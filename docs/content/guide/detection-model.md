@@ -122,7 +122,7 @@ Reflected findings injected through a request header or cookie grade `low`, incl
 - **A payload the page's CSP would let execute.** Either inline script is permitted, or the sink runs script directly (`eval`, `Function`, `document.write`, `<script>` text) and so does not depend on inline-handler permission. A report-only CSP enforces nothing and never lowers the grade.
 - **No Trusted Types interception.** `require-trusted-types-for 'script'` with a TrustedHTML-class sink grades `low`.
 
-Sanitizers are not a grading signal because they already act as a *filter*: the analyzer treats them as taint clearers, so if a finding exists at all, no recognised sanitizer was on the path.
+Sanitizers are not a grading signal because they already act as a *filter*: the analyzer treats them as taint clearers, so if a finding exists at all, no recognised sanitizer was on the path. A sanitizer is recognised by name (`DOMPurify.sanitize`, `escapeHtml`, …). When the page itself defines a function under such a name and the analyzer can see that it hands its argument straight back, as in `function escapeHtml(s) { return s }`, the name is not taken as a sanitizer.
 
 `confidence_reason` never mixes the two directions. A `high` grade lists the supporting signals; a `low` grade lists only what blocked it, so the signals that did hold are not shown. One reason is informational only: `flow sits inside a conditional branch` records that the flow is guarded. It appears on `high` grades and never changes the grade on its own.
 

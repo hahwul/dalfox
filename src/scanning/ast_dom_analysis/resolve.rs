@@ -185,6 +185,28 @@ impl<'a> DomXssVisitor<'a> {
         }
         false
     }
+    /// Whether a call to `name` is taken as sanitizing on the strength of the
+    /// name: it is on the explicit list or looks like a sanitizer
+    /// ([`is_likely_sanitizer_name`]) — unless the page itself defines the
+    /// function and its body hands the parameter straight back (see
+    /// `returns_param_unchanged`). A name is the only evidence there is for a
+    /// library function; for a stub the page spells out, the body outranks it.
+    ///
+    /// `summary_key` is the key the callee's summary is stored under when it
+    /// differs from the spelled name (`u.escapeHtml` for an instance of
+    /// `Utils` is `Utils.escapeHtml`).
+    ///
+    /// [`is_likely_sanitizer_name`]: DomXssVisitor::is_likely_sanitizer_name
+    pub(super) fn sanitizes_by_name(&self, name: &str, summary_key: Option<&str>) -> bool {
+        if !self.sanitizers.contains(name) && !Self::is_likely_sanitizer_name(name) {
+            return false;
+        }
+        let global = super::sinks::strip_global_object(name);
+        ![Some(name), Some(global), summary_key]
+            .into_iter()
+            .flatten()
+            .any(|key| self.passthrough_sanitizers.get(key) == Some(&true))
+    }
     /// Evaluate an expression to a static string when possible.
     ///
     /// Recurses unguarded by the visitor walk (it's reached from
