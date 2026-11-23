@@ -375,13 +375,43 @@ fn decoded_variants_are_vetted_too() {
 
 // ---- helpers ---------------------------------------------------------------
 
+fn anchor_of(payload: &str) -> String {
+    payload_anchor(&payload_variants(payload)).to_string()
+}
+
 #[test]
 fn payload_anchor_prefers_the_scan_marker() {
-    let p = attr_payload();
-    assert_eq!(payload_anchor(&p), marker());
-    assert_eq!(payload_anchor("alert(1)"), "alert");
-    assert_eq!(payload_anchor("x=1;confirm`1`"), "confirm");
-    assert_eq!(payload_anchor("'\"()"), "");
+    assert_eq!(anchor_of(&attr_payload()), marker());
+    assert_eq!(anchor_of("alert(1)"), "alert");
+    assert_eq!(anchor_of("x=1;confirm`1`"), "confirm");
+    assert_eq!(anchor_of("'\"()"), "");
+    // An encoder variant spells the marker only once decoded.
+    let encoded = urlencoding::encode(&attr_payload()).into_owned();
+    assert_eq!(anchor_of(&encoded), marker());
+    assert_eq!(
+        anchor_of("&#x61;&#x6c;&#x65;&#x72;&#x74;&#x28;1&#x29;"),
+        "alert"
+    );
+}
+
+#[test]
+fn encoder_variants_of_an_attack_payload_are_in_scope() {
+    // Sent entity-encoded, echoed as sent: in text it is the characters
+    // `' onerror=…`, displayed.
+    let p: String = attr_payload()
+        .chars()
+        .map(|c| format!("&#x{:04x};", c as u32))
+        .collect();
+    let html = format!("<div>{p}</div>");
+    assert!(inert(&html, &p));
+    let html = format!("<div>{p}</div><input value='{p}'>");
+    assert!(inert(&html, &p));
+    // An event handler decodes it before running it.
+    let html = format!("<div>{p}</div><a onclick='x={p}'>x</a>");
+    assert!(!inert(&html, &p));
+    // The server decoded it: the live form is in the page.
+    let html = format!("<div>{p}</div><img alt='{}'>", attr_payload());
+    assert!(!inert(&html, &p));
 }
 
 #[test]

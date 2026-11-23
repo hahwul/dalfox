@@ -1576,22 +1576,30 @@ const INERT_RAW_TEXT_ELEMENTS: &[&str] = &["textarea", "title", "xmp", "noscript
 /// Shortest [`payload_anchor`] the per-occurrence gate works with.
 const MIN_PAYLOAD_ANCHOR_LEN: usize = 4;
 
-/// The part of `payload` an output encoder leaves alone: the scan's own
-/// class/id marker when the payload carries one, otherwise its longest run of
-/// ASCII letters and digits. Entity-, percent- and JS-escaping all rewrite
-/// punctuation and keep these bytes, so finding the anchor in an attribute
-/// value means the payload came back there in *some* encoding.
-fn payload_anchor(payload: &str) -> &str {
+/// The part of a payload an output encoder leaves alone: the scan's own
+/// class/id marker when one of the payload's forms carries it, otherwise the
+/// longest run of ASCII letters and digits in any of them. Entity-, percent-
+/// and JS-escaping all rewrite punctuation and keep these bytes, so finding
+/// the anchor in an attribute value means the payload came back there in
+/// *some* encoding.
+///
+/// `variants` are the payload and its decoded forms ([`payload_variants`]): an
+/// encoder variant spells the marker only once decoded.
+fn payload_anchor(variants: &[String]) -> &str {
     for marker in [
         crate::scanning::markers::class_marker(),
         crate::scanning::markers::id_marker(),
     ] {
-        if let Some(at) = payload.find(marker) {
-            return &payload[at..at + marker.len()];
+        if let Some((v, at)) = variants
+            .iter()
+            .find_map(|v| v.find(marker).map(|at| (v, at)))
+        {
+            return &v[at..at + marker.len()];
         }
     }
-    payload
-        .split(|c: char| !c.is_ascii_alphanumeric())
+    variants
+        .iter()
+        .flat_map(|v| v.split(|c: char| !c.is_ascii_alphanumeric()))
         .max_by_key(|run| run.len())
         .unwrap_or("")
 }
@@ -1749,20 +1757,25 @@ pub(crate) fn reflection_inert_at_every_occurrence(html: &str, payload: &str) ->
     if payload.len() < MIN_ESCAPED_ECHO_PAYLOAD_LEN {
         return false;
     }
-    let attack_shaped = payload.contains(crate::scanning::markers::class_marker())
-        || payload.contains(crate::scanning::markers::id_marker())
-        || js::payload_carries_js_sink(payload);
-    if !attack_shaped {
-        return false;
-    }
-    let anchor = payload_anchor(payload);
-    if anchor.len() < MIN_PAYLOAD_ANCHOR_LEN {
-        return false;
-    }
     let variants: Vec<String> = payload_variants(payload)
         .into_iter()
         .filter(|v| !v.is_empty())
         .collect();
+    // Judged on the decoded forms too: the encoder variants of an attack
+    // payload (`&#x0027;&#x0020;onerror…`, `%27%20onerror…`) spell neither the
+    // marker nor a sink name literally.
+    let attack_shaped = variants.iter().any(|v| {
+        v.contains(crate::scanning::markers::class_marker())
+            || v.contains(crate::scanning::markers::id_marker())
+            || js::payload_carries_js_sink(v)
+    });
+    if !attack_shaped {
+        return false;
+    }
+    let anchor = payload_anchor(&variants);
+    if anchor.len() < MIN_PAYLOAD_ANCHOR_LEN {
+        return false;
+    }
     if variants.iter().any(|v| {
         decoded_is_dangerous_scheme(v) || TEMPLATE_DELIMITERS.iter().any(|d| v.contains(d))
     }) {

@@ -6493,14 +6493,13 @@ async fn test_run_scanning_escaped_echo_sends_no_wire_repeats() {
         repeats.is_empty(),
         "wire requests sent more than once: {repeats:?}"
     );
-    // The reflection phase runs until REFLECTION_INERT_ECHO_BUDGET escaped
-    // echoes. Payloads this server has nothing to escape in come back verbatim
-    // as inert text and do not count, so that takes about 480 requests. A DOM
-    // phase that did not count the reused verdicts would send
-    // ~INERT_ECHO_BUDGET more.
+    // Reflection phase: ~REFLECTION_INERT_ECHO_BUDGET requests. Payloads this
+    // server has nothing to escape in come back verbatim as inert text and
+    // count toward the budget like the escaped ones. A DOM phase that did not
+    // count the reused verdicts would send ~INERT_ECHO_BUDGET more.
     let sent: usize = seen.values().sum();
     assert!(
-        sent < 600,
+        sent < 400,
         "DOM phase must stop on the reused echoes; sent {sent}"
     );
     assert!(
