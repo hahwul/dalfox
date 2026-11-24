@@ -385,7 +385,7 @@ Upload `dalfox.sarif` with GitHub's `upload-sarif` action, and findings appear i
 - name: Check report
   id: sarif
   if: ${{ !cancelled() && hashFiles('dalfox.sarif') != '' }}
-  run: echo "complete=$(jq '.runs[0].properties.incomplete | not' dalfox.sarif)" >> "$GITHUB_OUTPUT"
+  run: echo "complete=$(jq '.runs[0].properties | (.incomplete | not) and all(.target_summary[]; .status != "skipped")' dalfox.sarif)" >> "$GITHUB_OUTPUT"
 
 - uses: github/codeql-action/upload-sarif@v4
   if: ${{ !cancelled() && steps.sarif.outputs.complete == 'true' }}
