@@ -597,3 +597,46 @@ fn url_in_scope_reuses_the_compiled_patterns() {
     let again = compiled_url_scope(&args.include_url, &args.exclude_url);
     assert!(std::sync::Arc::ptr_eq(&first, &again));
 }
+
+#[test]
+fn comma_list_flags_trim_spaces_after_commas() {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        scan: ScanArgs,
+    }
+    // A space after the comma is how most people type a list. Untrimmed, the
+    // remote names miss the provider registry (the list is skipped with only
+    // a warning) and the status codes fail to parse.
+    let cli = TestCli::try_parse_from([
+        "dalfox",
+        "https://e.com",
+        "--remote-payloads",
+        "portswigger, payloadbox",
+        "--remote-wordlists",
+        " burp ,assetnote",
+        "--ignore-return",
+        "302, 404 ,500",
+    ])
+    .expect("lists with spaces around commas must parse");
+    assert_eq!(cli.scan.remote_payloads, ["portswigger", "payloadbox"]);
+    assert_eq!(cli.scan.remote_wordlists, ["burp", "assetnote"]);
+    assert_eq!(cli.scan.ignore_return, [302, 404, 500]);
+}
+
+#[test]
+fn ignore_return_still_rejects_non_numeric_items() {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        scan: ScanArgs,
+    }
+    let err = TestCli::try_parse_from(["dalfox", "https://e.com", "--ignore-return", "302, abc"])
+        .err()
+        .expect("a non-numeric status code must be rejected");
+    assert!(err.to_string().contains("--ignore-return"), "got: {err}");
+}
