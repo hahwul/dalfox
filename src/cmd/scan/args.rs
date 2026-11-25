@@ -291,10 +291,6 @@ pub(crate) fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String
     }
 }
 
-/// `--limit 0` used to mean "no findings" — counter-intuitive and
-/// inconsistent with `--max-payloads-per-param 0` (which means "no
-/// cap"). Reject 0 outright so the meaning is unambiguous: either
-/// omit `--limit` for unlimited, or supply a positive cap.
 /// One item of a comma-separated list flag, with the space people type after
 /// a comma removed: `--remote-payloads "portswigger, payloadbox"`. Untrimmed,
 /// ` payloadbox` misses the provider registry and that list is skipped with
@@ -309,6 +305,10 @@ fn parse_status_code_arg(s: &str) -> std::result::Result<u16, String> {
     s.trim().parse::<u16>().map_err(|e| e.to_string())
 }
 
+/// `--limit 0` used to mean "no findings" — counter-intuitive and
+/// inconsistent with `--max-payloads-per-param 0` (which means "no
+/// cap"). Reject 0 outright so the meaning is unambiguous: either
+/// omit `--limit` for unlimited, or supply a positive cap.
 fn parse_limit_arg(s: &str) -> std::result::Result<usize, String> {
     let n: usize = s
         .parse()
