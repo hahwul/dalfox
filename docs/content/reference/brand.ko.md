@@ -13,24 +13,24 @@ Dalfox는 여우와 초승달을 결합한 심볼에 짙은 네이비, 달빛을
 
 <div style="display:flex; flex-wrap:wrap; gap:1rem; margin:1.5rem 0;">
   <figure style="flex:1 1 15rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#f4f1ea; text-align:center;">
-    <a href="/images/logo.svg"><img src="/images/logo.svg" alt="밝은 배경용 Dalfox 워드마크" width="200" style="max-width:100%; height:auto;"></a>
-    <figcaption style="color:#1d2030;">밝은 배경 · <a href="/images/logo.svg" style="color:#30365e;">SVG 다운로드</a></figcaption>
+    <a href="../../../images/logo.svg"><img src="../../../images/logo.svg" alt="밝은 배경용 Dalfox 워드마크" width="200" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#1d2030;">밝은 배경 · <a href="../../../images/logo.svg" style="color:#30365e;">SVG 다운로드</a></figcaption>
   </figure>
   <figure style="flex:1 1 15rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#0b0d16; text-align:center;">
-    <a href="/images/logo-dark.svg"><img src="/images/logo-dark.svg" alt="어두운 배경용 Dalfox 워드마크" width="200" style="max-width:100%; height:auto;"></a>
-    <figcaption style="color:#e9ecf4;">어두운 배경 · <a href="/images/logo-dark.svg" style="color:#b1b8f5;">SVG 다운로드</a></figcaption>
+    <a href="../../../images/logo-dark.svg"><img src="../../../images/logo-dark.svg" alt="어두운 배경용 Dalfox 워드마크" width="200" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#e9ecf4;">어두운 배경 · <a href="../../../images/logo-dark.svg" style="color:#b1b8f5;">SVG 다운로드</a></figcaption>
   </figure>
   <figure style="flex:0 1 11rem; max-width:12rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#f4f1ea; text-align:center;">
-    <a href="/images/logo_solo.webp"><img src="/images/logo_solo.webp" alt="Dalfox 여우와 초승달 단독 심볼" width="112" style="max-width:100%; height:auto;"></a>
-    <figcaption style="color:#1d2030;">단독 심볼 · <a href="/favicon.svg" style="color:#30365e;">SVG</a> · <a href="/images/logo_solo.png" style="color:#30365e;">PNG</a> · <a href="/images/logo_solo.webp" style="color:#30365e;">WebP</a></figcaption>
+    <a href="../../../images/logo_solo.webp"><img src="../../../images/logo_solo.webp" alt="Dalfox 여우와 초승달 단독 심볼" width="112" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#1d2030;">단독 심볼 · <a href="../../../favicon.svg" style="color:#30365e;">SVG</a> · <a href="../../../images/logo_solo.png" style="color:#30365e;">PNG</a> · <a href="../../../images/logo_solo.webp" style="color:#30365e;">WebP</a></figcaption>
   </figure>
 </div>
 
 | 종류 | 용도 | 파일 |
 |------|------|------|
-| 밝은 배경용 워드마크 | 밝은 표면의 기본 로고 | [SVG](/images/logo.svg) · [PNG](/images/logo.png) · [WebP](/images/logo.webp) |
-| 어두운 배경용 워드마크 | 어두운 표면 | [SVG](/images/logo-dark.svg) |
-| 단독 심볼 | 아바타, 파비콘, 정사각형 그래픽 | [SVG](/favicon.svg) · [PNG](/images/logo_solo.png) · [WebP](/images/logo_solo.webp) |
+| 밝은 배경용 워드마크 | 밝은 표면의 기본 로고 | [SVG](../../../images/logo.svg) · [PNG](../../../images/logo.png) · [WebP](../../../images/logo.webp) |
+| 어두운 배경용 워드마크 | 어두운 표면 | [SVG](../../../images/logo-dark.svg) |
+| 단독 심볼 | 아바타, 파비콘, 정사각형 그래픽 | [SVG](../../../favicon.svg) · [PNG](../../../images/logo_solo.png) · [WebP](../../../images/logo_solo.webp) |
 
 단독 심볼 래스터 파일은 512 × 512, 워드마크 래스터 파일은 1920 × 902입니다. 로고를 자르지 말고 비율을 유지하세요. 워드마크를 알아보기 어려울 만큼 작게 써야 한다면 단독 심볼을 사용하세요.
 

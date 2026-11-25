@@ -13,24 +13,24 @@ Use the full wordmark in documents and presentations. Use the standalone mark wh
 
 <div style="display:flex; flex-wrap:wrap; gap:1rem; margin:1.5rem 0;">
   <figure style="flex:1 1 15rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#f4f1ea; text-align:center;">
-    <a href="/images/logo.svg"><img src="/images/logo.svg" alt="Dalfox wordmark for light backgrounds" width="200" style="max-width:100%; height:auto;"></a>
-    <figcaption style="color:#1d2030;">Light background · <a href="/images/logo.svg" style="color:#30365e;">Download SVG</a></figcaption>
+    <a href="../../images/logo.svg"><img src="../../images/logo.svg" alt="Dalfox wordmark for light backgrounds" width="200" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#1d2030;">Light background · <a href="../../images/logo.svg" style="color:#30365e;">Download SVG</a></figcaption>
   </figure>
   <figure style="flex:1 1 15rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#0b0d16; text-align:center;">
-    <a href="/images/logo-dark.svg"><img src="/images/logo-dark.svg" alt="Dalfox wordmark for dark backgrounds" width="200" style="max-width:100%; height:auto;"></a>
-    <figcaption style="color:#e9ecf4;">Dark background · <a href="/images/logo-dark.svg" style="color:#b1b8f5;">Download SVG</a></figcaption>
+    <a href="../../images/logo-dark.svg"><img src="../../images/logo-dark.svg" alt="Dalfox wordmark for dark backgrounds" width="200" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#e9ecf4;">Dark background · <a href="../../images/logo-dark.svg" style="color:#b1b8f5;">Download SVG</a></figcaption>
   </figure>
   <figure style="flex:0 1 11rem; max-width:12rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#f4f1ea; text-align:center;">
-    <a href="/images/logo_solo.webp"><img src="/images/logo_solo.webp" alt="Standalone Dalfox fox-and-crescent mark" width="112" style="max-width:100%; height:auto;"></a>
-    <figcaption style="color:#1d2030;">Standalone mark · <a href="/favicon.svg" style="color:#30365e;">SVG</a> · <a href="/images/logo_solo.png" style="color:#30365e;">PNG</a> · <a href="/images/logo_solo.webp" style="color:#30365e;">WebP</a></figcaption>
+    <a href="../../images/logo_solo.webp"><img src="../../images/logo_solo.webp" alt="Standalone Dalfox fox-and-crescent mark" width="112" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#1d2030;">Standalone mark · <a href="../../favicon.svg" style="color:#30365e;">SVG</a> · <a href="../../images/logo_solo.png" style="color:#30365e;">PNG</a> · <a href="../../images/logo_solo.webp" style="color:#30365e;">WebP</a></figcaption>
   </figure>
 </div>
 
 | Variant | Use | Files |
 |---------|-----|-------|
-| Wordmark, light | Default on light surfaces | [SVG](/images/logo.svg) · [PNG](/images/logo.png) · [WebP](/images/logo.webp) |
-| Wordmark, dark | Use on dark surfaces | [SVG](/images/logo-dark.svg) |
-| Standalone mark | Avatars, favicons, and square artwork | [SVG](/favicon.svg) · [PNG](/images/logo_solo.png) · [WebP](/images/logo_solo.webp) |
+| Wordmark, light | Default on light surfaces | [SVG](../../images/logo.svg) · [PNG](../../images/logo.png) · [WebP](../../images/logo.webp) |
+| Wordmark, dark | Use on dark surfaces | [SVG](../../images/logo-dark.svg) |
+| Standalone mark | Avatars, favicons, and square artwork | [SVG](../../favicon.svg) · [PNG](../../images/logo_solo.png) · [WebP](../../images/logo_solo.webp) |
 
 The standalone raster files are 512 × 512. The full wordmark raster files are 1920 × 902. Keep the artwork uncropped and preserve its proportions. When the wordmark is too small to read, use the standalone mark.
 
