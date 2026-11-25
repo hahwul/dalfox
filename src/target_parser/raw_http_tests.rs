@@ -13,6 +13,54 @@ fn test_is_raw_http_request_false() {
 }
 
 #[test]
+fn is_raw_http_request_accepts_a_lowercase_method() {
+    assert!(is_raw_http_request(
+        "post /search HTTP/1.1\r\nHost: example.com\r\n\r\n"
+    ));
+    assert!(is_raw_http_request(
+        "Get /path HTTP/1.1\r\nHost: example.com\r\n\r\n"
+    ));
+    // A request line that is lowercase throughout, version included.
+    assert!(is_raw_http_request(
+        "post /search http/1.1\r\nHost: example.com\r\n\r\nq=1"
+    ));
+    assert!(is_raw_http_request(
+        "get /path Http/2\r\nHost: example.com\r\n\r\n"
+    ));
+    // A version token is still required.
+    assert!(!is_raw_http_request(
+        "post /search\r\nHost: example.com\r\n\r\n"
+    ));
+    assert!(!is_raw_http_request("post /search httpx/1.1\r\n\r\n"));
+    // The method still has to be a known one, whatever its case.
+    assert!(!is_raw_http_request(
+        "purge /x HTTP/1.1\r\nHost: example.com\r\n\r\n"
+    ));
+}
+
+#[test]
+fn parse_raw_http_uppercases_the_method() {
+    let cases = [
+        (
+            "post /search HTTP/1.1\r\nHost: example.com\r\n\r\nq=1",
+            "POST",
+        ),
+        ("Get /path HTTP/1.1\r\nHost: example.com\r\n\r\n", "GET"),
+        // Any method token is accepted; only its case changes.
+        ("purge /x HTTP/1.1\r\nHost: example.com\r\n\r\n", "PURGE"),
+        // An uppercase request parses as before.
+        (
+            "POST /search HTTP/1.1\r\nHost: example.com\r\n\r\nq=1",
+            "POST",
+        ),
+    ];
+    for (raw, want) in cases {
+        let t = parse_raw_http_request(raw).expect("should parse");
+        assert_eq!(t.method, want, "{raw:?}");
+    }
+}
+
+#[test]
 fn test_parse_raw_http_absolute_form() {
     let raw = "GET http://example.com/level1/frame HTTP/1.1\r\nUser-Agent: Dalfox\r\nCookie: sid=abc; a=b\r\n\r\n";
     let t = parse_raw_http_request(raw).expect("should parse absolute-form request");

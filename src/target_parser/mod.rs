@@ -614,13 +614,18 @@ pub fn is_raw_http_request(s: &str) -> bool {
     // and aborts the run. `is_har_content` already strips it.
     let first = strip_bom(s).lines().next().unwrap_or("").trim_start();
     let mut it = first.split_whitespace();
-    if let Some(method) = it.next()
-        && KNOWN_HTTP_METHODS.contains(&method)
-        && first.contains(" HTTP/")
-    {
-        return true;
-    }
-    false
+    let Some(method) = it.next() else {
+        return false;
+    };
+    // The version token is matched without regard to case, like the method:
+    // a hand-written `post /search http/1.1` is still a request, and the
+    // parser already accepts a lowercase version. Missing it here sends the
+    // file to the URL-list path, which scans `http://search/` instead.
+    KNOWN_HTTP_METHODS.contains(&method.to_ascii_uppercase().as_str())
+        && it.any(|tok| {
+            tok.get(..5)
+                .is_some_and(|p| p.eq_ignore_ascii_case("HTTP/"))
+        })
 }
 
 /// Request headers that must not be forwarded verbatim from an imported request
@@ -732,10 +737,13 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
     // 1) Request line
     let request_line = lines.next().ok_or("empty raw http request")?.trim();
     let mut parts = request_line.split_whitespace();
+    // Method names are case-sensitive on the wire, so a hand-written `post`
+    // would be sent as an extension method. HAR import and the
+    // `METHOD URL [BODY]` line parser uppercase it too.
     let method = parts
         .next()
         .ok_or("invalid request line: missing method")?
-        .to_string();
+        .to_uppercase();
     let uri = parts
         .next()
         .ok_or("invalid request line: missing request-target")?;
