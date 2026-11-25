@@ -291,6 +291,20 @@ pub(crate) fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String
     }
 }
 
+/// One item of a comma-separated list flag, with the space people type after
+/// a comma removed: `--remote-payloads "portswigger, payloadbox"`. Untrimmed,
+/// ` payloadbox` misses the provider registry and that list is skipped with
+/// only a warning.
+fn parse_list_item_arg(s: &str) -> std::result::Result<String, String> {
+    Ok(s.trim().to_string())
+}
+
+/// One status code of `--ignore-return`, trimmed like [`parse_list_item_arg`]
+/// so `--ignore-return "302, 404"` parses.
+fn parse_status_code_arg(s: &str) -> std::result::Result<u16, String> {
+    s.trim().parse::<u16>().map_err(|e| e.to_string())
+}
+
 /// `--limit 0` used to mean "no findings" — counter-intuitive and
 /// inconsistent with `--max-payloads-per-param 0` (which means "no
 /// cap"). Reject 0 outright so the meaning is unambiguous: either
@@ -621,7 +635,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "PARAMETER MINING")]
     /// Remote parameter wordlists to fetch (comma-separated): burp, assetnote
-    #[arg(long = "remote-wordlists", value_delimiter = ',')]
+    #[arg(long = "remote-wordlists", value_delimiter = ',', value_parser = parse_list_item_arg)]
     pub remote_wordlists: Vec<String>,
 
     #[clap(help_heading = "PARAMETER MINING")]
@@ -714,7 +728,7 @@ pub struct ScanArgs {
     #[clap(help_heading = "NETWORK")]
     /// Skip responses with these HTTP status codes (comma-separated, e.g.
     /// 302,403,404)
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, value_delimiter = ',', value_parser = parse_status_code_arg)]
     pub ignore_return: Vec<u16>,
 
     #[clap(help_heading = "ENGINE")]
@@ -739,7 +753,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Remote payload lists to fetch (comma-separated): portswigger, payloadbox
-    #[arg(long = "remote-payloads", value_delimiter = ',')]
+    #[arg(long = "remote-payloads", value_delimiter = ',', value_parser = parse_list_item_arg)]
     pub remote_payloads: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
