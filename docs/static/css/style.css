@@ -258,13 +258,15 @@ body.is-landing .site-header:not(.is-scrolled) {
     margin-right: 1.1rem;
     color: var(--fg);
 }
-.header-logo img {
+.header-logo-mark {
     width: 26px;
     height: 26px;
+    flex: 0 0 26px;
     border-radius: 50%;
 }
-html[data-theme="light"] .header-logo img {
-    filter: none;
+html:not([data-theme="light"]) .header-logo-mark-light,
+html[data-theme="light"] .header-logo-mark-dark {
+    display: none;
 }
 .header-logo-text {
     font-family: var(--font-mono);
