@@ -357,8 +357,15 @@ fn print_all_payloads(json: bool) -> bool {
     true
 }
 
+/// Selector names are lowercase; `--remote-payloads` already accepts
+/// `PortSwigger`, so the positional selector takes any case too.
+fn normalize_selector(selector: &str) -> String {
+    selector.trim().to_ascii_lowercase()
+}
+
 pub async fn run_payload(args: PayloadArgs) -> ScanOutcome {
-    let ok = match args.selector.as_deref() {
+    let selector = args.selector.as_deref().map(normalize_selector);
+    let ok = match selector.as_deref() {
         // Provide a small, helpful summary rather than a no-op — but honor
         // `--json`. Printing the prose block under `--json` made the flag a
         // silent no-op on this one path, so a script that always passes it
