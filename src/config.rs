@@ -654,6 +654,20 @@ impl ScanConfig {
             reject_unless_allowed(field, allowed, name, &mut warnings);
         }
 
+        // `session_check` / `inject_marker` — an empty value matches everything:
+        // an empty regex reports every probe as a live session, and an empty
+        // marker selects every value. The CLI rejects both at startup; a config
+        // file skips that check.
+        for (field, name) in [
+            (&mut self.session_check, "scan.session_check"),
+            (&mut self.inject_marker, "scan.inject_marker"),
+        ] {
+            if field.as_deref().is_some_and(|v| v.trim().is_empty()) {
+                warnings.push(format!("config {name}: empty value; ignoring"));
+                *field = None;
+            }
+        }
+
         // `session_check` — compiled on every probe, potentially an hour into
         // the scan. A config file skips clap entirely, so validate the pattern
         // here rather than letting a typo silently report every probe as a
