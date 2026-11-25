@@ -2568,3 +2568,28 @@ fn validate_cookie_pairs_allows_blank_on_every_surface() {
 }
 
 mod confidence_model;
+
+#[test]
+fn validate_param_specs_rejects_an_empty_parameter_name() {
+    let check = |spec: &str| validate_param_specs(&[spec.to_string()]);
+
+    for spec in ["", "  ", ":query", " :query"] {
+        let err = check(spec).expect_err("an empty name is rejected");
+        assert!(
+            err.contains("empty parameter name"),
+            "{spec:?} should report the empty name: {err}"
+        );
+    }
+
+    // A name is all a spec needs; the type stays optional.
+    for spec in ["q", "q:query", "q:"] {
+        assert!(check(spec).is_ok(), "{spec:?} should be accepted");
+    }
+
+    // The unknown-type error is unchanged.
+    let err = check("id:qurey").expect_err("an unknown type is rejected");
+    assert!(err.contains("invalid param type in 'id:qurey'"), "{err}");
+
+    // One bad spec fails the list, wherever it sits.
+    assert!(validate_param_specs(&["q".to_string(), String::new()]).is_err());
+}
