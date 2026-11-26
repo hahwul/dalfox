@@ -427,6 +427,7 @@ fn current_libraries_across_dataset_are_safe() {
         <script src="/underscore-1.13.8.min.js"></script>
         <script src="/knockout-3.5.3.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/mustache@4.2.0/mustache.min.js"></script>
+        <script type="module" src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.2.67/build/pdf.min.mjs"></script>
     "#;
     assert!(
         libs(body).is_empty(),
@@ -657,6 +658,8 @@ fn cdn_patterns_ignore_packages_that_contain_a_library_name() {
         "https://unpkg.com/knockout-mapping@2.6.0/dist/knockout.mapping.min.js",
         "https://cdn.jsdelivr.net/gh/jonnyreeves/jquery-Mustache@0.2.8/jquery.mustache.js",
         "/vendor/jquery-mustache-0.2.8.js",
+        "https://unpkg.com/react-pdf@7.7.0/dist/umd/react-pdf.js",
+        "https://cdn.jsdelivr.net/npm/ng2-pdfjs-viewer@3.2.1/bundles/ng2-pdfjs-viewer.umd.js",
     ] {
         let body = format!(r#"<script src="{url}"></script>"#);
         assert!(libs(&body).is_empty(), "{url} flagged: {:?}", libs(&body));
@@ -817,6 +820,80 @@ fn combine_url_reads_every_library() {
             .any(|v| v.library == "jQuery" && v.version == "3.4.1"),
         "got {found:?}"
     );
+}
+
+#[test]
+fn detects_pdfjs_from_src_and_inline() {
+    for url in [
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.1.392/pdf.min.mjs",
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.1.392/build/pdf.min.mjs",
+        "https://unpkg.com/pdfjs-dist@4.1.392/build/pdf.mjs",
+        "/static/pdfjs-4.1.392-dist/build/pdf.mjs",
+        "/static/pdfjs-4.1.392-legacy-dist/build/pdf.mjs",
+    ] {
+        let found = libs(&format!(r#"<script type="module" src="{url}"></script>"#));
+        let m = found
+            .iter()
+            .find(|v| v.library == "PDF.js" && v.version == "4.1.392")
+            .unwrap_or_else(|| {
+                panic!("PDF.js 4.1.392 should be flagged from {url}, got {found:?}")
+            });
+        assert_eq!(m.severity, "High");
+        assert_eq!(m.advisories, ["CVE-2024-4367"]);
+        assert_eq!(m.fixed_in, "4.2.67");
+    }
+    // The `var` (<= 2.0) and `const` banners, then the `apiVersion` a build
+    // keeps once minified: 2.0 unminified, 2.16 / 4.x unminified, minified.
+    for (inline, version) in [
+        ("var pdfjsVersion = '2.0.943';", "2.0.943"),
+        ("const pdfjsVersion = '2.16.105';", "2.16.105"),
+        (r#"const pdfjsVersion = "4.1.392";"#, "4.1.392"),
+        (
+            "{\n    docId: docId,\n    apiVersion: '2.0.943',",
+            "2.0.943",
+        ),
+        ("{\n    docId,\n    apiVersion: \"4.1.392\",", "4.1.392"),
+        (
+            r#"sendWithPromise("GetDocRequest",{docId:n,apiVersion:"2.16.105",source:{}})"#,
+            "2.16.105",
+        ),
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == "PDF.js" && v.version == version),
+            "inline PDF.js {version} should be detected from {inline:?}, got {found:?}"
+        );
+    }
+}
+
+#[test]
+fn pdfjs_fixed_release_is_safe() {
+    let body = r#"<script src="https://unpkg.com/pdfjs-dist@4.1.392/build/pdf.mjs"></script>
+        <script src="https://unpkg.com/pdfjs-dist@4.2.67/build/pdf.mjs"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs"></script>
+        <script>const pdfjsVersion = "4.2.67";</script>"#;
+    let versions: Vec<_> = libs(body)
+        .into_iter()
+        .filter(|v| v.library == "PDF.js")
+        .map(|v| v.version)
+        .collect();
+    assert_eq!(versions, ["4.1.392"]);
+}
+
+/// Only `pdfjsVersion`, or an `apiVersion` sent next to `docId`, is PDF.js's.
+#[test]
+fn unrelated_inline_version_is_not_pdfjs() {
+    for unrelated in [
+        r#"var version = "1.0.0";"#,
+        r#"const viewer = { name: "pdf-viewer", version: "1.0.0" };"#,
+        r#"client.init({ apiVersion: "1.0.0" });"#,
+        r#"const mypdfjsVersion = "1.0.0";"#,
+    ] {
+        let found = libs(&format!("<script>{unrelated}</script>"));
+        assert!(found.is_empty(), "{unrelated:?} flagged: {found:?}");
+    }
 }
 
 #[test]

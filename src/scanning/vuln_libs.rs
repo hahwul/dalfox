@@ -352,6 +352,29 @@ static LIB_SPECS: &[LibSpec] = &[
             severity: SEV_HIGH,
         }],
     },
+    LibSpec {
+        name: "PDF.js",
+        // cdnjs (`/ajax/libs/pdf.js/<ver>/`), the npm package on jsDelivr /
+        // unpkg, and the unpacked release archive (`pdfjs-<ver>-dist/`).
+        url_patterns: &[
+            r"(?i)/pdf\.js/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/pdfjs-dist@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
+            r"(?i)/pdfjs-(\d+\.\d+(?:\.\d+)?)(?:-legacy)?-dist/",
+        ],
+        // Unminified builds declare `pdfjsVersion` (`var` up to 2.0, `const`
+        // after). Minified builds rename it, but keep the `apiVersion` they
+        // send next to `docId` when opening a document.
+        inline_patterns: &[
+            r#"\bpdfjsVersion\s*=\s*["'](\d+\.\d+(?:\.\d+)?)["']"#,
+            r#"\bdocId\s*(?::\s*[\w$]+\s*)?,\s*apiVersion\s*:\s*["'](\d+\.\d+(?:\.\d+)?)["']"#,
+        ],
+        ranges: &[VulnRange {
+            introduced: None,
+            fixed: "4.2.67",
+            advisories: &["CVE-2024-4367"],
+            severity: SEV_HIGH,
+        }],
+    },
 ];
 
 /// Compiled form of a [`LibSpec`] (regexes built once).
