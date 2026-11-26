@@ -3549,3 +3549,26 @@ fn store_probe_attempts_stop_growing_past_the_old_url_count() {
     assert_eq!(store_probe_attempts(&args, 4), 6);
     assert_eq!(store_probe_attempts(&args, 20), 6);
 }
+
+#[test]
+fn decode_form_urlencoded_like_decodes_plus_and_percent_escapes() {
+    assert_eq!(
+        decode_form_urlencoded_like("a+b%2B").as_deref(),
+        Some("a b+")
+    );
+    assert_eq!(
+        decode_form_urlencoded_like("%3Cscript%3E").as_deref(),
+        Some("<script>")
+    );
+}
+
+#[test]
+fn decode_form_urlencoded_like_returns_none_when_nothing_changes() {
+    // Fast path: no `+` and no `%`.
+    assert_eq!(decode_form_urlencoded_like("abc"), None);
+    // An invalid escape passes through unchanged.
+    assert_eq!(decode_form_urlencoded_like("100%"), None);
+    assert_eq!(decode_form_urlencoded_like("%zz"), None);
+    // Decodes to a byte sequence that is not UTF-8.
+    assert_eq!(decode_form_urlencoded_like("%FF"), None);
+}
