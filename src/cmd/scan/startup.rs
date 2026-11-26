@@ -85,14 +85,22 @@ fn validate_param_inputs(args: &ScanArgs) -> Result<(), String> {
 /// matches everything: an empty regex reports every probe as a live session,
 /// and an empty marker selects every value. `--session-check "$UNSET_VAR"` is
 /// the usual way to get here.
+///
+/// Only the exact empty string is refused for `--session-check`. A
+/// whitespace-only pattern is a real regex, and REST / MCP compile it as one
+/// (`job::normalize_session_check`), so the CLI does the same. A marker is
+/// trimmed first: a blank one cannot name anything.
 fn validate_non_empty_inputs(args: &ScanArgs) -> Result<(), String> {
-    for (value, flag) in [
-        (&args.session_check, "--session-check"),
-        (&args.inject_marker, "--inject-marker"),
-    ] {
-        if value.as_deref().is_some_and(|v| v.trim().is_empty()) {
-            return Err(format!("{flag} is empty (omit the flag to leave it unset)"));
-        }
+    let empty = "is empty (omit the flag to leave it unset)";
+    if args.session_check.as_deref() == Some("") {
+        return Err(format!("--session-check {empty}"));
+    }
+    if args
+        .inject_marker
+        .as_deref()
+        .is_some_and(|v| v.trim().is_empty())
+    {
+        return Err(format!("--inject-marker {empty}"));
     }
     Ok(())
 }
@@ -493,9 +501,12 @@ mod tests {
             })
         };
 
+        let err = session_check("").unwrap_err();
+        assert!(err.contains("--session-check is empty"), "{err}");
+        // Whitespace-only is a real pattern, as it is over REST / MCP.
+        assert!(session_check("  ").is_ok());
+
         for empty in ["", "  "] {
-            let err = session_check(empty).unwrap_err();
-            assert!(err.contains("--session-check is empty"), "{err}");
             let err = inject_marker(empty).unwrap_err();
             assert!(err.contains("--inject-marker is empty"), "{err}");
         }

@@ -658,14 +658,21 @@ impl ScanConfig {
         // an empty regex reports every probe as a live session, and an empty
         // marker selects every value. The CLI rejects both at startup; a config
         // file skips that check.
-        for (field, name) in [
-            (&mut self.session_check, "scan.session_check"),
-            (&mut self.inject_marker, "scan.inject_marker"),
-        ] {
-            if field.as_deref().is_some_and(|v| v.trim().is_empty()) {
-                warnings.push(format!("config {name}: empty value; ignoring"));
-                *field = None;
-            }
+        //
+        // Only the exact empty string is dropped for `session_check`: a
+        // whitespace-only pattern is a real regex, on the CLI and over REST /
+        // MCP alike. A marker is trimmed first.
+        if self.session_check.as_deref() == Some("") {
+            warnings.push("config scan.session_check: empty value; ignoring".to_string());
+            self.session_check = None;
+        }
+        if self
+            .inject_marker
+            .as_deref()
+            .is_some_and(|v| v.trim().is_empty())
+        {
+            warnings.push("config scan.inject_marker: empty value; ignoring".to_string());
+            self.inject_marker = None;
         }
 
         // `session_check` — compiled on every probe, potentially an hour into

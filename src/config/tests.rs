@@ -540,25 +540,42 @@ fn test_normalize_and_validate_drops_empty_session_check_and_inject_marker() {
     // An empty value matches everything, so it must not reach the scan: an
     // empty `session_check` regex reads every probe as alive, and an empty
     // `inject_marker` selects every value.
-    for empty in ["", "  "] {
-        let mut cfg = Config {
-            scan: Some(ScanConfig {
-                session_check: Some(empty.to_string()),
-                inject_marker: Some(empty.to_string()),
-                ..Default::default()
-            }),
-        };
-        let warnings = cfg.normalize_and_validate();
-        for name in ["scan.session_check", "scan.inject_marker"] {
-            assert!(
-                warnings.iter().any(|w| w.contains(name)),
-                "{empty:?}: expected a warning for {name}, got: {warnings:?}"
-            );
-        }
-        let scan = cfg.scan.as_ref().unwrap();
-        assert!(scan.session_check.is_none());
-        assert!(scan.inject_marker.is_none());
+    let mut cfg = Config {
+        scan: Some(ScanConfig {
+            session_check: Some(String::new()),
+            inject_marker: Some(String::new()),
+            ..Default::default()
+        }),
+    };
+    let warnings = cfg.normalize_and_validate();
+    for name in ["scan.session_check", "scan.inject_marker"] {
+        assert!(
+            warnings.iter().any(|w| w.contains(name)),
+            "expected a warning for {name}, got: {warnings:?}"
+        );
     }
+    let scan = cfg.scan.as_ref().unwrap();
+    assert!(scan.session_check.is_none());
+    assert!(scan.inject_marker.is_none());
+
+    // A whitespace-only `session_check` is a real pattern and is kept, the
+    // same as over REST / MCP; a whitespace-only marker is still dropped.
+    let mut cfg = Config {
+        scan: Some(ScanConfig {
+            session_check: Some("  ".to_string()),
+            inject_marker: Some("  ".to_string()),
+            ..Default::default()
+        }),
+    };
+    let warnings = cfg.normalize_and_validate();
+    assert!(
+        !warnings.iter().any(|w| w.contains("scan.session_check")),
+        "got: {warnings:?}"
+    );
+    assert!(warnings.iter().any(|w| w.contains("scan.inject_marker")));
+    let scan = cfg.scan.as_ref().unwrap();
+    assert_eq!(scan.session_check.as_deref(), Some("  "));
+    assert!(scan.inject_marker.is_none());
 
     // Real values are left alone.
     let mut cfg = Config {
