@@ -51,6 +51,6 @@ XDG_CONFIG_HOME=./.config dalfox scan https://target.app
 
 다음 설정에는 환경 변수가 없습니다.
 
-- **프록시.** `--proxy`나 설정 파일의 `proxy`를 쓰세요. 스캔 트래픽과 interactsh OOB 클라이언트는 의도치 않은 트래픽 가로채기를 막으려고 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`를 읽지 않습니다. 예외는 원격 목록 다운로드(`--remote-payloads`, `--remote-wordlists`, `dalfox payload portswigger|payloadbox`)로, `--proxy`가 없으면 이 요청들은 표준 프록시 환경 변수를 따릅니다.
+- **프록시.** `--proxy`나 설정 파일의 `proxy`를 쓰세요. 스캔 트래픽과 interactsh OOB 클라이언트는 의도치 않은 트래픽 가로채기를 막으려고 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`를 읽지 않습니다. 원격 목록 다운로드(`--remote-payloads`, `--remote-wordlists`, `dalfox payload portswigger|payloadbox`)도 이 변수들을 읽지 않으며, `--proxy`를 주면 그 프록시를 거칩니다.
 - **타임아웃, 워커, 형식.** CLI 플래그나 설정 파일로만 지정합니다.
 - **디버그.** 명령줄에 `--debug`를 주거나 설정 파일에 `debug = true`를 넣으세요.

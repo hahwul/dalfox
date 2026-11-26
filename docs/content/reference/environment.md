@@ -51,6 +51,6 @@ XDG_CONFIG_HOME=./.config dalfox scan https://target.app
 
 These settings have no environment variable:
 
-- **Proxy.** Use `--proxy` or `proxy` in config. Scan traffic and the interactsh OOB client ignore `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` to avoid accidental traffic interception. The one exception is downloading remote lists (`--remote-payloads`, `--remote-wordlists`, `dalfox payload portswigger|payloadbox`): without `--proxy`, those requests follow the standard proxy variables.
+- **Proxy.** Use `--proxy` or `proxy` in config. Scan traffic and the interactsh OOB client ignore `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` to avoid accidental traffic interception. Remote list downloads (`--remote-payloads`, `--remote-wordlists`, `dalfox payload portswigger|payloadbox`) ignore those variables too; `--proxy` routes them.
 - **Timeout, workers, format.** CLI flag or config only.
 - **Debug.** Pass `--debug` on the command line or set `debug = true` in config.
