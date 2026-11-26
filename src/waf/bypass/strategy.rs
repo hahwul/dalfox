@@ -218,6 +218,7 @@ pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
         WafType::SafeLine => unknown_strategy_for("SafeLine"),
         WafType::DdosGuard => unknown_strategy_for("DDoS-Guard"),
         WafType::Reblaze => unknown_strategy_for("Reblaze"),
+        WafType::AlibabaCloud => unknown_strategy_for("AlibabaCloud"),
         WafType::Unknown(hint) => unknown_strategy_for(hint),
     }
 }

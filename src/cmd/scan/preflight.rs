@@ -464,6 +464,7 @@ pub(super) fn parse_waf_type(s: &str) -> crate::waf::WafType {
         "safeline" | "safe-line" | "chaitin" => crate::waf::WafType::SafeLine,
         "ddos-guard" | "ddosguard" => crate::waf::WafType::DdosGuard,
         "reblaze" => crate::waf::WafType::Reblaze,
+        "alibaba" | "aliyun" => crate::waf::WafType::AlibabaCloud,
         other => crate::waf::WafType::Unknown(other.to_string()),
     }
 }
@@ -495,6 +496,8 @@ mod waf_type_tests {
         assert_eq!(parse_waf_type("DDoS-Guard"), WafType::DdosGuard);
         assert_eq!(parse_waf_type("ddosguard"), WafType::DdosGuard);
         assert_eq!(parse_waf_type("Reblaze"), WafType::Reblaze);
+        assert_eq!(parse_waf_type("Alibaba"), WafType::AlibabaCloud);
+        assert_eq!(parse_waf_type("aliyun"), WafType::AlibabaCloud);
     }
 
     #[test]
