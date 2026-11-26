@@ -147,7 +147,7 @@ pub(crate) struct ScanWithDalfoxParams {
     pub target: String,
 
     /// Specific parameters to test. Supports location hints via "name:location" syntax.
-    /// Locations: query, body, header, cookie, path, json.
+    /// Locations: query, body, json, multipart, graphql, xml, path, fragment, header, cookie.
     /// Examples: ["q", "id:query", "user:body", "auth:header"]
     #[serde(default)]
     pub param: Vec<String>,
