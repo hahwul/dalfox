@@ -1,8 +1,8 @@
 use super::{
     KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_print_remote,
-    functions_payloads, levenshtein_distance, print_summary, render_lines, run_payload,
-    special_chars_payloads, static_selector_counts, static_selector_groups, summary_block,
-    summary_json, tips_block, uri_scheme_payloads,
+    functions_payloads, levenshtein_distance, normalize_selector, print_summary, render_lines,
+    run_payload, special_chars_payloads, static_selector_counts, static_selector_groups,
+    summary_block, summary_json, tips_block, uri_scheme_payloads,
 };
 use crate::cmd::scan::ScanOutcome;
 
@@ -87,6 +87,37 @@ async fn test_run_payload_known_selectors_return_clean() {
 async fn test_run_payload_unknown_selector_returns_error() {
     let outcome = run_payload(PayloadArgs {
         selector: Some("not-a-selector".to_string()),
+        json: false,
+    })
+    .await;
+    assert_eq!(outcome, ScanOutcome::Error);
+}
+
+#[test]
+fn test_normalize_selector_ignores_case_and_surrounding_whitespace() {
+    assert_eq!(normalize_selector("PortSwigger"), "portswigger");
+    assert_eq!(normalize_selector("JavaScript"), "javascript");
+    assert_eq!(normalize_selector(" all "), "all");
+    assert_eq!(normalize_selector("event-handlers"), "event-handlers");
+}
+
+#[tokio::test]
+async fn test_run_payload_selectors_match_case_insensitively() {
+    for selector in ["JavaScript", "EVENT-HANDLERS", " all ", " Useful-Tags "] {
+        let outcome = run_payload(PayloadArgs {
+            selector: Some(selector.to_string()),
+            json: false,
+        })
+        .await;
+        assert_eq!(
+            outcome,
+            ScanOutcome::Clean,
+            "selector {selector:?} should return Clean"
+        );
+    }
+    // Normalizing the case does not make an unknown selector known.
+    let outcome = run_payload(PayloadArgs {
+        selector: Some("Not-A-Selector".to_string()),
         json: false,
     })
     .await;
