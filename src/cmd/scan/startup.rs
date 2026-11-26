@@ -81,6 +81,30 @@ fn validate_param_inputs(args: &ScanArgs) -> Result<(), String> {
     crate::job::validate_param_specs(&args.param)
 }
 
+/// Refuse an empty `--session-check` or `--inject-marker`. The empty string
+/// matches everything: an empty regex reports every probe as a live session,
+/// and an empty marker selects every value. `--session-check "$UNSET_VAR"` is
+/// the usual way to get here.
+///
+/// Only the exact empty string is refused for `--session-check`. A
+/// whitespace-only pattern is a real regex, and REST / MCP compile it as one
+/// (`job::normalize_session_check`), so the CLI does the same. A marker is
+/// trimmed first: a blank one cannot name anything.
+fn validate_non_empty_inputs(args: &ScanArgs) -> Result<(), String> {
+    let empty = "is empty (omit the flag to leave it unset)";
+    if args.session_check.as_deref() == Some("") {
+        return Err(format!("--session-check {empty}"));
+    }
+    if args
+        .inject_marker
+        .as_deref()
+        .is_some_and(|v| v.trim().is_empty())
+    {
+        return Err(format!("--inject-marker {empty}"));
+    }
+    Ok(())
+}
+
 /// Refuse an `-o/--output` path that names a directory or whose parent is
 /// missing or is not a directory. The file is written after the scan, and with `-o` the
 /// results are not printed to stdout either, so this would otherwise lose them.
@@ -209,6 +233,10 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // Validate the session-check inputs up front. Both are consulted only when
     // a probe fires — potentially an hour into the scan — so a bad regex or a
     // malformed probe URL must fail here, not there.
+    if let Err(msg) = validate_non_empty_inputs(args) {
+        emit_error(&args.format, crate::cmd::error_codes::PARSE_ERROR, &msg);
+        return Err(ScanOutcome::Error);
+    }
     if let Err(e) = session::compile_session_check(args) {
         emit_error(
             &args.format,
@@ -456,6 +484,52 @@ mod tests {
                 "type '{valid}' should be valid"
             );
         }
+    }
+
+    #[test]
+    fn test_validate_non_empty_inputs() {
+        let session_check = |value: &str| {
+            validate_non_empty_inputs(&ScanArgs {
+                session_check: Some(value.to_string()),
+                ..Default::default()
+            })
+        };
+        let inject_marker = |value: &str| {
+            validate_non_empty_inputs(&ScanArgs {
+                inject_marker: Some(value.to_string()),
+                ..Default::default()
+            })
+        };
+
+        let err = session_check("").unwrap_err();
+        assert!(err.contains("--session-check is empty"), "{err}");
+        // Whitespace-only is a real pattern, as it is over REST / MCP.
+        assert!(session_check("  ").is_ok());
+
+        for empty in ["", "  "] {
+            let err = inject_marker(empty).unwrap_err();
+            assert!(err.contains("--inject-marker is empty"), "{err}");
+        }
+
+        assert!(session_check("Sign out").is_ok());
+        assert!(inject_marker("FUZZ").is_ok());
+        // Leaving both flags off is the default and stays valid.
+        assert!(validate_non_empty_inputs(&ScanArgs::default()).is_ok());
+    }
+
+    #[test]
+    fn test_prepare_and_validate_rejects_empty_session_check_and_inject_marker() {
+        let args = ScanArgs {
+            session_check: Some(String::new()),
+            ..Default::default()
+        };
+        assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
+
+        let args = ScanArgs {
+            inject_marker: Some("  ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
     }
 
     #[test]

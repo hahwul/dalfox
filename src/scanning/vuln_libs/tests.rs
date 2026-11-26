@@ -895,3 +895,15 @@ fn unrelated_inline_version_is_not_pdfjs() {
         assert!(found.is_empty(), "{unrelated:?} flagged: {found:?}");
     }
 }
+
+#[test]
+fn parse_version_keeps_the_numeric_prefix_of_each_component() {
+    assert_eq!(parse_version("1.7.2-rc1"), [1, 7, 2]);
+    assert_eq!(parse_version("10.20"), [10, 20]);
+    // A component with no leading digit reads as 0.
+    assert_eq!(parse_version("v1.2"), [0, 2]);
+    assert_eq!(parse_version(""), [0]);
+    assert_eq!(parse_version("1..3"), [1, 0, 3]);
+    // u64::MAX + 1 does not fit, so it also reads as 0.
+    assert_eq!(parse_version("18446744073709551616"), [0]);
+}

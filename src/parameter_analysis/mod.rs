@@ -506,13 +506,14 @@ pub(crate) const SPECIAL_PROBE_CHARS: &[char] = &[
     '+', ',', '$', '-',
 ];
 
-/// Skeleton classification helper.
-/// Given a response body that already contains the reflection marker (dynamic nonce),
-/// return (valid, invalid) special chars based on naive presence detection.
-/// TODO:
-/// 1. Actively send mutated payloads per character (e.g. dalfox'<c>dalfox")
-/// 2. Parse the reflected segment boundaries to avoid false positives
-/// 3. Detect normalization (HTML entity encoding, URL encoding) and still treat as "valid"
+/// Split `SPECIAL_PROBE_CHARS` into (valid, invalid) by presence alone: a
+/// character is valid when it appears anywhere in `body`, whether or not it
+/// came from the reflection. Sends no request and does not look at segment
+/// boundaries or encoded forms.
+///
+/// The probe-based classification is `active_probe_param`, which reflects the
+/// characters between markers, reads only that segment, and accepts the
+/// `encoded_variants` of each one.
 pub(crate) fn classify_special_chars(body: &str) -> (Vec<char>, Vec<char>) {
     let mut valid = Vec::new();
     let mut invalid = Vec::new();

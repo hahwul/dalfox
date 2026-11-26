@@ -214,3 +214,28 @@ pub(crate) fn authorize_request(state: &AppState, headers: &HeaderMap) -> Result
         Err(Denied::Unauthorized)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::host_name_of;
+
+    #[test]
+    fn host_name_of_drops_the_port() {
+        assert_eq!(host_name_of("localhost:6664"), "localhost");
+        assert_eq!(host_name_of("example.com"), "example.com");
+    }
+
+    #[test]
+    fn host_name_of_unbrackets_an_ipv6_literal() {
+        assert_eq!(host_name_of("[::1]:6664"), "::1");
+        assert_eq!(host_name_of("[::1]"), "::1");
+    }
+
+    #[test]
+    fn host_name_of_reads_a_bare_ipv6_literal_as_empty() {
+        // A bare IPv6 `Host` is not valid HTTP (the literal needs brackets),
+        // so everything from the first `:` is taken for a port. Pinned here so
+        // that a change to this is deliberate.
+        assert_eq!(host_name_of("::1"), "");
+    }
+}
