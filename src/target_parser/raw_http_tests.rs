@@ -457,3 +457,65 @@ fn raw_http_origin_form_takes_the_scheme_from_http2_hints() {
         );
     }
 }
+
+#[test]
+fn content_disposition_attr_reads_each_attribute() {
+    let line = r#"Content-Disposition: form-data; name="file"; filename="a.png""#;
+    assert_eq!(
+        content_disposition_attr(line, "name").as_deref(),
+        Some("file")
+    );
+    assert_eq!(
+        content_disposition_attr(line, "filename").as_deref(),
+        Some("a.png")
+    );
+    // The key is matched whole: `filename="x"` contains `name="` but is not `name`.
+    let line = r#"Content-Disposition: form-data; filename="x"; name="f""#;
+    assert_eq!(content_disposition_attr(line, "name").as_deref(), Some("f"));
+}
+
+#[test]
+fn content_disposition_attr_reads_a_quoted_string() {
+    // `\"` is an escape, and a `;` inside the quotes does not end the value.
+    let line = r#"Content-Disposition: form-data; name="a\"b""#;
+    assert_eq!(
+        content_disposition_attr(line, "name").as_deref(),
+        Some("a\"b")
+    );
+    let line = r#"Content-Disposition: form-data; name="a;b""#;
+    assert_eq!(
+        content_disposition_attr(line, "name").as_deref(),
+        Some("a;b")
+    );
+}
+
+#[test]
+fn content_disposition_attr_reads_an_unquoted_value() {
+    // No spaces after the separators, and the value is trimmed.
+    let line = "Content-Disposition:form-data;name=foo ;x=1";
+    assert_eq!(
+        content_disposition_attr(line, "name").as_deref(),
+        Some("foo")
+    );
+}
+
+#[test]
+fn content_disposition_attr_ignores_case() {
+    let line = r#"CONTENT-DISPOSITION: form-data; NAME="x""#;
+    assert_eq!(content_disposition_attr(line, "name").as_deref(), Some("x"));
+}
+
+#[test]
+fn content_disposition_attr_returns_none_without_a_match() {
+    // `filename*` (RFC 5987) is a different attribute from `filename`.
+    let line = "Content-Disposition: form-data; filename*=UTF-8''x.png";
+    assert_eq!(content_disposition_attr(line, "filename"), None);
+    // Not a Content-Disposition line at all.
+    assert_eq!(
+        content_disposition_attr("Content-Type: text/plain", "name"),
+        None
+    );
+    // A key with no `=`.
+    let line = "Content-Disposition: form-data; name";
+    assert_eq!(content_disposition_attr(line, "name"), None);
+}
