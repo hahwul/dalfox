@@ -421,6 +421,34 @@ mod input_shape_tests {
     }
 
     #[test]
+    fn normalize_host_canonicalizes_each_spelling() {
+        // Case and one trailing dot.
+        assert_eq!(normalize_host("Example.COM."), "example.com");
+        // IPv6: brackets dropped, long form compressed.
+        assert_eq!(normalize_host("[::1]"), "::1");
+        assert_eq!(normalize_host("0:0:0:0:0:0:0:1"), "::1");
+        // IPv4 shorthand and hex octets.
+        assert_eq!(normalize_host("127.1"), "127.0.0.1");
+        assert_eq!(normalize_host("0x7f.0.0.1"), "127.0.0.1");
+        // IDNA.
+        assert_eq!(normalize_host("bücher.de"), "xn--bcher-kva.de");
+        // A glob is not a host, so it is only lowercased.
+        assert_eq!(normalize_host("*.Example.COM"), "*.example.com");
+    }
+
+    #[test]
+    fn glob_match_anchors_both_ends() {
+        assert!(glob_match("example.com", "example.com"));
+        // No `*`: the pattern must be the whole text, not a prefix of it.
+        assert!(!glob_match("example.com.evil", "example.com"));
+        assert!(glob_match("127.0.0.5", "127.0.0.*"));
+        assert!(glob_match("aXbYc", "a*b*c"));
+        assert!(!glob_match("abc", "*d"));
+        // The prefix and the suffix must not share a character.
+        assert!(!glob_match("a", "a*a"));
+    }
+
+    #[test]
     fn url_input_recognizes_schemes_and_hosts() {
         assert!(looks_like_url_input("https://example.com/x"));
         assert!(looks_like_url_input("example.com"));
