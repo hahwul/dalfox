@@ -375,6 +375,25 @@ static LIB_SPECS: &[LibSpec] = &[
             severity: SEV_HIGH,
         }],
     },
+    LibSpec {
+        name: "Video.js",
+        // Video.js's own CDN (`vjs.zencdn.net/<ver>/`), cdnjs and the npm
+        // package. Plugins are published as `videojs-*` or under `@videojs/`
+        // and are not matched.
+        url_patterns: &[
+            r"(?i)//vjs\.zencdn\.net/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?i)/video\.js/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/video\.js@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
+        ],
+        // The `@license` banner, kept by minified builds too.
+        inline_patterns: &[r"Video\.js (\d+\.\d+(?:\.\d+)?) <https?://videojs\.com/?>"],
+        ranges: &[VulnRange {
+            introduced: None,
+            fixed: "7.14.3",
+            advisories: &["CVE-2021-23414"],
+            severity: SEV_MEDIUM,
+        }],
+    },
 ];
 
 /// Compiled form of a [`LibSpec`] (regexes built once).
