@@ -822,8 +822,10 @@ fn test_alibaba_cloud_detection_by_acw_tc_cookie() {
     let headers = make_headers(&[("set-cookie", "acw_tc=abc123;path=/;HttpOnly;Max-Age=1800")]);
     let result = fingerprint_from_response(&headers, None, 200);
     assert!(result.waf_types().contains(&&WafType::AlibabaCloud));
-    // The CDN sets this cookie too, so on its own it stays a weak signal.
-    assert!(result.primary().unwrap().confidence < 0.8);
+    // The CDN sets this cookie too, so on its own it stays below the default
+    // `--waf-min-confidence` and is filtered out unless the floor is lowered.
+    let floor = crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE;
+    assert!(result.detected.iter().all(|fp| fp.confidence < floor));
 }
 
 #[test]

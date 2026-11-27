@@ -396,12 +396,14 @@ waf_type = "AlibabaCloud"
 confidence = 0.8
 evidence_label = "aliyungf_tc cookie (Alibaba Cloud)"
 
-# Alibaba Cloud CDN sets `acw_tc` too, with no WAF behind it.
+# Alibaba Cloud CDN sets `acw_tc` too, with no WAF behind it, so keep the
+# confidence below the default `--waf-min-confidence` (0.3): a CDN-only site
+# is then not reported as a WAF unless the user lowers the floor.
 [[header]]
 header = "set-cookie"
 value_contains = "acw_tc="
 waf_type = "AlibabaCloud"
-confidence = 0.5
+confidence = 0.25
 evidence_label = "acw_tc cookie (Alibaba Cloud WAF or CDN)"
 
 
