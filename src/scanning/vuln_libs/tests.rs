@@ -356,6 +356,90 @@ fn jquery_validation_is_not_read_as_jquery() {
 }
 
 #[test]
+fn detects_datatables_from_src_and_inline() {
+    for url in [
+        "https://cdn.datatables.net/1.10.21/js/jquery.dataTables.min.js",
+        "//cdn.datatables.net/1.10.21/js/jquery.dataTables.js",
+        "https://cdn.datatables.net/v/dt/dt-1.10.21/datatables.min.js",
+        "https://cdn.datatables.net/v/bs4/jq-3.3.1/dt-1.10.21/b-1.6.2/datatables.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.21/js/jquery.dataTables.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/datatables.net/1.10.21/jquery.dataTables.min.js",
+        "https://cdn.jsdelivr.net/npm/datatables.net@1.10.21/js/jquery.dataTables.min.js",
+        "https://unpkg.com/datatables.net@1.10.21",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        let m = found
+            .iter()
+            .find(|v| v.library == "DataTables" && v.version == "1.10.21")
+            .unwrap_or_else(|| {
+                panic!("DataTables 1.10.21 should be flagged from {url}, got {found:?}")
+            });
+        assert_eq!(m.severity, "High");
+        assert_eq!(m.advisories, ["CVE-2020-28458", "CVE-2021-23445"]);
+        assert_eq!(m.fixed_in, "1.11.3");
+    }
+    // The unminified banner, then the minified one, where the name sits on
+    // its own line inside a longer licence comment.
+    for inline in [
+        "/*! DataTables 1.10.21\n * ©2008-2020 SpryMedia Ltd - datatables.net/license\n */",
+        "/*!\n   Copyright 2008-2020 SpryMedia Ltd.\n\n This source file is free software.\n\n DataTables 1.10.21\n ©2008-2020 SpryMedia Ltd - datatables.net/license\n*/\nvar $jscomp=$jscomp||{};",
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == "DataTables" && v.version == "1.10.21"),
+            "inline DataTables should be detected from {inline:?}, got {found:?}"
+        );
+    }
+}
+
+#[test]
+fn datatables_fix_boundaries() {
+    // 1.10.22 clears the prototype pollution but not the XSS; 1.11.3 clears both.
+    let found = libs(
+        r#"<script src="https://cdn.datatables.net/1.10.22/js/jquery.dataTables.min.js"></script>"#,
+    );
+    assert_eq!(found.len(), 1, "got {found:?}");
+    assert_eq!(found[0].advisories, ["CVE-2021-23445"]);
+    assert_eq!(found[0].severity, "Medium");
+    assert_eq!(found[0].fixed_in, "1.11.3");
+
+    let body = r#"<script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script>
+        <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+        <script src="https://cdn.datatables.net/v/dt/dt-2.0.8/datatables.min.js"></script>
+        <script>/*! DataTables 2.0.8
+ * © SpryMedia Ltd - datatables.net/license
+ */</script>"#;
+    assert!(libs(body).is_empty(), "got {:?}", libs(body));
+}
+
+/// Extensions and styling packages carry their own version numbers.
+#[test]
+fn datatables_extensions_are_not_datatables() {
+    for url in [
+        "https://cdn.datatables.net/buttons/1.6.2/js/dataTables.buttons.min.js",
+        "https://cdn.datatables.net/responsive/2.2.5/js/dataTables.responsive.min.js",
+        "https://cdn.datatables.net/v/dt/b-1.6.2/r-2.2.5/datatables.min.js",
+        "https://cdn.jsdelivr.net/npm/datatables.net-bs4@1.10.21/js/dataTables.bootstrap4.min.js",
+        "https://cdn.jsdelivr.net/npm/datatables.net-buttons@1.6.2/js/dataTables.buttons.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/datatables-buttons/1.6.2/js/dataTables.buttons.min.js",
+        "https://cdn.jsdelivr.net/npm/angular-datatables@0.6.4/dist/angular-datatables.min.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        assert!(found.is_empty(), "{url} flagged: {found:?}");
+    }
+    for inline in [
+        "/*! Buttons for DataTables 1.6.2\n * ©2016-2020 SpryMedia Ltd - datatables.net/license\n */",
+        "/*!\n Buttons for DataTables 1.6.2\n ©2016-2020 SpryMedia Ltd - datatables.net/license\n*/",
+        "// tested with DataTables 1.10.21",
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(found.is_empty(), "{inline:?} flagged: {found:?}");
+    }
+}
+
+#[test]
 fn detects_handlebars_from_src_and_inline() {
     let from_src = libs(r#"<script src="/vendor/handlebars-4.0.5.min.js"></script>"#);
     assert!(
@@ -419,6 +503,7 @@ fn current_libraries_across_dataset_are_safe() {
     let body = r#"
         <script src="/jquery-ui-1.13.2.min.js"></script>
         <script src="/jquery.validate-1.22.1.min.js"></script>
+        <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
         <script src="/handlebars-4.7.8.min.js"></script>
         <script src="/moment-2.29.4.min.js"></script>
         <script src="/lodash-4.17.21.min.js"></script>

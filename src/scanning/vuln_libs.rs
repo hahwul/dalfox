@@ -154,6 +154,39 @@ static LIB_SPECS: &[LibSpec] = &[
         ],
     },
     LibSpec {
+        name: "DataTables",
+        // The DataTables CDN serves the core at `/<ver>/` and its extensions
+        // at `/<extension>/<ver>/`, and its download builder writes
+        // `/v/dt/dt-<ver>/`. The styling packages (`datatables.net-bs4`) and
+        // extensions have their own version lines and are not matched.
+        url_patterns: &[
+            r"(?i)//cdn\.datatables\.net/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?i)//cdn\.datatables\.net/v/[\w-]+/(?:[\w.-]+/)*dt-(\d+\.\d+(?:\.\d+)?)/",
+            r"(?i)/datatables(?:\.net)?/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/datatables\.net@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
+        ],
+        // The banner line holds nothing but the name and version, with the
+        // SpryMedia line under it; an extension's banner ("Buttons for
+        // DataTables 1.6.2") has text before the name.
+        inline_patterns: &[
+            r"(?m)^(?:/\*!)?[ \t]*DataTables (\d+\.\d+(?:\.\d+)?)[ \t]*\r?\n[ \t*]*©[\d-]* ?SpryMedia Ltd - datatables\.net/license",
+        ],
+        ranges: &[
+            VulnRange {
+                introduced: None,
+                fixed: "1.10.22",
+                advisories: &["CVE-2020-28458"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "1.11.3",
+                advisories: &["CVE-2021-23445"],
+                severity: SEV_MEDIUM,
+            },
+        ],
+    },
+    LibSpec {
         name: "AngularJS",
         url_patterns: &[
             r"(?i)angular[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
