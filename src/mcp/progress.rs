@@ -39,12 +39,15 @@
 //! called directly — every unit test, and every tool that does not report —
 //! takes a `try_with` miss and nothing else.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use rmcp::model::{ProgressNotificationParam, ProgressToken};
 use rmcp::{Peer, RoleServer};
 
 use super::call_scope;
+
+const PROGRESS_SEND_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Enforces the spec's "the progress value MUST increase with each
 /// notification" rule for one token.
@@ -101,6 +104,7 @@ pub(super) struct ProgressSink {
     peer: Peer<RoleServer>,
     token: ProgressToken,
     gate: MonotonicGate,
+    disabled: AtomicBool,
 }
 
 impl ProgressSink {
@@ -109,6 +113,7 @@ impl ProgressSink {
             peer,
             token,
             gate: MonotonicGate::default(),
+            disabled: AtomicBool::new(false),
         }
     }
 }
@@ -119,17 +124,23 @@ impl ProgressSink {
 /// that has closed, must not turn into a failed scan — the tool's own result is
 /// the contract, and progress is an optional courtesy on top of it.
 pub(super) async fn report(progress: u64, message: impl Into<String>) {
-    let Some(sink) = call_scope::progress_sink() else {
+    let Some(sink) = call_scope::progress_sink().filter(|s| !s.disabled.load(Ordering::Relaxed))
+    else {
         return;
     };
     let value = sink.gate.next_value(progress);
     let mut param = ProgressNotificationParam::new(sink.token.clone(), value);
     param.message = Some(message.into());
-    if let Err(e) = sink.peer.notify_progress(param).await {
-        // A client that has gone away, or a transport already closing, is not
-        // a failed scan. The tool's own result is the contract.
-        crate::dbg_log!("mcp: progress notification dropped: {e}");
-    }
+    let error =
+        match tokio::time::timeout(PROGRESS_SEND_TIMEOUT, sink.peer.notify_progress(param)).await {
+            Ok(Ok(())) => return,
+            Ok(Err(error)) => error.to_string(),
+            Err(_) => "transport write timed out".to_string(),
+        };
+    // rmcp can still have the timed-out write queued. Avoid adding more
+    // notifications for this call while the client is behind.
+    sink.disabled.store(true, Ordering::Relaxed);
+    crate::dbg_log!("mcp: progress notification dropped: {error}");
 }
 
 /// True when the current tool call asked for progress. Lets a caller skip
