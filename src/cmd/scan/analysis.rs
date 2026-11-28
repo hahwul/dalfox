@@ -80,28 +80,30 @@ pub(crate) async fn apply_per_host_cap(
     skipped_targets: &Mutex<HashMap<String, &'static str>>,
 ) {
     for group in host_groups.values_mut() {
-        if group.len() > args.max_targets_per_host {
-            let dropped: Vec<String> = group
-                .iter()
-                .skip(args.max_targets_per_host)
-                .map(Target::state_key)
-                .collect();
-            if !dropped.is_empty() {
-                if !args.silence {
-                    crate::ceprintln!(
-                        "{} max-targets-per-host cap ({}) reached; {} target(s) skipped",
-                        log_prefix("33", "WARN"),
-                        args.max_targets_per_host,
-                        dropped.len()
-                    );
-                }
-                let mut guard = skipped_targets.lock().await;
-                for key in dropped {
-                    guard.insert(key, crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP);
-                }
-            }
-            group.truncate(args.max_targets_per_host);
+        if group.len() <= args.max_targets_per_host {
+            continue;
         }
+        let (retained, dropped) = group.split_at(args.max_targets_per_host);
+        if !args.silence {
+            crate::ceprintln!(
+                "{} max-targets-per-host cap ({}) reached; {} target(s) skipped",
+                log_prefix("33", "WARN"),
+                args.max_targets_per_host,
+                dropped.len()
+            );
+        }
+        // The cap counts input occurrences, but the report has one row per
+        // key. A dropped duplicate must not label its retained twin skipped.
+        let retained: std::collections::HashSet<_> =
+            retained.iter().map(Target::state_key).collect();
+        let mut guard = skipped_targets.lock().await;
+        for target in dropped {
+            let key = target.state_key();
+            if !retained.contains(&key) {
+                guard.insert(key, crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP);
+            }
+        }
+        group.truncate(args.max_targets_per_host);
     }
 }
 

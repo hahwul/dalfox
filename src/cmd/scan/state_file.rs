@@ -393,22 +393,20 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
         })
     };
 
-    let raw = match std::fs::metadata(path) {
+    let raw = match crate::utils::fs::read_bounded(
+        std::path::Path::new(path),
+        MAX_STATE_FILE_BYTES,
+        "state file",
+    ) {
+        Ok(raw) => raw,
         // No file yet is the ordinary first run, not a reset.
-        Err(_) => return fresh(None),
-        Ok(_) => match crate::utils::fs::read_bounded(
-            std::path::Path::new(path),
-            MAX_STATE_FILE_BYTES,
-            "state file",
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(format!(
-                    "--state-file '{}' exists but could not be read ({}); move it aside or point --state-file elsewhere",
-                    path, e
-                ));
-            }
-        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return fresh(None),
+        Err(e) => {
+            return Err(format!(
+                "--state-file '{}' could not be read ({}); move it aside or point --state-file elsewhere",
+                path, e
+            ));
+        }
     };
 
     if raw.trim().is_empty() {

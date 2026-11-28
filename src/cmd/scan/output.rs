@@ -151,15 +151,17 @@ pub(crate) async fn render_dry_run(
         .map(|n| n as usize)
         .sum();
     let skipped = skipped_targets.lock().await;
-    let total_input_targets =
-        dry_run_targets.len() + skipped.len() + state.dedup.collapsed + state.resumed_skipped;
+    let total_input_targets = state.total_targets + state.dedup.collapsed + state.resumed_skipped;
+    // The plan counts input occurrences, while the detailed skip list has
+    // at most one row per target key.
+    let total_skipped = state.total_targets.saturating_sub(dry_run_targets.len());
 
     let report = if args.format == "json" || args.format == "jsonl" {
         let mut meta = serde_json::json!({
             "dalfox_version": env!("CARGO_PKG_VERSION"),
             "targets_input": total_input_targets,
             "targets_scannable": dry_run_targets.len(),
-            "targets_skipped": skipped.len(),
+            "targets_skipped": total_skipped,
             "total_params_discovered": total_params,
             "total_estimated_requests": total_estimated,
             "dedup_mode": state.dedup.mode,
@@ -198,7 +200,7 @@ pub(crate) async fn render_dry_run(
         let _ = writeln!(out, "Dry-run summary:");
         let _ = writeln!(out, "  Targets (input):     {}", total_input_targets);
         let _ = writeln!(out, "  Targets (scannable): {}", dry_run_targets.len());
-        let _ = writeln!(out, "  Targets (skipped):   {}", skipped.len());
+        let _ = writeln!(out, "  Targets (skipped):   {}", total_skipped);
         for e in skipped_entries(all_targets, &skipped) {
             let _ = writeln!(
                 out,
@@ -302,46 +304,36 @@ pub(crate) async fn render_only_discovery(
     });
     use std::fmt::Write as _;
     let report = match args.format.as_str() {
-        "json" => {
+        "json" | "jsonl" => {
             let mut meta = serde_json::json!({
                 "dalfox_version": env!("CARGO_PKG_VERSION"),
                 "mode": "only_discovery",
                 "params_discovered": entries.len(),
+                "dedup_mode": state.dedup.mode,
+                "targets_deduplicated": state.dedup.collapsed,
             });
-            if let Some(r) = &resumed {
-                meta["resumed"] = r.clone();
+            if state.unparsable_lines > 0 {
+                meta["targets_unparsable"] = serde_json::json!(state.unparsable_lines);
+            }
+            if let Some(resumed) = resumed {
+                meta["resumed"] = resumed;
             }
             if !skipped.is_empty() {
                 meta["targets_skipped"] = serde_json::json!(skipped.len());
                 meta["skipped"] = serde_json::json!(skipped_entries(all_targets, &skipped));
             }
-            let envelope = serde_json::json!({
-                "meta": meta,
-                "params": entries,
-            });
-            serde_json::to_string_pretty(&envelope).unwrap_or_default()
-        }
-        "jsonl" => {
-            // Meta line first (consistent with `-f jsonl` for scans),
-            // then one param per line.
-            let mut inner = serde_json::json!({
-                "dalfox_version": env!("CARGO_PKG_VERSION"),
-                "mode": "only_discovery",
-                "params_discovered": entries.len(),
-            });
-            if let Some(r) = &resumed {
-                inner["resumed"] = r.clone();
+            if args.format == "json" {
+                let envelope = serde_json::json!({ "meta": meta, "params": entries });
+                serde_json::to_string_pretty(&envelope).unwrap_or_default()
+            } else {
+                // Metadata first, then one parameter per line.
+                let mut out =
+                    serde_json::to_string(&serde_json::json!({ "meta": meta })).unwrap_or_default();
+                for e in &entries {
+                    let _ = write!(out, "\n{}", serde_json::to_string(e).unwrap_or_default());
+                }
+                out
             }
-            if !skipped.is_empty() {
-                inner["targets_skipped"] = serde_json::json!(skipped.len());
-                inner["skipped"] = serde_json::json!(skipped_entries(all_targets, &skipped));
-            }
-            let meta = serde_json::json!({ "meta": inner });
-            let mut out = serde_json::to_string(&meta).unwrap_or_default();
-            for e in &entries {
-                let _ = write!(out, "\n{}", serde_json::to_string(e).unwrap_or_default());
-            }
-            out
         }
         _ => {
             let mut out = String::new();

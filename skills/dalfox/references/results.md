@@ -313,10 +313,12 @@ See `src/cmd/mod.rs` for the canonical list. Common ones:
 
 In JSON output the per-target summary contains `error_code` when the target was skipped, its session was lost, the parameter cap truncated coverage, or `--scan-timeout` cut it short (`SCAN_TIMEOUT`, which can sit on a `findings` target: its findings are real, coverage is partial).
 
-`meta.targets_unparsable` (present only when non-zero) counts target-list lines
-that could not be parsed, plus OpenAPI / Postman operations that could not be
-built, and were skipped. Like `meta.targets_deduplicated`, it
-exists so a report is never read as full coverage of the input list.
+JSON and JSONL reports for scans, `--dry-run`, and `--only-discovery` include
+`meta.dedup_mode` and `meta.targets_deduplicated`. When some input could not be
+parsed, `meta.targets_unparsable` counts the skipped target-list lines or
+OpenAPI / Postman operations. The dry-run target counts include repeated
+entries with `--dedup-urls off`. Its `meta.skipped` list has at most one row per
+target key.
 
 ## Incomplete Runs
 
