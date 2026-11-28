@@ -514,6 +514,7 @@ fn current_libraries_across_dataset_are_safe() {
         <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/mustache@4.2.0/mustache.min.js"></script>
         <script type="module" src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.2.67/build/pdf.min.mjs"></script>
+        <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     "#;
     assert!(
         libs(body).is_empty(),
@@ -1059,6 +1060,86 @@ fn unrelated_inline_version_is_not_pdfjs() {
     ] {
         let found = libs(&format!("<script>{unrelated}</script>"));
         assert!(found.is_empty(), "{unrelated:?} flagged: {found:?}");
+    }
+}
+
+#[test]
+fn detects_videojs_from_src_and_inline() {
+    for url in [
+        "https://vjs.zencdn.net/7.10.2/video.min.js",
+        "//vjs.zencdn.net/7.10.2/video.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/video.js/7.10.2/video.min.js",
+        "https://cdn.jsdelivr.net/npm/video.js@7.10.2/dist/video.min.js",
+        "https://unpkg.com/video.js@7.10.2",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        let m = found
+            .iter()
+            .find(|v| v.library == "Video.js" && v.version == "7.10.2")
+            .unwrap_or_else(|| {
+                panic!("Video.js 7.10.2 should be flagged from {url}, got {found:?}")
+            });
+        assert_eq!(m.severity, "Medium");
+        assert_eq!(m.advisories, ["CVE-2021-23414"]);
+        assert_eq!(m.fixed_in, "7.14.3");
+    }
+    // The same banner opens the minified and unminified builds, 5.x included.
+    for (inline, version) in [
+        (
+            "/**\n * @license\n * Video.js 7.10.2 <http://videojs.com/>\n * Copyright Brightcove, Inc.\n */\n!function(e,t){}",
+            "7.10.2",
+        ),
+        (
+            "/**\n * @license\n * Video.js 5.20.5 <http://videojs.com/>\n */\n!function(a){}",
+            "5.20.5",
+        ),
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == "Video.js" && v.version == version),
+            "inline Video.js {version} should be detected from {inline:?}, got {found:?}"
+        );
+    }
+}
+
+#[test]
+fn videojs_fixed_release_is_safe() {
+    let body = r#"<script src="https://vjs.zencdn.net/7.14.2/video.min.js"></script>
+        <script src="https://vjs.zencdn.net/7.14.3/video.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.10.0/video.min.js"></script>
+        <script>/**
+ * @license
+ * Video.js 7.21.5 <http://videojs.com/>
+ */</script>"#;
+    let versions: Vec<_> = libs(body)
+        .into_iter()
+        .filter(|v| v.library == "Video.js")
+        .map(|v| v.version)
+        .collect();
+    assert_eq!(versions, ["7.14.2"]);
+}
+
+/// Plugins have their own version lines, and a mention of the name is not
+/// the banner.
+#[test]
+fn videojs_plugins_are_not_videojs() {
+    for url in [
+        "https://cdn.jsdelivr.net/npm/videojs-contrib-hls@5.15.0/dist/videojs-contrib-hls.min.js",
+        "https://cdn.jsdelivr.net/npm/@videojs/http-streaming@2.9.1/dist/videojs-http-streaming.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/videojs-youtube/2.6.1/Youtube.min.js",
+        "https://cdn.jsdelivr.net/npm/react-video.js@1.0.0/index.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        assert!(found.is_empty(), "{url} flagged: {found:?}");
+    }
+    for inline in [
+        "// requires Video.js 7.0.0 or later",
+        r#"var player = { tech: "Video.js 5.0.0" };"#,
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(found.is_empty(), "{inline:?} flagged: {found:?}");
     }
 }
 
