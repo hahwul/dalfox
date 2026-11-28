@@ -367,6 +367,29 @@ static LIB_SPECS: &[LibSpec] = &[
         }],
     },
     LibSpec {
+        name: "Select2",
+        // `select2.full.js` is the same release with the compatibility
+        // modules bundled in.
+        url_patterns: &[
+            r"(?im)(?:^|/)select2[-.](\d+\.\d+(?:\.\d+)?)(?:\.full)?(?:\.min)?\.js",
+            r"(?i)/select2/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/select2@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
+        ],
+        // 4.x opens with `/*! Select2 <ver> |` (minified) or `/*!\n * Select2
+        // <ver>` (unminified); 3.x has `Version: <ver> Timestamp:` under its
+        // copyright line.
+        inline_patterns: &[
+            r"/\*!\s*(?:\*\s*)?Select2 (\d+\.\d+(?:\.\d+)?)",
+            r"Copyright \d{4} Igor Vaynberg\s+Version: (\d+\.\d+(?:\.\d+)?) Timestamp:",
+        ],
+        ranges: &[VulnRange {
+            introduced: None,
+            fixed: "4.0.6",
+            advisories: &["CVE-2016-10744"],
+            severity: SEV_MEDIUM,
+        }],
+    },
+    LibSpec {
         name: "Mustache.js",
         url_patterns: &[
             r"(?im)(?:^|/)mustache[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",

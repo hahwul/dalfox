@@ -511,6 +511,7 @@ fn current_libraries_across_dataset_are_safe() {
         <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js"></script>
         <script src="/underscore-1.13.8.min.js"></script>
         <script src="/knockout-3.5.3.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/mustache@4.2.0/mustache.min.js"></script>
         <script type="module" src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.2.67/build/pdf.min.mjs"></script>
     "#;
@@ -616,6 +617,86 @@ fn detects_knockout_from_src_and_inline() {
             .any(|v| v.library == "Knockout" && v.version == "3.4.2"),
         "inline Knockout banner should be detected, got {from_inline:?}"
     );
+}
+
+#[test]
+fn detects_select2_from_src_and_inline() {
+    for url in [
+        "https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.5/js/select2.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.5/js/select2.full.js",
+        "https://cdn.jsdelivr.net/npm/select2@4.0.5/dist/js/select2.min.js",
+        "https://unpkg.com/select2@4.0.5",
+        "/static/js/select2-4.0.5.min.js",
+        "/static/js/select2.4.0.5.full.min.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        let m = found
+            .iter()
+            .find(|v| v.library == "Select2" && v.version == "4.0.5")
+            .unwrap_or_else(|| panic!("Select2 4.0.5 should be flagged from {url}, got {found:?}"));
+        assert_eq!(m.severity, "Medium");
+        assert_eq!(m.advisories, ["CVE-2016-10744"]);
+        assert_eq!(m.fixed_in, "4.0.6");
+    }
+    // The minified and unminified 4.x banners, then the 3.x one.
+    for (inline, version) in [
+        (
+            "/*! Select2 4.0.5 | https://github.com/select2/select2/blob/master/LICENSE.md */!function(a){}",
+            "4.0.5",
+        ),
+        (
+            "/*!\n * Select2 4.0.5\n * https://select2.github.io\n *\n * Released under the MIT license\n */",
+            "4.0.5",
+        ),
+        (
+            "/*\nCopyright 2012 Igor Vaynberg\n\nVersion: 3.5.4 Timestamp: Sun Aug 30 13:30:32 EDT 2015\n*/",
+            "3.5.4",
+        ),
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == "Select2" && v.version == version),
+            "inline Select2 {version} should be detected from {inline:?}, got {found:?}"
+        );
+    }
+}
+
+#[test]
+fn select2_fixed_release_is_safe() {
+    let body = r#"<script src="/ajax/libs/select2/4.0.5/js/select2.min.js"></script>
+        <script src="/ajax/libs/select2/4.0.6/js/select2.min.js"></script>
+        <script src="/ajax/libs/select2/4.0.6-rc.1/js/select2.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+        <script>/*! Select2 4.0.13 | https://github.com/select2/select2/blob/master/LICENSE.md */</script>"#;
+    let versions: Vec<_> = libs(body)
+        .into_iter()
+        .filter(|v| v.library == "Select2")
+        .map(|v| v.version)
+        .collect();
+    assert_eq!(versions, ["4.0.5"]);
+}
+
+/// Themes, wrappers and a bare mention of the name are not Select2 itself.
+#[test]
+fn select2_lookalikes_are_not_select2() {
+    for url in [
+        "https://cdnjs.cloudflare.com/ajax/libs/select2-bootstrap-theme/0.1.0-beta.10/select2-bootstrap.min.js",
+        "https://cdn.jsdelivr.net/npm/ng-select2@1.2.3/bundles/ng-select2.umd.js",
+        "https://cdn.jsdelivr.net/npm/select2-sortable@1.0.0/select2-sortable.js",
+        "/vendor/angular-select2-1.0.0.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        assert!(found.is_empty(), "{url} flagged: {found:?}");
+    }
+    for inline in [
+        r#"var config = { plugin: "Select2 3.0.0" };"#,
+        "// requires Select2 4.0.0 or later",
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(found.is_empty(), "{inline:?} flagged: {found:?}");
+    }
 }
 
 /// Lo-Dash 2.x banners credit Underscore ("Based on Underscore.js 1.5.2");
