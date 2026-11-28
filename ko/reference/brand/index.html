@@ -1,0 +1,353 @@
+
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  
+  
+  
+  
+  <meta name="description" content="Dalfox 로고 파일, 색상 팔레트, 서체와 사용 지침입니다.">
+  <meta name="author" content="hahwul">
+  
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b0d16">
+  <title>브랜드 키트 · Dalfox</title>
+  <meta property="og:title" content="브랜드 키트">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/reference/brand/">
+  <meta property="og:description" content="Dalfox 로고 파일, 색상 팔레트, 서체와 사용 지침입니다.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-reference-brand.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="브랜드 키트">
+  <meta name="twitter:description" content="Dalfox 로고 파일, 색상 팔레트, 서체와 사용 지침입니다.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-reference-brand.png">
+  <meta property="og:image:alt" content="브랜드 키트">
+  <meta property="og:site_name" content="Dalfox">
+  <meta property="og:locale" content="ko_KR">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/reference/brand/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/reference/brand/">
+<link rel="alternate" hreflang="x-default" href="https://dalfox.hahwul.com/reference/brand/">
+  
+  <meta property="og:locale:alternate" content="en_US">
+  <link rel="alternate" hreflang="x-default" href="https://dalfox.hahwul.com/reference/brand/">
+  
+  
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/reference/brand/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox (한국어)" href="https://dalfox.hahwul.com/ko/rss.xml">
+  
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"브랜드 키트","url":"https://dalfox.hahwul.com/ko/reference/brand/","description":"Dalfox 로고 파일, 색상 팔레트, 서체와 사용 지침입니다.","image":"https://dalfox.hahwul.com/og-images/ko-reference-brand.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"레퍼런스","item":"https://dalfox.hahwul.com/ko/reference/"},{"@type":"ListItem","position":3,"name":"브랜드 키트"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/boot.js"></script>
+  <link rel="icon" type="image/png" href="https://dalfox.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://dalfox.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://dalfox.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://dalfox.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="https://dalfox.hahwul.com/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="reference">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" type="button" aria-label="메뉴" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img class="header-logo-mark header-logo-mark-dark" src="https://dalfox.hahwul.com/images/logo_solo-dark.svg" alt="" aria-hidden="true">
+          <img class="header-logo-mark header-logo-mark-light" src="https://dalfox.hahwul.com/images/logo_solo.svg" alt="" aria-hidden="true">
+          <span class="header-logo-text">dalfox</span>
+        </a>
+        <nav class="site-nav" aria-label="주 메뉴">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색" aria-label="검색">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/reference/brand/" hreflang="en">en</a><span class="lang-switch-item is-active" aria-current="true">ko</span>
+        </div>
+        
+        <button class="header-iconbtn theme-toggle" type="button" aria-label="밝은 테마로 전환" data-label-dark="어두운 테마로 전환" data-label-light="밝은 테마로 전환">
+          <svg class="icon-moon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <svg class="icon-sun" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        </button>
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav" aria-label="문서">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/migration/">v2에서 마이그레이션</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/detection-model/">탐지 모델</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/brand/">브랜드 키트</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.3.0" target="_blank" rel="noopener" title="Dalfox v3.3.0 릴리스 노트">v3.3.0</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <header class="article-head" data-n="05">
+            <p class="article-eyebrow"><a href="https://dalfox.hahwul.com/ko/">dalfox</a> <span class="sep">/</span> <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a></p>
+            <h1>브랜드 키트</h1>
+          </header>
+          <p>Dalfox는 여우와 초승달을 결합한 심볼에 짙은 네이비, 달빛을 닮은 인디고, 따뜻한 여우빛 색상을 사용합니다. 이 페이지에는 프로젝트 사이트에서 사용하는 그래픽과 디자인 토큰을 정리했습니다.</p>
+<h2 id="심볼과-로고">심볼과 로고</h2>
+<p>문서와 발표 자료에는 워드마크를 사용하세요. 정사각형 공간이거나 크기가 작을 때는 단독 심볼을 사용하세요.</p>
+<div style="display:flex; flex-wrap:wrap; gap:1rem; margin:1.5rem 0;">
+  <figure style="flex:1 1 13rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#f4f1ea; text-align:center;">
+    <a href="../../../images/logo.svg"><img src="../../../images/logo.svg" alt="밝은 배경용 Dalfox 워드마크" width="200" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#1d2030;">밝은 배경 · <a href="../../../images/logo.svg" style="color:#30365e;">SVG 다운로드</a></figcaption>
+  </figure>
+  <figure style="flex:1 1 13rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#0b0d16; text-align:center;">
+    <a href="../../../images/logo-dark.svg"><img src="../../../images/logo-dark.svg" alt="어두운 배경용 Dalfox 워드마크" width="200" style="max-width:100%; height:auto;"></a>
+    <figcaption style="color:#e9ecf4;">어두운 배경 · <a href="../../../images/logo-dark.svg" style="color:#b1b8f5;">SVG 다운로드</a></figcaption>
+  </figure>
+  <figure style="flex:0 1 13rem; max-width:13rem; margin:0; padding:1.25rem; border-radius:0.75rem; background:#f4f1ea; text-align:center;">
+    <div style="display:flex; justify-content:center; gap:0.75rem; margin-bottom:0.75rem;">
+      <a href="../../../images/logo_solo.svg" style="display:block; width:4.5rem; padding:0.25rem; border-radius:0.5rem; background:#f4f1ea;"><img src="../../../images/logo_solo.svg" alt="밝은 배경용 Dalfox 단독 심볼" width="72" style="max-width:100%; height:auto;"></a>
+      <a href="../../../images/logo_solo-dark.svg" style="display:block; width:4.5rem; padding:0.25rem; border-radius:0.5rem; background:#0b0d16;"><img src="../../../images/logo_solo-dark.svg" alt="어두운 배경용 Dalfox 단독 심볼" width="72" style="max-width:100%; height:auto;"></a>
+    </div>
+    <figcaption style="color:#1d2030;">단독 심볼 · <a href="../../../images/logo_solo.svg" style="color:#30365e;">밝은 SVG</a> · <a href="../../../images/logo_solo-dark.svg" style="color:#30365e;">어두운 SVG</a> · <a href="../../../images/logo_solo.png" style="color:#30365e;">PNG</a> · <a href="../../../images/logo_solo.webp" style="color:#30365e;">WebP</a></figcaption>
+  </figure>
+</div>
+<table>
+<thead>
+<tr>
+<th>종류</th>
+<th>용도</th>
+<th>파일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>밝은 배경용 워드마크</td>
+<td>밝은 표면의 기본 로고</td>
+<td><a href="../../../images/logo.svg">SVG</a> · <a href="../../../images/logo.png">PNG</a> · <a href="../../../images/logo.webp">WebP</a></td>
+</tr>
+<tr>
+<td>어두운 배경용 워드마크</td>
+<td>어두운 표면</td>
+<td><a href="../../../images/logo-dark.svg">SVG</a></td>
+</tr>
+<tr>
+<td>단독 심볼</td>
+<td>아바타, 파비콘, 정사각형 그래픽에서 배경 대비에 맞는 버전 사용</td>
+<td><a href="../../../images/logo_solo.svg">밝은 SVG</a> · <a href="../../../images/logo_solo-dark.svg">어두운 SVG</a> · <a href="../../../images/logo_solo.png">PNG</a> · <a href="../../../images/logo_solo.webp">WebP</a></td>
+</tr>
+</tbody>
+</table>
+<p>단독 심볼 래스터 파일은 512 × 512, 워드마크 래스터 파일은 1920 × 902입니다. 로고를 자르지 말고 비율을 유지하세요. 워드마크를 알아보기 어려울 만큼 작게 써야 한다면 단독 심볼을 사용하세요.</p>
+<h2 id="색상">색상</h2>
+<p>로고는 브랜드 네이비와 흰색을 사용합니다. 문서 사이트는 여기에 달빛 인디고와 여우빛 강조색을 더하며, 어두운 테마와 밝은 테마에서 각각 다른 값을 씁니다.</p>
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr)); gap:0.75rem; margin:1rem 0;">
+  <div style="padding:0.85rem; border:1px solid var(--line); border-radius:0.75rem; background:var(--bg-2);">
+    <span aria-hidden="true" style="display:block;width:2rem;height:2rem;margin-bottom:0.6rem;border-radius:0.4rem;background:#30365e;"></span>
+    <strong>브랜드 네이비</strong><br><code>#30365E</code><br>
+    <small>심볼, 밝은 표면의 기본 강조색</small>
+  </div>
+  <div style="padding:0.85rem; border:1px solid var(--line); border-radius:0.75rem; background:var(--bg-2);">
+    <span aria-hidden="true" style="display:block;width:2rem;height:2rem;margin-bottom:0.6rem;border-radius:0.4rem;background:#8f99ef;"></span>
+    <strong>달빛</strong><br><code>#8F99EF</code><br>
+    <small>어두운 표면의 기본 강조색</small>
+  </div>
+  <div style="padding:0.85rem; border:1px solid var(--line); border-radius:0.75rem; background:var(--bg-2);">
+    <span aria-hidden="true" style="display:block;width:2rem;height:2rem;margin-bottom:0.6rem;border-radius:0.4rem;background:#b1b8f5;"></span>
+    <strong>달빛 하이라이트</strong><br><code>#B1B8F5</code><br>
+    <small>어두운 표면의 강조·활성 상태</small>
+  </div>
+  <div style="padding:0.85rem; border:1px solid var(--line); border-radius:0.75rem; background:var(--bg-2);">
+    <span aria-hidden="true" style="display:block;width:2rem;height:2rem;margin-bottom:0.6rem;border-radius:0.4rem;background:#d99a63;"></span>
+    <strong>여우빛 주황</strong><br><code>#D99A63</code><br>
+    <small>여우 그래픽, 어두운 표면의 따뜻한 강조색</small>
+  </div>
+  <div style="padding:0.85rem; border:1px solid var(--line); border-radius:0.75rem; background:var(--bg-2);">
+    <span aria-hidden="true" style="display:block;width:2rem;height:2rem;margin-bottom:0.6rem;border-radius:0.4rem;background:#b8743f;"></span>
+    <strong>종이빛 주황</strong><br><code>#B8743F</code><br>
+    <small>여우 그래픽, 밝은 표면의 따뜻한 강조색</small>
+  </div>
+  <div style="padding:0.85rem; border:1px solid var(--line); border-radius:0.75rem; background:var(--bg-2);">
+    <span aria-hidden="true" style="display:block;width:2rem;height:2rem;margin-bottom:0.6rem;border:1px solid #6e7791;border-radius:0.4rem;background:#0b0d16;"></span>
+    <strong>밤</strong><br><code>#0B0D16</code><br>
+    <small>문서 사이트의 어두운 배경</small>
+  </div>
+  <div style="padding:0.85rem; border:1px solid var(--line); border-radius:0.75rem; background:var(--bg-2);">
+    <span aria-hidden="true" style="display:block;width:2rem;height:2rem;margin-bottom:0.6rem;border:1px solid #b9b5ad;border-radius:0.4rem;background:#f4f1ea;"></span>
+    <strong>종이</strong><br><code>#F4F1EA</code><br>
+    <small>문서 사이트의 밝은 배경</small>
+  </div>
+</div>
+<p>문서 사이트 색상은 <code>docs/static/css/style.css</code>에, 로고 파일은 <code>docs/static/images/</code>에 있습니다.</p>
+<h2 id="서체">서체</h2>
+<ul>
+<li>문서와 인터페이스에는 <strong>Inter</strong>를 사용합니다.</li>
+<li>명령어, 코드, 짧은 기술 라벨에는 <strong>JetBrains Mono</strong>를 사용합니다.</li>
+</ul>
+<h2 id="로고-사용">로고 사용</h2>
+<p>Dalfox를 소개하거나 Dalfox와의 연동을 표시할 때 제공된 파일을 사용하세요. 심볼을 다시 그리거나 색을 바꾸고, 비율을 변형하거나 자르지 마세요. Dalfox가 제품이나 서비스를 보증하는 듯한 인상을 주어서도 안 됩니다. 저장소는 MIT 라이선스를 사용하지만 로고 그래픽에 대한 별도 라이선스는 공개되어 있지 않습니다. 다른 용도가 필요하면 관리자에게 문의하세요.</p>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#심볼과-로고">심볼과 로고</a></li><li><a href="#색상">색상</a></li><li><a href="#서체">서체</a></li><li><a href="#로고-사용">로고 사용</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <div class="docs-content-container docs-tail">
+      <nav class="docs-pager" aria-label="이전/다음 문서" data-prev="이전" data-next="다음" hidden></nav>
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/reference/brand.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      </div>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <nav class="footer-links" aria-label="푸터 링크">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">github</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+        <a href="https://github.com/hahwul/dalfox/security/policy" target="_blank" rel="noopener">보안</a>
+      </nav>
+      <p class="footer-meta">
+        <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+          <span class="hahwul-img" aria-hidden="true"></span>
+          <span class="footer-love">Built with Love</span>
+        </a>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span>MIT &middot; &copy; 2026 <a href="https://github.com/hahwul" target="_blank" rel="noopener">hahwul</a></span>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </p>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>
