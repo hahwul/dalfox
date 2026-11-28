@@ -154,6 +154,39 @@ static LIB_SPECS: &[LibSpec] = &[
         ],
     },
     LibSpec {
+        name: "DataTables",
+        // The DataTables CDN serves the core at `/<ver>/` and its extensions
+        // at `/<extension>/<ver>/`, and its download builder writes
+        // `/v/dt/dt-<ver>/`. The styling packages (`datatables.net-bs4`) and
+        // extensions have their own version lines and are not matched.
+        url_patterns: &[
+            r"(?i)//cdn\.datatables\.net/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?i)//cdn\.datatables\.net/v/[\w-]+/(?:[\w.-]+/)*dt-(\d+\.\d+(?:\.\d+)?)/",
+            r"(?i)/datatables(?:\.net)?/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/datatables\.net@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
+        ],
+        // The banner line holds nothing but the name and version, with the
+        // SpryMedia line under it; an extension's banner ("Buttons for
+        // DataTables 1.6.2") has text before the name.
+        inline_patterns: &[
+            r"(?m)^(?:/\*!)?[ \t]*DataTables (\d+\.\d+(?:\.\d+)?)[ \t]*\r?\n[ \t*]*©[\d-]* ?SpryMedia Ltd - datatables\.net/license",
+        ],
+        ranges: &[
+            VulnRange {
+                introduced: None,
+                fixed: "1.10.22",
+                advisories: &["CVE-2020-28458"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "1.11.3",
+                advisories: &["CVE-2021-23445"],
+                severity: SEV_MEDIUM,
+            },
+        ],
+    },
+    LibSpec {
         name: "AngularJS",
         url_patterns: &[
             r"(?i)angular[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
@@ -330,6 +363,29 @@ static LIB_SPECS: &[LibSpec] = &[
             introduced: None,
             fixed: "3.5.0",
             advisories: &["CVE-2019-14862"],
+            severity: SEV_MEDIUM,
+        }],
+    },
+    LibSpec {
+        name: "Select2",
+        // `select2.full.js` is the same release with the compatibility
+        // modules bundled in.
+        url_patterns: &[
+            r"(?im)(?:^|/)select2[-.](\d+\.\d+(?:\.\d+)?)(?:\.full)?(?:\.min)?\.js",
+            r"(?i)/select2/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/select2@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
+        ],
+        // 4.x opens with `/*! Select2 <ver> |` (minified) or `/*!\n * Select2
+        // <ver>` (unminified); 3.x has `Version: <ver> Timestamp:` under its
+        // copyright line.
+        inline_patterns: &[
+            r"/\*!\s*(?:\*\s*)?Select2 (\d+\.\d+(?:\.\d+)?)",
+            r"Copyright \d{4} Igor Vaynberg\s+Version: (\d+\.\d+(?:\.\d+)?) Timestamp:",
+        ],
+        ranges: &[VulnRange {
+            introduced: None,
+            fixed: "4.0.6",
+            advisories: &["CVE-2016-10744"],
             severity: SEV_MEDIUM,
         }],
     },
