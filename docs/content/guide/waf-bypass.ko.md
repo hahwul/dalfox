@@ -41,6 +41,12 @@ toc = true
 
 Wallarm, NAXSI, SafeLine, DDoS-Guard, Reblaze는 핑거프린트는 되지만 전용 전략이 없으며, 인식되지 않는 WAF와 마찬가지로 범용 폴백 전략을 적용합니다.
 
+하나의 프리플라이트 응답에 HTTP 405, 기본 차단 페이지 문구,
+`errors.aliyun.com` 참조가 모두 있으면 CLI의
+`meta.target_summary[].waf.detected`에 Alibaba Cloud WAF가 `AlibabaCloud`로 표시됩니다.
+이미 받은 응답을 사용하므로 추가 요청은 없습니다. 사용자 지정 차단 페이지는
+탐지되지 않을 수 있습니다. 이 정보는 보고에만 사용됩니다.
+
 ## 동작 조정하기
 
 ### Auto (기본값)

@@ -3,6 +3,7 @@
 //! classification and the `--force-waf` parser. Split out of `scan.rs`.
 
 use super::args::ScanArgs;
+use crate::waf::report::{PassiveWafObservation, alibaba_block_page};
 use reqwest::header::CONTENT_TYPE;
 use std::time::Duration;
 
@@ -23,6 +24,7 @@ pub(crate) struct PreflightResult {
     pub(crate) csp_header: Option<(String, String)>,
     pub(crate) response_body: Option<String>,
     pub(crate) waf_result: crate::waf::WafDetectionResult,
+    pub(crate) passive_waf_observation: Option<PassiveWafObservation>,
     pub(crate) tech_result: crate::scanning::tech_detect::TechDetectionResult,
     /// Fingerprint of the authenticated landing response, for mid-scan
     /// session-loss detection. Derived from the GET below, so it costs no
@@ -52,6 +54,7 @@ pub(crate) enum PreflightOutcome {
         session_baseline: Option<super::session::SessionBaseline>,
         response_body: Option<String>,
         response_content_type: String,
+        passive_waf_observation: Option<PassiveWafObservation>,
     },
     /// Hard reachability failure — the `&'static str` carries the
     /// specific error_code (`DNS_RESOLUTION_FAILED`,
@@ -59,6 +62,19 @@ pub(crate) enum PreflightOutcome {
     /// `CONNECTION_FAILED`) so target_summary surfaces *which* layer
     /// failed instead of lumping DNS / refused / handshake together.
     Unreachable(&'static str),
+}
+
+impl PreflightOutcome {
+    pub(super) fn passive_waf_observation(&self) -> Option<PassiveWafObservation> {
+        match self {
+            Self::WithContentType(result) => result.passive_waf_observation,
+            Self::NoContentType {
+                passive_waf_observation,
+                ..
+            } => *passive_waf_observation,
+            Self::Unreachable(_) => None,
+        }
+    }
 }
 
 /// Which layer a connect/request failure died at, read off the error chain.
@@ -269,6 +285,7 @@ pub(crate) async fn preflight_content_type(
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
     let mut response_content_type = String::new();
+    let mut passive_waf_observation = None;
     let mut session_baseline: Option<super::session::SessionBaseline> = None;
     let monitor_session = super::session::monitoring_enabled(args, target);
     let get_req =
@@ -280,7 +297,8 @@ pub(crate) async fn preflight_content_type(
         return unreachable_outcome(target, args, e);
     }
     if let Ok(get_resp) = get_send {
-        let get_status = get_resp.status().as_u16();
+        let status = get_resp.status();
+        let get_status = status.as_u16();
         baseline_status = Some(get_status);
         let get_headers = get_resp.headers().clone();
         if head_failure.is_some() {
@@ -298,6 +316,10 @@ pub(crate) async fn preflight_content_type(
         let get_final_url = get_resp.url().clone();
         if let Ok(body) = crate::utils::http::read_body_counted(get_resp).await {
             response_body = Some(body.clone());
+            if args.force_waf.is_none() {
+                passive_waf_observation = alibaba_block_page(status, &body)
+                    .filter(|observation| observation.confidence >= args.waf_min_confidence);
+            }
 
             // Authenticated-state fingerprint for mid-scan session-loss
             // detection. Reuses this response, so monitoring adds no request
@@ -382,6 +404,7 @@ pub(crate) async fn preflight_content_type(
             csp_header,
             response_body,
             waf_result,
+            passive_waf_observation,
             tech_result,
             session_baseline,
         }),
@@ -389,6 +412,7 @@ pub(crate) async fn preflight_content_type(
             session_baseline,
             response_body,
             response_content_type,
+            passive_waf_observation,
         },
     }
 }

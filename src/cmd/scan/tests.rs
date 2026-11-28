@@ -2865,6 +2865,84 @@ async fn test_render_results_includes_waf_summary() {
 }
 
 #[tokio::test]
+async fn alibaba_block_page_is_reported_without_scan_strategy() {
+    let _guard = RUN_SCAN_LOCK.lock().await;
+    let requests = Arc::new(AtomicUsize::new(0));
+    let app = Router::new().route(
+        "/{case}",
+        any({
+            let requests = Arc::clone(&requests);
+            move |axum::extract::Path(case): axum::extract::Path<String>| {
+                let requests = Arc::clone(&requests);
+                async move {
+                    requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let page = r#"<h1>Sorry, your request has been blocked as it may cause potential threats to the server's security.</h1>
+                        <img src="https://errors.aliyun.com/images/block.png">"#;
+                    let response = match case.as_str() {
+                        "html" => Response::builder()
+                            .status(StatusCode::METHOD_NOT_ALLOWED)
+                            .header("content-type", "text/html")
+                            .body(Body::from(page)),
+                        "no-type" => Response::builder()
+                            .status(StatusCode::METHOD_NOT_ALLOWED)
+                            .body(Body::from(page)),
+                        "cdn" => Response::builder()
+                            .status(StatusCode::TOO_MANY_REQUESTS)
+                            .header("content-type", "text/html")
+                            .header("set-cookie", "acw_tc=fixture; Path=/")
+                            .body(Body::from("Too Many Requests")),
+                        _ => unreachable!("fixture path"),
+                    };
+                    response.expect("valid response")
+                }
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let urls = ["html", "no-type", "cdn"].map(|case| format!("http://{addr}/{case}"));
+    let dir = tempfile::tempdir().expect("output dir");
+    let path = dir.path().join("out.json");
+    let args = ScanArgs {
+        targets: urls.to_vec(),
+        output: Some(path.to_string_lossy().into_owned()),
+        skip_ast_analysis: true,
+        waf_min_confidence: super::DEFAULT_WAF_MIN_CONFIDENCE,
+        ..analysis_only_args(3)
+    };
+
+    let outcome = super::run_scan(&args).await;
+    server.abort();
+    assert_eq!(outcome, ScanOutcome::Clean);
+    assert_eq!(requests.load(std::sync::atomic::Ordering::Relaxed), 6);
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("report written")).expect("JSON");
+    let summary = report["meta"]["target_summary"]
+        .as_array()
+        .expect("targets");
+    assert_eq!(summary.len(), urls.len());
+    for (index, url) in urls.iter().enumerate() {
+        let entry = summary
+            .iter()
+            .find(|entry| entry["target"] == url.as_str())
+            .expect("matching target");
+        if index == 2 {
+            assert!(entry.get("waf").is_none(), "{entry}");
+            continue;
+        }
+        let waf = &entry["waf"];
+        let detected = waf["detected"].as_array().expect("reported observations");
+        assert_eq!(detected.len(), 1, "{waf}");
+        assert_eq!(detected[0]["type"], "AlibabaCloud");
+        assert!(waf.get("bypass").is_none(), "{waf}");
+    }
+}
+
+#[tokio::test]
 async fn test_render_results_stdout_path_returns_results() {
     // No --output → renders to stdout; the returned final_results still
     // reflects the deduped/filtered set.

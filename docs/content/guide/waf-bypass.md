@@ -41,6 +41,12 @@ This is all on by default. You only touch flags if you want to disable or steer 
 
 Wallarm, NAXSI, SafeLine, DDoS-Guard, and Reblaze are fingerprinted but have no dedicated strategy; like unrecognised WAFs, they get a generic fallback strategy.
 
+Dalfox reports Alibaba Cloud WAF as `AlibabaCloud` in the CLI's
+`meta.target_summary[].waf.detected` when the same preflight response has
+HTTP 405, the default block-page message, and a reference to `errors.aliyun.com`.
+This report uses the existing response and adds no requests. Custom block
+pages can go undetected. The observation is for reporting only.
+
 ## Tuning the behaviour
 
 ### Auto (default)

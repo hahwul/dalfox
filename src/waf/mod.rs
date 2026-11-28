@@ -4,6 +4,7 @@
 //! Provides per-WAF bypass strategies for payload mutation and encoding selection.
 
 pub mod bypass;
+pub(crate) mod report;
 
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
