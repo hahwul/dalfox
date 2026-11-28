@@ -71,6 +71,22 @@ fn new_file_gets_a_header_and_no_completions() {
     let _ = std::fs::remove_file(&path);
 }
 
+#[cfg(unix)]
+#[test]
+fn read_only_state_file_reports_symlink_resolution_errors() {
+    let path = scratch("symlink_loop");
+    std::os::unix::fs::symlink(&path, &path).expect("create a self-referential symlink");
+    let args = args_with(&path);
+
+    let opened = StateFile::open_read_only(path.to_str().unwrap(), &args);
+    std::fs::remove_file(&path).expect("remove symlink");
+
+    let Err(error) = opened else {
+        panic!("a symlink loop must be reported as a state file read error");
+    };
+    assert!(error.contains("could not be read"), "{error}");
+}
+
 #[test]
 fn completed_targets_are_skipped_on_the_next_run() {
     let path = scratch("resume");

@@ -141,6 +141,95 @@ fn unique_temp_path(prefix: &str) -> PathBuf {
 }
 
 #[tokio::test]
+async fn host_cap_keeps_the_retained_duplicate_scannable() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let (base, server) = spawn_low_confidence_via_varnish_server().await;
+    let target = format!("{base}?q=1");
+    let output = unique_temp_path("host-cap-duplicate.json");
+    let mut args = non_network_url_args(&target);
+    args.targets.push(target.clone());
+    args.dedup_urls = Some("off".into());
+    args.max_targets_per_host = 1;
+    args.dry_run = true;
+    args.output = Some(output.to_string_lossy().into_owned());
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+    let report = std::fs::read_to_string(&output).expect("dry-run report");
+    std::fs::remove_file(output).expect("remove report");
+    let report: serde_json::Value = serde_json::from_str(&report).expect("JSON report");
+
+    assert_eq!(outcome, dalfox::cmd::scan::ScanOutcome::Clean);
+    assert_eq!(report["meta"]["targets_input"], 2);
+    assert_eq!(report["meta"]["targets_scannable"], 1);
+    assert_eq!(report["meta"]["targets_skipped"], 1);
+    assert!(report["meta"].get("skipped").is_none());
+    assert_eq!(report["targets"][0]["target"], target);
+}
+
+#[tokio::test]
+async fn discovery_reports_unparsable_and_deduplicated_list_entries() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let (base, server) = spawn_low_confidence_via_varnish_server().await;
+    let target = format!("{base}?q=1");
+    let list = unique_temp_path("discovery-targets.txt");
+    let output = unique_temp_path("discovery-targets.json");
+    std::fs::write(
+        &list,
+        format!("{target}\nmailto:user@example.test\n{target}\n"),
+    )
+    .expect("write target list");
+    let mut args = non_network_url_args(&target);
+    args.input_type = "file".into();
+    args.targets = vec![list.to_string_lossy().into_owned()];
+    args.only_discovery = true;
+    args.output = Some(output.to_string_lossy().into_owned());
+
+    for format in ["json", "jsonl"] {
+        args.format = format.into();
+        assert_eq!(run_scan(&args).await, dalfox::cmd::scan::ScanOutcome::Clean);
+        let report = std::fs::read_to_string(&output).expect("discovery report");
+        let envelope = if format == "jsonl" {
+            report.lines().next().expect("metadata line")
+        } else {
+            &report
+        };
+        let doc: serde_json::Value = serde_json::from_str(envelope).expect("JSON metadata");
+        assert_eq!(doc["meta"]["targets_unparsable"], 1, "{format}");
+        assert_eq!(doc["meta"]["dedup_mode"], "exact", "{format}");
+        assert_eq!(doc["meta"]["targets_deduplicated"], 1, "{format}");
+    }
+
+    server.abort();
+    std::fs::remove_file(list).expect("remove list");
+    std::fs::remove_file(output).expect("remove report");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn preview_rejects_an_unreadable_state_file_path() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let (base, server) = spawn_low_confidence_via_varnish_server().await;
+    let state = unique_temp_path("preview-state-loop.jsonl");
+    let output = unique_temp_path("preview-state-loop.json");
+    std::os::unix::fs::symlink(&state, &state).expect("create a self-referential symlink");
+    let mut args = non_network_url_args(&base);
+    args.state_file = Some(state.to_string_lossy().into_owned());
+    args.output = Some(output.to_string_lossy().into_owned());
+    args.dry_run = true;
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+    std::fs::remove_file(state).expect("remove symlink");
+
+    assert_eq!(outcome, dalfox::cmd::scan::ScanOutcome::Error);
+    assert!(
+        !output.exists(),
+        "state read errors must stop before reporting"
+    );
+}
+
+#[tokio::test]
 async fn test_run_scan_rejects_invalid_input_type() {
     let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = base_scan_args();

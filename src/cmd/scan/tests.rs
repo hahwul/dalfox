@@ -3932,6 +3932,31 @@ async fn analysis_restores_survivors_per_group_in_order() {
     assert_eq!(skipped.len(), 3);
 }
 
+#[tokio::test]
+async fn per_host_cap_records_only_keys_without_a_retained_target() {
+    let retained = parse_target("https://example.test/retained").unwrap();
+    let dropped = parse_target("https://example.test/dropped").unwrap();
+    let mut groups = host_group(vec![retained.clone(), retained.clone(), dropped.clone()]);
+    let args = ScanArgs {
+        max_targets_per_host: 1,
+        silence: true,
+        ..Default::default()
+    };
+    let skipped = Mutex::new(HashMap::new());
+
+    super::analysis::apply_per_host_cap(&args, &mut groups, &skipped).await;
+
+    assert_eq!(groups.values().flatten().count(), 1);
+    assert_eq!(groups.values().flatten().next().unwrap().url, retained.url);
+    assert_eq!(
+        *skipped.lock().await,
+        HashMap::from([(
+            dropped.state_key(),
+            crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP,
+        )])
+    );
+}
+
 // finalize_scan_args — the shared preamble that the bare `scan` path and the
 // `url`/`file`/`pipe` subcommands all run. Regression cover for the bug where
 // those subcommands skipped config overlay and `--include-all`.
