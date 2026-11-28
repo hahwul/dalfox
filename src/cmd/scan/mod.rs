@@ -487,9 +487,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let skipped_targets: Arc<Mutex<HashMap<String, &'static str>>> =
         Arc::new(Mutex::new(HashMap::new()));
     // Per-target preflight metadata serialized once during preflight, read at
-    // target_summary build time. Populated from `target.waf_info` and the
-    // applied bypass strategy. JSON/JSONL consumers can't otherwise see what
-    // WAF was detected — that information only reached the plain-mode log.
+    // target_summary build time. Carries WAF detections, report-only
+    // observations, and any applied strategy metadata for JSON/JSONL.
     let target_meta: Arc<Mutex<HashMap<String, serde_json::Value>>> =
         Arc::new(Mutex::new(HashMap::new()));
     // Side map of WAF-bypass effectiveness counters, alive across the

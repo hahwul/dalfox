@@ -4,6 +4,7 @@
 //! Provides per-WAF bypass strategies for payload mutation and encoding selection.
 
 pub mod bypass;
+pub(crate) mod report;
 
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -49,9 +50,6 @@ pub enum WafType {
     /// Reblaze. Fingerprinted by its `Server: Reblaze Secure Web Gateway`
     /// header or `rbzid` cookie.
     Reblaze,
-    /// Alibaba Cloud WAF (AliYunDun). Fingerprinted by its `aliyungf_tc` /
-    /// `acw_tc` cookies or its block page.
-    AlibabaCloud,
     Unknown(String),
 }
 
@@ -78,7 +76,6 @@ impl std::fmt::Display for WafType {
             WafType::SafeLine => write!(f, "SafeLine"),
             WafType::DdosGuard => write!(f, "DDoS-Guard"),
             WafType::Reblaze => write!(f, "Reblaze"),
-            WafType::AlibabaCloud => write!(f, "AlibabaCloud"),
             WafType::Unknown(hint) => write!(f, "Unknown ({})", hint),
         }
     }
@@ -171,7 +168,6 @@ fn parse_waf_type_from_rule(name: &str) -> WafType {
         "SafeLine" => WafType::SafeLine,
         "DdosGuard" => WafType::DdosGuard,
         "Reblaze" => WafType::Reblaze,
-        "AlibabaCloud" => WafType::AlibabaCloud,
         other => WafType::Unknown(other.to_string()),
     }
 }

@@ -38,9 +38,14 @@ toc = true
 - SafeLine
 - DDoS-Guard
 - Reblaze
-- Alibaba Cloud WAF
 
-Wallarm, NAXSI, SafeLine, DDoS-Guard, Reblaze, Alibaba Cloud WAF는 핑거프린트는 되지만 전용 전략이 없으며, 인식되지 않는 WAF와 마찬가지로 범용 폴백 전략을 적용합니다.
+Wallarm, NAXSI, SafeLine, DDoS-Guard, Reblaze는 핑거프린트는 되지만 전용 전략이 없으며, 인식되지 않는 WAF와 마찬가지로 범용 폴백 전략을 적용합니다.
+
+하나의 프리플라이트 응답에 HTTP 405, 기본 차단 페이지 문구,
+`errors.aliyun.com` 참조가 모두 있으면 CLI의
+`meta.target_summary[].waf.detected`에 Alibaba Cloud WAF가 `AlibabaCloud`로 표시됩니다.
+이미 받은 응답을 사용하므로 추가 요청은 없습니다. 사용자 지정 차단 페이지는
+탐지되지 않을 수 있습니다. 이 정보는 보고에만 사용됩니다.
 
 ## 동작 조정하기
 
@@ -64,7 +69,7 @@ dalfox scan https://target.app \
 
 WAF가 자신의 헤더를 감추거나 CDN 뒤에 있을 때 유용합니다. WAF를 고르는 것은 `--force-waf`입니다. `auto`에서도 적용되며, `--force-waf` 없이 `--waf-bypass force`만 주면 `auto`와 똑같이 동작합니다. `--skip-waf-probe`를 함께 주지 않으면 자극 프로브는 여전히 전송됩니다.
 
-허용되는 이름(대소문자 무시): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`, `ddos-guard`/`ddosguard`, `reblaze`, `alibaba`/`aliyun`. 그 밖의 값은 거부됩니다.
+허용되는 이름(대소문자 무시): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`, `ddos-guard`/`ddosguard`, `reblaze`. 그 밖의 값은 거부됩니다.
 
 ### WAF 로직 비활성화
 

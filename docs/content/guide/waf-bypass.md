@@ -38,9 +38,14 @@ This is all on by default. You only touch flags if you want to disable or steer 
 - SafeLine
 - DDoS-Guard
 - Reblaze
-- Alibaba Cloud WAF
 
-Wallarm, NAXSI, SafeLine, DDoS-Guard, Reblaze, and Alibaba Cloud WAF are fingerprinted but have no dedicated strategy; like unrecognised WAFs, they get a generic fallback strategy.
+Wallarm, NAXSI, SafeLine, DDoS-Guard, and Reblaze are fingerprinted but have no dedicated strategy; like unrecognised WAFs, they get a generic fallback strategy.
+
+Dalfox reports Alibaba Cloud WAF as `AlibabaCloud` in the CLI's
+`meta.target_summary[].waf.detected` when the same preflight response has
+HTTP 405, the default block-page message, and a reference to `errors.aliyun.com`.
+This report uses the existing response and adds no requests. Custom block
+pages can go undetected. The observation is for reporting only.
 
 ## Tuning the behaviour
 
@@ -64,7 +69,7 @@ dalfox scan https://target.app \
 
 Handy when the WAF masks its headers or sits behind a CDN. `--force-waf` is what selects the WAF; it takes effect under `auto` too, and `--waf-bypass force` without it behaves like `auto`. The provocation probe is still sent unless you add `--skip-waf-probe`.
 
-Accepted names (case-insensitive): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`, `ddos-guard`/`ddosguard`, `reblaze`, `alibaba`/`aliyun`. Any other value is rejected.
+Accepted names (case-insensitive): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`, `ddos-guard`/`ddosguard`, `reblaze`. Any other value is rejected.
 
 ### Disable WAF logic
 

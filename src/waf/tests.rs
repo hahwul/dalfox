@@ -197,7 +197,6 @@ fn rules_toml_loads_and_covers_all_waf_families() {
         "SafeLine",
         "DdosGuard",
         "Reblaze",
-        "AlibabaCloud",
     ] {
         assert!(
             waf_names.contains(expected),
@@ -806,51 +805,6 @@ fn test_reblaze_not_detected_from_unrelated_headers() {
     let headers = make_headers(&[("server", "nginx"), ("set-cookie", "sessionid=abc123")]);
     let result = fingerprint_from_response(&headers, None, 200);
     assert!(!result.waf_types().contains(&&WafType::Reblaze));
-}
-
-#[test]
-fn test_alibaba_cloud_detection_by_aliyungf_tc_cookie() {
-    let headers = make_headers(&[("set-cookie", "aliyungf_tc=abc123; Path=/; HttpOnly")]);
-    let result = fingerprint_from_response(&headers, None, 200);
-    assert!(result.waf_types().contains(&&WafType::AlibabaCloud));
-    assert!(result.primary().unwrap().confidence >= 0.8);
-    assert_eq!(WafType::AlibabaCloud.to_string(), "AlibabaCloud");
-}
-
-#[test]
-fn test_alibaba_cloud_detection_by_acw_tc_cookie() {
-    let headers = make_headers(&[("set-cookie", "acw_tc=abc123;path=/;HttpOnly;Max-Age=1800")]);
-    let result = fingerprint_from_response(&headers, None, 200);
-    assert!(result.waf_types().contains(&&WafType::AlibabaCloud));
-    // The CDN sets this cookie too, so on its own it stays below the default
-    // `--waf-min-confidence` and is filtered out unless the floor is lowered.
-    let floor = crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE;
-    assert!(result.detected.iter().all(|fp| fp.confidence < floor));
-}
-
-#[test]
-fn test_alibaba_cloud_detection_by_block_message() {
-    let headers = make_headers(&[]);
-    let body = "Sorry, your request has been blocked as it may cause potential threats to the server's security.";
-    let result = fingerprint_from_response(&headers, Some(body), 405);
-    assert!(result.waf_types().contains(&&WafType::AlibabaCloud));
-}
-
-#[test]
-fn test_alibaba_cloud_detection_by_error_host() {
-    let headers = make_headers(&[]);
-    let body =
-        r#"<img src="https://errors.aliyun.com/images/TB1TpamHpXXXXaJXXXXeB7nYVXX-104-162.png">"#;
-    let result = fingerprint_from_response(&headers, Some(body), 405);
-    assert!(result.waf_types().contains(&&WafType::AlibabaCloud));
-}
-
-#[test]
-fn test_alibaba_cloud_not_detected_from_unrelated_response() {
-    let headers = make_headers(&[("server", "nginx"), ("set-cookie", "sessionid=abc123")]);
-    let body = "Sorry, your request has been blocked.";
-    let result = fingerprint_from_response(&headers, Some(body), 405);
-    assert!(!result.waf_types().contains(&&WafType::AlibabaCloud));
 }
 
 /// The status-only inference still fires when the block is the probe's doing

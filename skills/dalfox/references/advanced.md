@@ -16,6 +16,10 @@
 
 `--waf-min-confidence 0.3` (default) drops weak signals (Google Frontend, generic "request blocked" strings). Drop to `0.0` only when you are debugging fingerprinting.
 
+The CLI reports `AlibabaCloud` in `meta.target_summary[].waf.detected` when a
+single preflight response matches the default Alibaba Cloud WAF block page.
+This observation is for reporting only.
+
 `--skip-waf-probe` skips the active "provocation" request that improves detection of some WAFs. Use when you want pure passive header inspection.
 
 ## Parameter Discovery & Mining Control

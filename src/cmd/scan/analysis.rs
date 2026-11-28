@@ -347,6 +347,7 @@ pub(crate) async fn preflight_and_analyze_target(
         csp_header: __preflight_csp_header,
         response_body: preflight_response_body,
         response_content_type: preflight_response_content_type,
+        passive_waf_observation,
     } = run_target_preflight(
         &mut target,
         &args_clone,
@@ -406,6 +407,15 @@ pub(crate) async fn preflight_and_analyze_target(
                     );
                 }
             }
+        }
+        if let Some(observation) = passive_waf_observation {
+            crate::cprintln!(
+                "{} {} detected (confidence: {:.0}%, evidence: {})",
+                log_prefix("33", "WAF"),
+                observation.name,
+                observation.confidence * 100.0,
+                observation.evidence
+            );
         }
         // Log detected technologies
         if let Some(ref tech_info) = target.tech_info {
@@ -638,6 +648,7 @@ pub(crate) struct PreflightCapture {
     pub(crate) response_body: Option<String>,
     /// Content-Type paired with `response_body`, taken from the GET response.
     pub(crate) response_content_type: String,
+    pub(crate) passive_waf_observation: Option<crate::waf::report::PassiveWafObservation>,
 }
 
 /// Fetch the landing page once and derive everything the later phases need from
@@ -675,7 +686,7 @@ async fn run_target_preflight(
     // disabled WAF fingerprinting/bypass, CSP-bypass, tech detection,
     // and the initial-response AST DOM analysis under `--deep-scan`,
     // making the "more thorough" mode strictly weaker.
-    {
+    let passive_waf_observation = {
         preflight_idx_clone.fetch_add(1, Ordering::Relaxed);
         // Print an ephemeral spinner and auto-clear when finished. Single-target
         // only, for the same reason as the analysis spinner above.
@@ -690,6 +701,7 @@ async fn run_target_preflight(
         };
 
         let __preflight_info = preflight_content_type(target, args_clone).await;
+        let passive_waf_observation = __preflight_info.passive_waf_observation();
         if let Some((tx, done_rx)) = __preflight_spinner {
             let _ = tx.send(());
             let _ = done_rx.await;
@@ -711,18 +723,13 @@ async fn run_target_preflight(
                     .insert(target.state_key(), code);
                 return None;
             }
-            // NoContentType (e.g. GET preflight on a POST-only
-            // endpoint that 405s without a Content-Type header)
-            // — keep scanning, just skip the preflight metadata
-            // population below. Preserves the v3.0 behavior
-            // that body-param scans of /post-only endpoints
-            // still work. The session baseline is the one piece
-            // that must survive: the target still gets scanned, so
-            // it still has a session that can die mid-run.
+            // Continue without Content-Type, as on a POST-only endpoint.
+            // Carry the response body, session baseline, and report-only observation.
             PreflightOutcome::NoContentType {
                 session_baseline: baseline,
                 response_body,
                 response_content_type,
+                ..
             } => {
                 preflight_response_body = response_body;
                 preflight_response_content_type = response_content_type;
@@ -741,6 +748,9 @@ async fn run_target_preflight(
             PreflightOutcome::WithContentType(r) => Some(r),
         };
 
+        let mut detected_waf = Vec::new();
+        let mut bypass_meta = None;
+        let mut content_type_mismatch = false;
         if let Some(preflight) = __preflight_info {
             preflight_response_body = preflight.response_body;
             preflight_response_content_type = preflight.response_content_type;
@@ -806,7 +816,7 @@ async fn run_target_preflight(
                 // would otherwise have no visibility.
                 let mut detected_waf_extra_delay_ms = 0u64;
                 if let Some(ref waf_info) = target.waf_info {
-                    let detected_json: Vec<serde_json::Value> = waf_info
+                    detected_waf = waf_info
                         .detected
                         .iter()
                         .map(|fp| {
@@ -817,9 +827,6 @@ async fn run_target_preflight(
                             })
                         })
                         .collect();
-                    let mut meta_json = serde_json::json!({
-                        "detected": detected_json,
-                    });
                     if args_clone.waf_bypass != "off" {
                         let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
                         let strategy = crate::waf::bypass::merge_strategies(&waf_types);
@@ -827,16 +834,12 @@ async fn run_target_preflight(
                         // injection paths actually slow down for rate-limiting
                         // WAFs — previously this only landed in JSON meta.
                         detected_waf_extra_delay_ms = strategy.extra_delay_hint_ms;
-                        meta_json["bypass"] = serde_json::json!({
+                        bypass_meta = Some(serde_json::json!({
                             "encoders": strategy.extra_encoders,
                             "mutation_count": strategy.mutations.len(),
                             "extra_delay_hint_ms": strategy.extra_delay_hint_ms,
-                        });
+                        }));
                     }
-                    target_meta_clone
-                        .lock()
-                        .await
-                        .insert(target.state_key(), meta_json);
                 }
 
                 // Apply the WAF pacing hint so detected rate-limiting
@@ -874,22 +877,40 @@ async fn run_target_preflight(
             // `--deep-scan` deliberately scans every content type,
             // whereas a normal scan drops denylisted types (images,
             // fonts, etc.) that can't carry reflected/DOM XSS.
-            if !args_clone.deep_scan && !is_xss_scannable_content_type(&preflight.content_type) {
-                // Skip this target early
-                skipped_targets_clone.lock().await.insert(
-                    target.state_key(),
-                    crate::cmd::error_codes::CONTENT_TYPE_MISMATCH,
-                );
-                return None;
-            }
+            content_type_mismatch =
+                !args_clone.deep_scan && !is_xss_scannable_content_type(&preflight.content_type);
         }
-    }
+
+        // Report-only observations have no entry in the target's WAF strategy,
+        // pacing, or mutation-stat state.
+        detected_waf
+            .extend(passive_waf_observation.map(|observation| serde_json::json!(observation)));
+        if !detected_waf.is_empty() {
+            let mut meta_json = serde_json::json!({ "detected": detected_waf });
+            if let Some(bypass_meta) = bypass_meta {
+                meta_json["bypass"] = bypass_meta;
+            }
+            target_meta_clone
+                .lock()
+                .await
+                .insert(target.state_key(), meta_json);
+        }
+        if content_type_mismatch {
+            skipped_targets_clone.lock().await.insert(
+                target.state_key(),
+                crate::cmd::error_codes::CONTENT_TYPE_MISMATCH,
+            );
+            return None;
+        }
+        passive_waf_observation
+    };
 
     Some(PreflightCapture {
         csp_present: __preflight_csp_present,
         csp_header: __preflight_csp_header,
         response_body: preflight_response_body,
         response_content_type: preflight_response_content_type,
+        passive_waf_observation,
     })
 }
 

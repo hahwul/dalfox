@@ -388,24 +388,6 @@ waf_type = "Reblaze"
 confidence = 0.85
 evidence_label = "rbzid cookie (Reblaze)"
 
-# Alibaba Cloud
-[[header]]
-header = "set-cookie"
-value_contains = "aliyungf_tc="
-waf_type = "AlibabaCloud"
-confidence = 0.8
-evidence_label = "aliyungf_tc cookie (Alibaba Cloud)"
-
-# Alibaba Cloud CDN sets `acw_tc` too, with no WAF behind it, so keep the
-# confidence below the default `--waf-min-confidence` (0.3): a CDN-only site
-# is then not reported as a WAF unless the user lowers the floor.
-[[header]]
-header = "set-cookie"
-value_contains = "acw_tc="
-waf_type = "AlibabaCloud"
-confidence = 0.25
-evidence_label = "acw_tc cookie (Alibaba Cloud WAF or CDN)"
-
 
 # ── Body rules ──────────────────────────────────────────────────────────
 
@@ -599,19 +581,3 @@ pattern = "current session has been terminated"
 waf_type = "Reblaze"
 confidence = 0.26
 evidence_label = "Reblaze session-terminated block page"
-
-# Alibaba Cloud
-# The 405 block page. wafw00f requires the sentence, the error host and the
-# status together; the sentence alone is already specific to this page.
-[[body]]
-pattern = "blocked as it may cause potential threats to the server's security"
-waf_type = "AlibabaCloud"
-confidence = 0.85
-evidence_label = "Alibaba Cloud WAF block message in body"
-
-# The error host also appears on Alibaba Cloud pages no WAF produced.
-[[body]]
-pattern = "errors.aliyun.com"
-waf_type = "AlibabaCloud"
-confidence = 0.5
-evidence_label = "errors.aliyun.com reference in body"
