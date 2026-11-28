@@ -493,6 +493,69 @@ fn test_analyze_external_js_flag_is_recognized() {
     );
 }
 
+#[test]
+fn test_alibaba_block_page_report_in_plain_output() {
+    use axum::{Router, http::StatusCode, routing::get};
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let address = runtime.block_on(async {
+        let app = Router::new().route(
+            "/",
+            get(|| async {
+                (
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    [("content-type", "text/html")],
+                    r#"<p>Sorry, your request has been blocked as it may cause potential threats to the server's security.</p>
+                    <img src="https://errors.aliyun.com/images/block.png">"#,
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind test server");
+        let address = listener.local_addr().expect("server address");
+        tokio::spawn(async move { axum::serve(listener, app).await.expect("serve test page") });
+        address
+    });
+    let config_dir = tempfile::tempdir().expect("config directory");
+    let config = config_dir.path().join("config.toml");
+    std::fs::write(&config, "[scan]\n").expect("write test config");
+
+    for (threshold, expected) in [("0.3", true), ("0.9", false)] {
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .arg("--config")
+            .arg(&config)
+            .args([
+                "--no-color",
+                "scan",
+                &format!("http://{address}/"),
+                "--format",
+                "plain",
+                "--waf-bypass",
+                "off",
+                "--skip-xss-scanning",
+                "--skip-ast-analysis",
+                "--skip-discovery",
+                "--skip-mining",
+                "--waf-min-confidence",
+                threshold,
+            ])
+            .output()
+            .expect("run dalfox");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "stdout: {stdout}\nstderr: {stderr}"
+        );
+        assert_eq!(
+            stdout.contains("AlibabaCloud detected (confidence: 85%, evidence: Alibaba Cloud WAF default HTTP 405 block page)"),
+            expected,
+            "confidence floor {threshold}: {stdout}"
+        );
+    }
+}
+
 /// Full E2E: dalfox binary with `--analyze-external-js` finds a DOM-XSS sink
 /// inside a same-origin external script and reports it in JSON output.
 #[test]

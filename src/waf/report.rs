@@ -92,6 +92,10 @@ mod tests {
             BLOCK_PAGE.to_owned(),
             BLOCK_PAGE.replace("server's", "server&#39;s"),
             BLOCK_PAGE.replace("//errors.aliyun.com", "https://errors.aliyun.com"),
+            BLOCK_PAGE.replace(
+                r#"<img src="//errors.aliyun.com/images/block.png">"#,
+                r#"<a href="https://errors.aliyun.com/">Request details</a>"#,
+            ),
         ] {
             let observation = alibaba_block_page(StatusCode::METHOD_NOT_ALLOWED, &page)
                 .expect("the three signals occur in the same response");
