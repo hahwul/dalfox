@@ -210,8 +210,7 @@ async fn main() {
     // Exit cleanly when a downstream consumer (e.g. `head`, `grep -q`) closes
     // the pipe. Rust ignores SIGPIPE by default, so the next `println!` panics
     // inside the stdio shim with `failed printing to stdout: Broken pipe` and
-    // exits 101 with a stack trace — surprising for `dalfox payload payloadbox
-    // | head -10`. Override the panic hook to swallow only that specific
+    // exits 101 with a stack trace. Override the panic hook to swallow that
     // payload and exit 0; any other panic still flows through the default hook.
     let default_panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -468,12 +467,12 @@ async fn main() {
     if config_no_color {
         utils::term::disable_colors();
     }
-    if !is_mcp
+    let show_banner = !is_mcp
         && !is_machine_format
         && !config_machine_format
         && !effective_silence
-        && !is_payload_machine_output
-    {
+        && !is_payload_machine_output;
+    if show_banner && !matches!(&cli.command, Some(Commands::Payload(_))) {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), banner_color);
     }
 
@@ -515,7 +514,9 @@ async fn main() {
                 }
             })
         }
-        Some(Commands::Payload(args)) => cmd::payload::run_payload(args).await,
+        Some(Commands::Payload(args)) => {
+            cmd::payload::run_payload_with_banner(args, show_banner.then_some(banner_color)).await
+        }
         // `man` and `completion` are handled immediately after parsing, so
         // this arm exists only for match exhaustiveness.
         Some(Commands::Completion { .. } | Commands::Man) => unreachable!(),

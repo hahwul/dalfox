@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+
 use clap::Args;
 use serde::Serialize;
 
@@ -188,19 +190,18 @@ fn render_lines<T: std::fmt::Display + Serialize>(
     }
 }
 
-fn print_lines<T: std::fmt::Display + Serialize>(selector: &str, list: &[T], json: bool) -> bool {
-    let rendered = match render_lines(list, json) {
-        Ok(rendered) => rendered,
-        Err(error) => {
-            eprintln!("[payload] failed to serialize {}: {}", selector, error);
-            return false;
-        }
-    };
+fn write_lines<T: std::fmt::Display + Serialize>(
+    out: &mut impl Write,
+    selector: &str,
+    list: &[T],
+    json: bool,
+) -> io::Result<()> {
+    let rendered = render_lines(list, json).map_err(io::Error::other)?;
     if !rendered.is_empty() {
-        println!("{}", rendered);
+        writeln!(out, "{rendered}")?;
     }
     crate::dbg_log!("{}: {} items", selector, list.len());
-    true
+    Ok(())
 }
 
 /// Every static selector paired with the lines it prints — the single source
@@ -256,7 +257,7 @@ fn summary_block() -> String {
     out
 }
 
-/// `--json` form of [`print_summary`]: every selector in `KNOWN_SELECTORS`
+/// `--json` form of [`write_summary`]: every selector in `KNOWN_SELECTORS`
 /// order, as the prose summary lists them, plus the same per-selector counts.
 /// Remote selectors and `all` have no static count.
 fn summary_json() -> serde_json::Value {
@@ -270,30 +271,15 @@ fn summary_json() -> serde_json::Value {
     })
 }
 
-fn print_summary_json() -> bool {
-    match serde_json::to_string_pretty(&summary_json()) {
-        Ok(text) => {
-            println!("{text}");
-            true
-        }
-        Err(e) => {
-            eprintln!("Error rendering payload summary: {e}");
-            false
-        }
-    }
-}
-
-fn print_summary() {
-    println!("Dalfox payload");
-    println!("----------------");
-    println!("Provide a selector to list payloads. Examples:");
+fn write_summary(out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "Dalfox payload")?;
+    writeln!(out, "----------------")?;
+    writeln!(out, "Provide a selector to list payloads. Examples:")?;
     for selector in KNOWN_SELECTORS {
-        println!("  dalfox payload {}", selector);
+        writeln!(out, "  dalfox payload {selector}")?;
     }
-    println!();
 
-    print!("{}", summary_block());
-    print!("\n{}", tips_block());
+    write!(out, "\n{}\n{}", summary_block(), tips_block())
 }
 
 /// The `Tips:` block, built as text so the encoder list is assertable and
@@ -310,25 +296,34 @@ fn tips_block() -> String {
 }
 
 /// Fetch payloads from a remote provider and print one per line.
-/// Returns `true` when initialization (and any printing) finished without an
-/// error path being taken; `false` on fetch failure or an uninitialized cache.
-/// Callers translate this into the CLI exit code.
-async fn fetch_and_print_remote(provider: &str, json: bool) -> bool {
+/// Fetch failures remain command errors. Output failures propagate to the
+/// caller so it can distinguish a closed pipe from other write errors.
+async fn fetch_and_write_remote(
+    out: &mut impl Write,
+    provider: &str,
+    json: bool,
+) -> io::Result<ScanOutcome> {
     let providers = [provider.to_string()];
     if let Err(e) =
         crate::utils::init_remote_resources_with_options(&providers, &[], None, None).await
     {
-        eprintln!("[payload] failed to fetch from {}: {}", provider, e);
-        return false;
+        let _ = writeln!(
+            io::stderr(),
+            "[payload] failed to fetch from {provider}: {e}"
+        );
+        return Ok(ScanOutcome::Error);
     }
     match crate::utils::get_remote_payloads() {
-        Some(list) => print_lines(provider, &list, json),
+        Some(list) => {
+            write_lines(out, provider, &list, json)?;
+            Ok(ScanOutcome::Clean)
+        }
         None => {
-            eprintln!(
-                "[payload] no payloads initialized for provider {}",
-                provider
+            let _ = writeln!(
+                io::stderr(),
+                "[payload] no payloads initialized for provider {provider}"
             );
-            false
+            Ok(ScanOutcome::Error)
         }
     }
 }
@@ -338,23 +333,23 @@ async fn fetch_and_print_remote(provider: &str, json: bool) -> bool {
 /// intentionally excluded — they require a remote fetch, so bundling them into
 /// `all` would make a "just show me everything local" command silently hit the
 /// network.
-fn print_all_payloads(json: bool) -> bool {
+fn write_all_payloads(out: &mut impl Write, json: bool) -> io::Result<()> {
     if json {
         let payloads: Vec<String> = static_selector_groups()
             .into_iter()
             .flat_map(|(_, lines)| lines)
             .collect();
-        return print_lines("all", &payloads, true);
+        return write_lines(out, "all", &payloads, true);
     }
 
     for (index, (selector, lines)) in static_selector_groups().into_iter().enumerate() {
         if index > 0 {
-            println!();
+            writeln!(out)?;
         }
-        println!("# {}", selector);
-        print_lines(selector, &lines, false);
+        writeln!(out, "# {selector}")?;
+        write_lines(out, selector, &lines, false)?;
     }
-    true
+    Ok(())
 }
 
 /// Selector names are lowercase; `--remote-payloads` already accepts
@@ -364,41 +359,71 @@ fn normalize_selector(selector: &str) -> String {
 }
 
 pub async fn run_payload(args: PayloadArgs) -> ScanOutcome {
-    let selector = args.selector.as_deref().map(normalize_selector);
-    let ok = match selector.as_deref() {
-        // Provide a small, helpful summary rather than a no-op — but honor
-        // `--json`. Printing the prose block under `--json` made the flag a
-        // silent no-op on this one path, so a script that always passes it
-        // got a page of tips where it expected a document to parse.
-        None if args.json => print_summary_json(),
-        None => {
-            print_summary();
-            true
+    run_payload_with_banner(args, None).await
+}
+
+/// CLI entry point. When requested, write the prose banner through the same
+/// fallible stdout path as the listing itself.
+#[doc(hidden)]
+pub async fn run_payload_with_banner(args: PayloadArgs, banner_color: Option<bool>) -> ScanOutcome {
+    let mut out = io::stdout();
+    match write_payload(&mut out, args, banner_color).await {
+        Ok(outcome) => outcome,
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ScanOutcome::Clean,
+        Err(e) => {
+            let _ = writeln!(io::stderr(), "[payload] failed to write output: {e}");
+            ScanOutcome::Error
         }
-        Some("all") => print_all_payloads(args.json),
+    }
+}
+
+async fn write_payload(
+    out: &mut impl Write,
+    args: PayloadArgs,
+    banner_color: Option<bool>,
+) -> io::Result<ScanOutcome> {
+    if let Some(color) = banner_color {
+        out.write_all(
+            crate::utils::banner::render_banner(env!("CARGO_PKG_VERSION"), color).as_bytes(),
+        )?;
+    }
+    let selector = args.selector.as_deref().map(normalize_selector);
+    match selector.as_deref() {
+        None if args.json => {
+            let text = serde_json::to_string_pretty(&summary_json()).map_err(io::Error::other)?;
+            writeln!(out, "{text}")?;
+        }
+        None => write_summary(out)?,
+        Some("all") => write_all_payloads(out, args.json)?,
         Some(provider @ ("payloadbox" | "portswigger")) => {
-            fetch_and_print_remote(provider, args.json).await
+            let outcome = fetch_and_write_remote(out, provider, args.json).await?;
+            if outcome == ScanOutcome::Error {
+                return Ok(outcome);
+            }
         }
         Some(other) => match static_selector_groups()
             .into_iter()
             .find(|(selector, _)| *selector == other)
         {
-            Some((selector, lines)) => print_lines(selector, &lines, args.json),
+            Some((selector, lines)) => write_lines(out, selector, &lines, args.json)?,
             None => {
-                eprintln!("Unknown selector: {}", other);
+                let mut stderr = io::stderr().lock();
+                let display = crate::utils::log::sanitize_log_message(other);
+                let _ = writeln!(stderr, "Unknown selector: {display}");
                 if let Some(selector) = closest_selector(other) {
-                    eprintln!("Did you mean: {}?", selector);
+                    let _ = writeln!(stderr, "Did you mean: {selector}?");
                 }
-                eprintln!("Available selectors: {}", KNOWN_SELECTORS.join(", "));
-                false
+                let _ = writeln!(
+                    stderr,
+                    "Available selectors: {}",
+                    KNOWN_SELECTORS.join(", ")
+                );
+                return Ok(ScanOutcome::Error);
             }
         },
-    };
-    if ok {
-        ScanOutcome::Clean
-    } else {
-        ScanOutcome::Error
     }
+    out.flush()?;
+    Ok(ScanOutcome::Clean)
 }
 
 #[cfg(test)]

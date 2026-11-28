@@ -1,14 +1,20 @@
 use super::{
-    KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_print_remote,
-    functions_payloads, levenshtein_distance, normalize_selector, print_summary, render_lines,
-    run_payload, special_chars_payloads, static_selector_counts, static_selector_groups,
-    summary_block, summary_json, tips_block, uri_scheme_payloads,
+    KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_write_remote,
+    functions_payloads, levenshtein_distance, normalize_selector, render_lines,
+    special_chars_payloads, static_selector_counts, static_selector_groups, summary_block,
+    summary_json, tips_block, uri_scheme_payloads, write_payload, write_summary,
 };
 use crate::cmd::scan::ScanOutcome;
 
 const NETWORK_SELECTORS: [&str; 2] = ["payloadbox", "portswigger"];
 /// Selectors that print other selectors instead of a list of their own.
 const AGGREGATE_SELECTORS: [&str; 1] = ["all"];
+
+async fn run_payload_to_sink(args: PayloadArgs) -> ScanOutcome {
+    write_payload(&mut std::io::sink(), args, None)
+        .await
+        .unwrap()
+}
 
 #[test]
 fn test_uri_scheme_payloads_shape() {
@@ -69,7 +75,7 @@ async fn test_run_payload_known_selectors_return_clean() {
         "mxss",
         "blind",
     ] {
-        let outcome = run_payload(PayloadArgs {
+        let outcome = run_payload_to_sink(PayloadArgs {
             selector: Some(selector.to_string()),
             json: false,
         })
@@ -85,7 +91,7 @@ async fn test_run_payload_known_selectors_return_clean() {
 
 #[tokio::test]
 async fn test_run_payload_unknown_selector_returns_error() {
-    let outcome = run_payload(PayloadArgs {
+    let outcome = run_payload_to_sink(PayloadArgs {
         selector: Some("not-a-selector".to_string()),
         json: false,
     })
@@ -104,7 +110,7 @@ fn test_normalize_selector_ignores_case_and_surrounding_whitespace() {
 #[tokio::test]
 async fn test_run_payload_selectors_match_case_insensitively() {
     for selector in ["JavaScript", "EVENT-HANDLERS", " all ", " Useful-Tags "] {
-        let outcome = run_payload(PayloadArgs {
+        let outcome = run_payload_to_sink(PayloadArgs {
             selector: Some(selector.to_string()),
             json: false,
         })
@@ -116,7 +122,7 @@ async fn test_run_payload_selectors_match_case_insensitively() {
         );
     }
     // Normalizing the case does not make an unknown selector known.
-    let outcome = run_payload(PayloadArgs {
+    let outcome = run_payload_to_sink(PayloadArgs {
         selector: Some("Not-A-Selector".to_string()),
         json: false,
     })
@@ -179,7 +185,7 @@ fn test_closest_selector_is_case_sensitive() {
 
 #[tokio::test]
 async fn test_run_payload_none_returns_clean() {
-    let outcome = run_payload(PayloadArgs {
+    let outcome = run_payload_to_sink(PayloadArgs {
         selector: None,
         json: false,
     })
@@ -192,17 +198,17 @@ async fn test_run_payload_debug_paths_do_not_panic() {
     let prev = crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed);
     crate::DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
 
-    let _ = run_payload(PayloadArgs {
+    let _ = run_payload_to_sink(PayloadArgs {
         selector: Some("event-handlers".to_string()),
         json: false,
     })
     .await;
-    let _ = run_payload(PayloadArgs {
+    let _ = run_payload_to_sink(PayloadArgs {
         selector: Some("useful-tags".to_string()),
         json: false,
     })
     .await;
-    let _ = run_payload(PayloadArgs {
+    let _ = run_payload_to_sink(PayloadArgs {
         selector: Some("uri-scheme".to_string()),
         json: false,
     })
@@ -214,13 +220,13 @@ async fn test_run_payload_debug_paths_do_not_panic() {
 #[tokio::test]
 async fn test_run_payload_remote_selectors_dispatch_without_network_after_unknown_init() {
     // Prime remote cache to empty so provider selectors avoid network fetch in tests.
-    let _ = fetch_and_print_remote("__unknown_provider__", false).await;
-    let _ = run_payload(PayloadArgs {
+    let _ = fetch_and_write_remote(&mut std::io::sink(), "__unknown_provider__", false).await;
+    let _ = run_payload_to_sink(PayloadArgs {
         selector: Some("payloadbox".to_string()),
         json: false,
     })
     .await;
-    let _ = run_payload(PayloadArgs {
+    let _ = run_payload_to_sink(PayloadArgs {
         selector: Some("portswigger".to_string()),
         json: false,
     })
@@ -228,13 +234,13 @@ async fn test_run_payload_remote_selectors_dispatch_without_network_after_unknow
 }
 
 #[tokio::test]
-async fn test_fetch_and_print_remote_unknown_provider_no_network_path() {
-    let _ = fetch_and_print_remote("__unknown_provider__", false).await;
+async fn test_fetch_and_write_remote_unknown_provider_no_network_path() {
+    let _ = fetch_and_write_remote(&mut std::io::sink(), "__unknown_provider__", false).await;
 }
 
 #[test]
-fn test_print_summary_executes() {
-    print_summary();
+fn test_write_summary_executes() {
+    write_summary(&mut std::io::sink()).unwrap();
 }
 
 #[test]
@@ -351,7 +357,7 @@ fn test_summary_block_renders_a_line_per_static_selector() {
 
 #[tokio::test]
 async fn test_run_payload_all_selector_returns_clean() {
-    let outcome = run_payload(PayloadArgs {
+    let outcome = run_payload_to_sink(PayloadArgs {
         selector: Some("all".to_string()),
         json: false,
     })

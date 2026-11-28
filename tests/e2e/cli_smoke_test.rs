@@ -81,6 +81,87 @@ fn test_payload_subcommand_help() {
 }
 
 #[test]
+fn test_payload_exits_cleanly_when_stdout_pipe_closes() {
+    let config = tempfile::NamedTempFile::new().unwrap();
+    for args in [&[][..], &["--json"], &["all"], &["useful-tags"]] {
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .arg("--config")
+            .arg(config.path())
+            .arg("payload")
+            .args(args)
+            .stdout(writer)
+            .output()
+            .unwrap();
+
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {output:?}");
+        assert!(output.stderr.is_empty(), "{args:?}: {output:?}");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_payload_reports_stdout_write_errors() {
+    let config = tempfile::NamedTempFile::new().unwrap();
+    for args in [&[][..], &["--json"], &["all"], &["useful-tags"]] {
+        let full = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .arg("--config")
+            .arg(config.path())
+            .arg("payload")
+            .args(args)
+            .stdout(full)
+            .output()
+            .unwrap();
+
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("failed to write output"),
+            "{args:?}: {stderr}"
+        );
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn test_payload_escapes_control_characters_in_unknown_selector() {
+    let config = tempfile::NamedTempFile::new().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(config.path())
+        .args(["payload", "invalid\nselector\u{1b}"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.starts_with("Unknown selector: invalid\\nselector\\x1b\n"));
+    assert_eq!(stderr.lines().count(), 2);
+}
+
+#[test]
+fn test_payload_reports_unknown_selector_status_with_closed_stderr() {
+    let config = tempfile::NamedTempFile::new().unwrap();
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let status = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("--config")
+        .arg(config.path())
+        .args(["payload", "invalid-selector"])
+        .stderr(writer)
+        .status()
+        .unwrap();
+
+    assert_eq!(status.code(), Some(2));
+}
+
+#[test]
 fn test_server_subcommand_help() {
     let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
         .args(["server", "--help"])
