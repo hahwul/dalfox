@@ -62,7 +62,7 @@ pub mod error_codes {
     /// or `"findings"` when something was found before the cap fired) and
     /// in a REST / MCP job's `error_message` (`SCAN_TIMEOUT: …`).
     pub(crate) const SCAN_TIMEOUT: &str = "SCAN_TIMEOUT";
-    /// `dalfox server` cancelled the scan because the server was stopping.
+    /// `dalfox server` or `dalfox mcp` cancelled the scan during shutdown.
     /// Prefixes the job's `error_message` (`SERVER_SHUTDOWN: …`).
     pub(crate) const SERVER_SHUTDOWN: &str = "SERVER_SHUTDOWN";
 }

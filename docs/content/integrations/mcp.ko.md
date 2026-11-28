@@ -520,19 +520,16 @@ MCP 서버는 활성(대기 중이거나 실행 중인) 스캔을 최대 100개,
 | 도구(tool) | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |------|----------------|-------------------|------------------|-----------------|
 | `scan_with_dalfox` | false | **true** | false | **true** |
-| `preflight_dalfox` | false | false | false | **true** |
+| `preflight_dalfox` | false | **true** | false | **true** |
 | `get_results_dalfox` | true | — | true | false |
 | `list_scans_dalfox` | true | — | true | false |
 | `cancel_scan_dalfox` | false | false | true | false |
 | `delete_scan_dalfox` | false | **true** | false | false |
 
 `openWorldHint: true`는 네트워크로 제3자 호스트에 도달하는 도구(tool)를 가리킵니다.
-`destructiveHint: true`는 무언가를 영구히 바꿔 놓을 수 있는 둘을 가리킵니다. 하나는
-기록을 버리고, 다른 하나는 발견된 모든 파라미터에 페이로드를 주입합니다. 직접 넘긴
-`POST` 본문도 포함되고, `blind_callback_url`을 설정했다면 대상에 남는 저장형
-`<script src=...>`까지 포함됩니다. `preflight_dalfox` 역시 read-only가 *아닙니다*.
-공격 페이로드는 보내지 않지만 `method`와 `data`를 받고 마이닝 단계가 프로브 요청을
-보내므로, `POST` preflight는 대상의 상태를 바꿀 수 있습니다.
+`destructiveHint: true`는 스캔 기록을 삭제하거나 대상의 상태를 바꿀 수 있는 호출을
+가리킵니다. `scan_with_dalfox`와 `preflight_dalfox` 모두 `method`와 `data`를 받으므로,
+어느 쪽에서든 `POST` 요청으로 대상의 상태가 바뀔 수 있습니다.
 
 `initialize` 핸드셰이크는 서버를 `dalfox`(표시 제목 `Dalfox XSS Scanner`)와 그 자신의
 버전으로 식별하고, 아이콘과 문서 사이트(`websiteUrl`)도 함께 알립니다. `tools`,
@@ -547,15 +544,16 @@ MCP 서버는 활성(대기 중이거나 실행 중인) 스캔을 최대 100개,
 `notifications/progress`를 보냅니다. 몇 분이 걸릴 수 있는 작업에서 클라이언트가
 멈춘 스피너 대신 실제 진행 상황을 보여줄 수 있습니다. 스캔의 경우 숫자 `progress`는 누적 전송
 요청 수이고, 단계, 테스트한 파라미터 수, 지금까지의 탐지 결과, 대상에 끝내 닿지 못한 요청
-수는 `message`에 담깁니다. `preflight_dalfox`는 대신 2초마다 하트비트를 보냅니다
-(`analyzing target (Ns elapsed)`). 종료 상태는 따로 알리지 않습니다. 그
-신호는 도구(tool) 호출의 결과 자체입니다.
+수는 `message`에 담깁니다. `preflight_dalfox`는 2초마다 하트비트를 보냅니다
+(`analyzing target (Ns elapsed)`). 알림 전송이 지연되면 해당 호출의 진행 알림을
+중단합니다. 호출이 끝나면 도구 실행 결과로 알립니다.
 
 **취소.** 진행 중인 `wait=true` 호출에 `notifications/cancelled`를 보내면 대기만이 아니라
 스캔 자체가 멈춥니다. 작업은 `the client cancelled the tool call`이라는
-`error_message`와 함께 `cancelled`로 정리되고, 그때까지 찾은 것은 유지됩니다. 반면 대기
-예산이 만료된 경우(`wait_timed_out: true`)에는 스캔이 계속 돌기 때문에 이어서
-폴링할 수 있습니다.
+`error_message`와 함께 `cancelled`로 정리되고, 그때까지 찾은 것은 유지됩니다. 대기
+시간만 만료된 경우(`wait_timed_out: true`)에는 스캔이 계속 돌므로 이어서
+폴링할 수 있습니다. stdio 입력이 닫히면 서버는 남은 응답의 전송을 마치기 전에 대기 중이거나
+실행 중인 스캔과 사전 검사를 취소합니다.
 
 **리소스.** 스캔은 호출 대상일 뿐 아니라 주소를 가진 리소스이기도 합니다:
 

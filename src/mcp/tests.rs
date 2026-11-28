@@ -2931,6 +2931,7 @@ fn every_tool_publishes_title_annotations_and_output_schema() {
     // `false` here is a promise this tool cannot keep, on precisely the tool a
     // client is likeliest to auto-approve from its hints.
     assert_eq!(by_name("scan_with_dalfox").destructive_hint, Some(true));
+    assert_eq!(by_name("preflight_dalfox").destructive_hint, Some(true));
     assert_eq!(by_name("delete_scan_dalfox").destructive_hint, Some(true));
     assert_eq!(by_name("get_results_dalfox").read_only_hint, Some(true));
     assert_eq!(by_name("get_results_dalfox").open_world_hint, Some(false));
@@ -3544,6 +3545,28 @@ fn progress_values_always_rise_even_when_the_counter_does_not() {
     assert_eq!(gate.next_value(3), 7.002);
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_stalled_progress_write_does_not_hold_up_the_tool_result() {
+    use rmcp::model::{ProgressToken, RequestId, RequestMetaObject};
+
+    let (started, writing) = tokio::sync::oneshot::channel();
+    let sink = Box::pin(futures::sink::unfold(started, |started, _| async move {
+        let _ = started.send(());
+        std::future::pending::<std::io::Result<tokio::sync::oneshot::Sender<()>>>().await
+    }));
+    let running =
+        rmcp::service::serve_directly(DalfoxMcp::new(), (sink, futures::stream::pending()), None);
+    let mut context =
+        rmcp::service::RequestContext::new(RequestId::Number(1), running.peer().clone());
+    context.meta = RequestMetaObject::with_progress_token(ProgressToken(RequestId::Number(2)));
+    let work = progress::tick_while("working", async {
+        writing.await.expect("the progress write started");
+    });
+    tokio::time::timeout(Duration::from_secs(3), call_scope::bind(&context, work))
+        .await
+        .expect("tool work must complete even while the progress write is stalled");
+}
+
 #[test]
 fn progress_status_line_names_the_phase() {
     let line = |body: serde_json::Value| progress::scan_status_line(&body);
@@ -4134,13 +4157,20 @@ struct WireClient {
 impl WireClient {
     /// Serve `DalfoxMcp` over a duplex and complete the handshake.
     async fn start() -> Self {
+        Self::start_with_session(DalfoxMcp::new()).await
+    }
+
+    async fn start_with_session(session: DalfoxMcp) -> Self {
         use tokio::io::{AsyncBufReadExt, BufReader};
 
         let (server_side, client_side) = tokio::io::duplex(1 << 20);
         let server = tokio::spawn(async move {
             let (r, w) = tokio::io::split(server_side);
-            if let Ok(running) = rmcp::service::serve_server(DalfoxMcp::new(), (r, w)).await {
-                let _ = running.waiting().await;
+            let transport = session_transport::SessionTransport::new(r, w, session.clone());
+            if let Ok(running) = rmcp::service::serve_server(session, transport).await {
+                wait_for_mcp(running)
+                    .await
+                    .expect("MCP service exited cleanly");
             }
         });
         let (client_r, writer) = tokio::io::split(client_side);
@@ -4220,6 +4250,96 @@ impl Drop for WireClient {
     fn drop(&mut self) {
         self.server.abort();
     }
+}
+
+#[tokio::test]
+async fn closing_mcp_input_cancels_active_work_and_preserves_finished_jobs() {
+    use std::sync::atomic::Ordering;
+    use tokio::io::AsyncWriteExt;
+
+    let session = DalfoxMcp::new();
+    let mut client = WireClient::start_with_session(session.clone()).await;
+    session.lock_jobs().extend([
+        ("queued".to_string(), test_job(JobStatus::Queued, None)),
+        ("running".to_string(), test_job(JobStatus::Running, None)),
+        (
+            "finished".to_string(),
+            test_job(JobStatus::Done, Some(vec![])),
+        ),
+    ]);
+
+    client.writer.shutdown().await.expect("close client input");
+    tokio::time::timeout(Duration::from_secs(2), &mut client.server)
+        .await
+        .expect("MCP server exits after EOF")
+        .expect("MCP server task completed");
+
+    {
+        let jobs = session.lock_jobs();
+        for id in ["queued", "running"] {
+            let job = &jobs[id];
+            assert_eq!(job.status, JobStatus::Cancelled);
+            assert!(job.cancelled.load(Ordering::Relaxed));
+            assert!(
+                job.error_message
+                    .as_deref()
+                    .unwrap()
+                    .starts_with("SERVER_SHUTDOWN:")
+            );
+        }
+        let finished = &jobs["finished"];
+        assert_eq!(finished.status, JobStatus::Done);
+        assert!(!finished.cancelled.load(Ordering::Relaxed));
+        assert!(finished.error_message.is_none());
+    }
+
+    let error = session
+        .scan_with_dalfox(Parameters(default_scan_params("http://127.0.0.1:1/")))
+        .await
+        .expect_err("the closed session refuses new work");
+    assert_eq!(error.code, rmcp::model::ErrorCode::INTERNAL_ERROR);
+    assert_eq!(session.lock_jobs().len(), 3);
+}
+
+#[tokio::test]
+async fn closing_mcp_input_releases_an_inflight_preflight_permit() {
+    use tokio::io::AsyncWriteExt;
+
+    let (target, server) = spawn_slow_target(Duration::from_secs(30)).await;
+    let session = DalfoxMcp::new();
+    let mut client = WireClient::start_with_session(session.clone()).await;
+    client
+        .send(rpc(
+            2,
+            "tools/call",
+            serde_json::json!({
+                "name": "preflight_dalfox",
+                "arguments": {"target": target, "timeout": 30}
+            }),
+        ))
+        .await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while session.preflight_sem.available_permits() == MAX_CONCURRENT_PREFLIGHT {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a preflight is in flight");
+
+    client.writer.shutdown().await.expect("close client input");
+    let response = tokio::time::timeout(Duration::from_secs(3), client.response(2))
+        .await
+        .expect("the preflight replies during the response drain");
+    assert_eq!(response["result"]["isError"], true);
+    assert_eq!(
+        response["result"]["content"][0]["text"],
+        "INTERNAL_ERROR: MCP client disconnected"
+    );
+    assert_eq!(
+        session.preflight_sem.available_permits(),
+        MAX_CONCURRENT_PREFLIGHT
+    );
+    server.abort();
 }
 
 /// A target that answers every request slowly, so a scan against it is still

@@ -26,24 +26,22 @@ Terminal jobs auto-purge after 1 hour.
   content block, so text-parsing clients keep working — but if your client surfaces
   `structuredContent`, read that: it is already a parsed object and it is the thing the
   schema validates.
-- **Behaviour hints.** `scan_with_dalfox` and `preflight_dalfox` are `openWorldHint:
-  true` and **not** `readOnlyHint` — preflight sends no attack payloads but does accept
-  `method`/`data` and fire mining probes, so a `POST` preflight can change target state.
-  `scan_with_dalfox` and `delete_scan_dalfox` are `destructiveHint: true` (a scan injects
-  payloads into every discovered parameter, and an armed `blind_callback_url` leaves
-  stored ones behind); `get_results_dalfox` and `list_scans_dalfox` are
-  `readOnlyHint: true`.
+- **Behaviour hints.** `scan_with_dalfox` and `preflight_dalfox` set `openWorldHint`
+  and `destructiveHint` to `true` and `readOnlyHint` to `false`. Both can send a
+  `POST` with caller-supplied data and change state on the target.
+  `delete_scan_dalfox` sets `destructiveHint: true`. `get_results_dalfox` and
+  `list_scans_dalfox` set `readOnlyHint: true`.
 - **Progress.** Attach `_meta.progressToken` to a `scan_with_dalfox` call with
   `wait=true`, or to `preflight_dalfox`, and the server streams
   `notifications/progress` against it while the call is open. The `progress` number is
   cumulative requests sent (it only ever rises, which the spec requires); the phase,
-  parameters tested, findings so far and lost requests are in `message`. No notification
-  is sent for the terminal state — the tool result is that signal. A call without a
-  token gets nothing.
-- **Cancellation.** `notifications/cancelled` on a `wait=true` scan stops the scan, not
-  just the wait: the job settles `cancelled` with partial results kept. A wait budget
-  that merely *expires* is the other case and leaves the job running, as
-  `wait_timed_out` says.
+  parameters tested, findings so far and lost requests are in `message`. If a
+  notification cannot be sent promptly, progress stops for that call. The tool
+  result signals completion.
+- **Cancellation.** `notifications/cancelled` on a `wait=true` scan stops the scan.
+  The job settles `cancelled` with partial results kept. A wait timeout
+  (`wait_timed_out: true`) leaves the job running. Closing stdio input cancels
+  queued and running scans and preflights while the server drains responses.
 - **Resources.** `dalfox://scans` is the job index (same body as `list_scans_dalfox`)
   and `dalfox://scan/{scan_id}` is one scan (same body as `get_results_dalfox`). Every
   tracked scan is also listed individually by `resources/list`, which pages with a

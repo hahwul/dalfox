@@ -103,6 +103,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 5. Keep server and MCP behavior non-breaking.
 - Server jobs are in-memory, async, and status-based (`queued/running/done/error/cancelled`).
 - MCP is stdio/JSON-RPC; avoid stdout noise in MCP mode (banner/log behavior matters).
+- MCP stdio shutdown cancels queued/running scans and preflights before draining responses. Optional progress notifications must not delay cancellation or wait deadlines.
 - Both server and MCP support real cancellation via `AtomicBool` flags checked in scan loops.
 - Both include progress tracking (params_total/tested, requests_sent, findings_so_far).
 - Use shared error codes from `cmd::error_codes` for application-level errors.

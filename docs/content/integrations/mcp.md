@@ -532,20 +532,16 @@ lets a client decide on its own which calls are safe to make without asking:
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |------|----------------|-------------------|------------------|-----------------|
 | `scan_with_dalfox` | false | **true** | false | **true** |
-| `preflight_dalfox` | false | false | false | **true** |
+| `preflight_dalfox` | false | **true** | false | **true** |
 | `get_results_dalfox` | true | — | true | false |
 | `list_scans_dalfox` | true | — | true | false |
 | `cancel_scan_dalfox` | false | false | true | false |
 | `delete_scan_dalfox` | false | **true** | false | false |
 
 `openWorldHint: true` marks each tool that reaches a third-party host over the network.
-`destructiveHint: true` marks the two that can leave something changed for good: one
-throws a record away, and the other injects payloads into every discovered parameter,
-including a `POST` body you supplied and, with `blind_callback_url` set, stored
-`<script src=...>` that stays in the target. `preflight_dalfox` is *not*
-read-only either: it sends no attack payloads, but it accepts `method` and `data` and
-its mining stage fires probe requests, so a `POST` preflight can change state on the
-target.
+`destructiveHint: true` marks calls that can delete scan records or change state on
+the target. Both `scan_with_dalfox` and `preflight_dalfox` accept `method` and `data`,
+so a `POST` can change state on the target during either call.
 
 The `initialize` handshake identifies the server as `dalfox` (display title
 `Dalfox XSS Scanner`) at its own version, with icons and the docs site as
@@ -560,15 +556,16 @@ or to `preflight_dalfox`, and Dalfox streams `notifications/progress` against th
 while the call is open, so a client can show movement during what can be minutes of
 work instead of a silent spinner. For a scan, the numeric `progress` is cumulative requests sent and
 `message` carries the phase, parameters tested, findings so far, and requests that never
-reached the target. `preflight_dalfox` sends a heartbeat every two seconds instead
-(`analyzing target (Ns elapsed)`). Nothing is published for the terminal state: the
-tool's own result is that signal.
+reached the target. `preflight_dalfox` sends a heartbeat every two seconds
+(`analyzing target (Ns elapsed)`). If a notification cannot be sent promptly, Dalfox
+stops sending progress for that call. The tool result signals completion.
 
 **Cancellation.** Sending `notifications/cancelled` for an in-flight `wait=true` call
 stops the scan itself, not just the wait. The job settles `cancelled` with the
 `error_message` `the client cancelled the tool call` and keeps whatever it found. When the
-wait budget expires instead (`wait_timed_out: true`), the scan keeps running so you can
-keep polling it.
+wait budget expires (`wait_timed_out: true`), the scan keeps running so you can keep
+polling it. Closing the stdio input cancels queued scans, running scans and preflights
+before the server finishes sending outstanding responses.
 
 **Resources.** Scans are addressable, not only callable:
 
